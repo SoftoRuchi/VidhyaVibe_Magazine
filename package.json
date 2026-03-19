@@ -20,6 +20,11 @@
   "engines": {
     "node": ">=18"
   },
+  "pnpm": {
+    "overrides": {
+      "pino": "9.0.0"
+    }
+  },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
@@ -30,5 +35,8 @@
     "husky": "^9.1.7",
     "lint-staged": "^15.2.0",
     "prettier": "^3.2.5"
+  },
+  "dependencies": {
+    "qrcode.react": "^4.2.0"
   }
 }

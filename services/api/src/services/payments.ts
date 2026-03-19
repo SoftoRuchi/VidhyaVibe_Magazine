@@ -1,5 +1,88 @@
+import crypto from 'crypto';
 import { getPool } from '../db';
 import { validateCoupon, recordCouponUsage } from './coupons';
+
+async function createRazorpayOrder(params: { amount: number; currency: string; receipt: string }) {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) {
+    throw new Error('razorpay_credentials_missing');
+  }
+
+  const auth = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+  const resp = await fetch('https://api.razorpay.com/v1/orders', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Basic ${auth}`,
+    },
+    body: JSON.stringify({
+      amount: params.amount,
+      currency: params.currency,
+      receipt: params.receipt,
+    }),
+  });
+
+  const data: any = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const msg =
+      data?.error?.description || data?.error?.message || data?.message || 'razorpay_order_failed';
+    throw new Error(msg);
+  }
+  if (!data?.id) throw new Error('razorpay_order_id_missing');
+  return data as { id: string; amount: number; currency: string; receipt: string; status: string };
+}
+
+export async function confirmRazorpayPayment(params: {
+  userId: number;
+  orderId: number;
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}) {
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keySecret) throw new Error('razorpay_credentials_missing');
+
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [rows]: any = await conn.query('SELECT * FROM orders WHERE id = ? LIMIT 1', [
+      params.orderId,
+    ]);
+    const order = rows?.[0];
+    if (!order) throw new Error('order_not_found');
+    if (Number(order.user_id) !== Number(params.userId)) throw new Error('forbidden');
+
+    // Ensure the Razorpay order id matches what we stored at creation time
+    if (!order.rp_order_id) throw new Error('rp_order_id_missing');
+    if (String(order.rp_order_id) !== String(params.razorpay_order_id))
+      throw new Error('rp_order_mismatch');
+
+    // Verify signature: HMAC_SHA256(order_id + "|" + payment_id, key_secret)
+    const payload = `${params.razorpay_order_id}|${params.razorpay_payment_id}`;
+    const expected = crypto.createHmac('sha256', keySecret).update(payload).digest('hex');
+    if (expected !== params.razorpay_signature) {
+      await conn.query('UPDATE orders SET status = ? WHERE id = ?', ['FAILED', order.id]);
+      await conn.commit();
+      throw new Error('invalid_signature');
+    }
+
+    await conn.query(
+      'UPDATE orders SET rp_payment_id = ?, rp_signature = ?, status = ? WHERE id = ?',
+      [params.razorpay_payment_id, params.razorpay_signature, 'PAID', order.id],
+    );
+
+    await conn.commit();
+    return { ok: true };
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
 
 export async function createOrder(params: {
   userId: number;
@@ -16,27 +99,38 @@ export async function createOrder(params: {
   try {
     await conn.beginTransaction();
     let plan: any;
-    let effectivePriceCents: number;
+    let effectivePrice: number;
     let effectiveCurrency: string;
     const deliveryMode = params.deliveryMode || 'BOTH';
     if (params.magazineId) {
+      // DB column naming differs between environments (snake_case vs camelCase).
+      // Fetch the full row and read both variants in JS.
       const [rows]: any = await conn.query(
-        `SELECT sp.id, sp.name, sp.min_months as minMonths, sp.max_months as maxMonths, sp.delivery_mode as deliveryMode, sp.price_cents as defaultPriceCents, sp.currency as defaultCurrency
-         FROM subscription_plans sp WHERE sp.id = ? AND sp.active = 1 LIMIT 1`,
+        `SELECT * FROM subscription_plans WHERE id = ? AND active = 1 LIMIT 1`,
         [params.planId],
       );
       plan = rows[0];
       if (!plan) throw new Error('plan_not_found');
-      const [mpRows]: any = await conn.query(
-        `SELECT price_cents, currency FROM magazine_plans WHERE magazine_id = ? AND plan_id = ? AND delivery_mode = ? AND active = 1 LIMIT 1`,
-        [params.magazineId, params.planId, deliveryMode],
-      );
+      let mpRows: any[] = [];
+      try {
+        const [r]: any = await conn.query(
+          `SELECT price, currency FROM magazine_plans WHERE magazine_id = ? AND plan_id = ? AND delivery_mode = ? AND active = 1 LIMIT 1`,
+          [params.magazineId, params.planId, deliveryMode],
+        );
+        mpRows = r;
+      } catch {
+        const [r]: any = await conn.query(
+          `SELECT price, currency FROM magazine_plans WHERE magazineId = ? AND planId = ? AND deliveryMode = ? AND active = 1 LIMIT 1`,
+          [params.magazineId, params.planId, deliveryMode],
+        );
+        mpRows = r;
+      }
       if (mpRows[0]) {
-        effectivePriceCents = Number(mpRows[0].price_cents);
+        effectivePrice = Number(mpRows[0].price);
         effectiveCurrency = mpRows[0].currency || 'INR';
       } else {
-        effectivePriceCents = Number(plan.defaultPriceCents);
-        effectiveCurrency = plan.defaultCurrency || 'INR';
+        effectivePrice = Number(plan.defaultPrice ?? plan.price);
+        effectiveCurrency = (plan.defaultCurrency ?? plan.currency) || 'INR';
       }
     } else {
       const [planRows]: any = await conn.query(
@@ -45,7 +139,7 @@ export async function createOrder(params: {
       );
       plan = planRows[0];
       if (!plan) throw new Error('plan_not_found');
-      effectivePriceCents = Number(plan.priceCents ?? plan.price_cents);
+      effectivePrice = Number(plan.price);
       effectiveCurrency = plan.currency || 'INR';
     }
     const minMonths = plan.minMonths ?? plan.min_months;
@@ -77,8 +171,8 @@ export async function createOrder(params: {
       if (!addrOk) throw new Error('physical_address_required');
     }
 
-    // compute amounts (use magazine-specific price when available)
-    const baseAmount = effectivePriceCents * Number(params.months);
+    // compute amounts in whole currency units (no cents conversion)
+    const baseAmount = effectivePrice * Number(params.months);
     let final = baseAmount;
     let couponId = null;
     if (params.couponCode) {
@@ -89,12 +183,20 @@ export async function createOrder(params: {
       if (v.coupon.discount_pct) {
         final = Math.max(0, final - Math.round((final * Number(v.coupon.discount_pct)) / 100));
       } else if (v.coupon.discount_cents) {
+        // NOTE: despite the column name, treat this as whole units in this project
         final = Math.max(0, final - Number(v.coupon.discount_cents));
       }
     }
 
+    // Create Razorpay order and store its id in orders.rp_order_id (RPOrderId)
+    const rpOrder = await createRazorpayOrder({
+      amount: final,
+      currency: effectiveCurrency,
+      receipt: 'test payment',
+    });
+
     const [ins]: any = await conn.query(
-      'INSERT INTO payment_orders (user_id, plan_id, months, reader_id, delivery_mode, address_id, coupon_id, amount_cents, final_cents, currency, magazine_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+      'INSERT INTO orders (user_id, plan_id, months, reader_id, delivery_mode, address_id, coupon_id, amount, final_amount, currency, magazine_id, rp_order_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
       [
         params.userId,
         params.planId,
@@ -107,16 +209,18 @@ export async function createOrder(params: {
         final,
         effectiveCurrency,
         params.magazineId || null,
+        rpOrder.id,
       ],
     );
     const orderId = ins.insertId;
     await conn.commit();
     // return order info including a UPI uri (simple)
-    const upi = `upi://pay?pa=merchant@upi&pn=Magazine&tn=Order%20${orderId}&am=${(final / 100).toFixed(2)}&cu=${effectiveCurrency}`;
+    const upi = `upi://pay?pa=merchant@upi&pn=Magazine&tn=Order%20${orderId}&am=${Number(final).toFixed(2)}&cu=${effectiveCurrency}`;
     return {
       orderId,
-      amountCents: baseAmount,
-      finalCents: final,
+      rpOrderId: rpOrder.id,
+      amount: baseAmount,
+      finalAmount: final,
       currency: effectiveCurrency,
       upi,
     };
@@ -229,7 +333,7 @@ export async function attachProof(orderId: number, userId: number, fileKey?: str
   const conn = await pool.getConnection();
   try {
     const [r]: any = await conn.query(
-      'INSERT INTO payment_proofs (order_id, user_id, file_key, url, created_at) VALUES (?, ?, ?, ?, NOW())',
+      'INSERT INTO order_proofs (order_id, user_id, file_key, url, created_at) VALUES (?, ?, ?, ?, NOW())',
       [orderId, userId, fileKey || null, url || null],
     );
     return r.insertId;
@@ -244,12 +348,12 @@ export async function verifyProof(proofId: number, adminId: number) {
   try {
     await conn.beginTransaction();
     // load proof and order
-    const [pRows]: any = await conn.query('SELECT * FROM payment_proofs WHERE id = ? LIMIT 1', [
+    const [pRows]: any = await conn.query('SELECT * FROM order_proofs WHERE id = ? LIMIT 1', [
       proofId,
     ]);
     const proof = pRows[0];
     if (!proof) throw new Error('proof_not_found');
-    const [oRows]: any = await conn.query('SELECT * FROM payment_orders WHERE id = ? LIMIT 1', [
+    const [oRows]: any = await conn.query('SELECT * FROM orders WHERE id = ? LIMIT 1', [
       proof.order_id,
     ]);
     const order = oRows[0];
@@ -261,7 +365,7 @@ export async function verifyProof(proofId: number, adminId: number) {
     const endsAt = new Date(startsAt);
     endsAt.setMonth(endsAt.getMonth() + Number(order.months));
     const [insSub]: any = await conn.query(
-      'INSERT INTO user_subscriptions (user_id, reader_id, magazine_id, plan_id, delivery_mode, status, starts_at, ends_at, auto_renew, price_cents, currency, coupon_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+      'INSERT INTO user_subscriptions (user_id, reader_id, magazine_id, plan_id, delivery_mode, status, starts_at, ends_at, auto_renew, price, currency, coupon_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
       [
         order.user_id,
         order.reader_id || null,
@@ -272,7 +376,7 @@ export async function verifyProof(proofId: number, adminId: number) {
         startsAt,
         endsAt,
         1,
-        order.final_cents,
+        Number(order.final_amount ?? order.final_cents ?? 0),
         order.currency,
         order.coupon_id || null,
       ],
@@ -285,7 +389,8 @@ export async function verifyProof(proofId: number, adminId: number) {
       [
         order.user_id,
         subscriptionId,
-        order.final_cents,
+        // payments table still stores cents; convert only for payments if needed
+        Math.round(Number(order.final_amount ?? order.final_cents ?? 0) * 100),
         order.currency,
         'UPI',
         proof.id.toString(),
@@ -301,9 +406,9 @@ export async function verifyProof(proofId: number, adminId: number) {
     }
 
     // mark order and proof as paid/verified
-    await conn.query('UPDATE payment_orders SET status = ? WHERE id = ?', ['PAID', order.id]);
+    await conn.query('UPDATE orders SET status = ? WHERE id = ?', ['PAID', order.id]);
     await conn.query(
-      'UPDATE payment_proofs SET verified = 1, verified_at = NOW(), verified_by = ? WHERE id = ?',
+      'UPDATE order_proofs SET verified = 1, verified_at = NOW(), verified_by = ? WHERE id = ?',
       [adminId, proof.id],
     );
 

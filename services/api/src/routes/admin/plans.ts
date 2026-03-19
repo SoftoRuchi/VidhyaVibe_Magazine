@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT id, name, slug, description, priceCents, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt FROM subscription_plans ORDER BY createdAt DESC',
+      'SELECT id, name, slug, description, price, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt FROM subscription_plans ORDER BY createdAt DESC',
     );
     res.json(rows);
   } catch (e: any) {
@@ -29,7 +29,7 @@ router.get('/:id', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT id, name, slug, description, priceCents, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt FROM subscription_plans WHERE id = ? LIMIT 1',
+      'SELECT id, name, slug, description, price, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt FROM subscription_plans WHERE id = ? LIMIT 1',
       [id],
     );
     const plan = rows[0];
@@ -48,7 +48,7 @@ router.post('/', async (req, res) => {
     name,
     slug,
     description,
-    priceCents,
+    price,
     currency,
     minMonths,
     maxMonths,
@@ -57,20 +57,20 @@ router.post('/', async (req, res) => {
     dispatchFrequencyDays,
     active,
   } = req.body;
-  if (!name || !slug || priceCents == null)
-    return res.status(400).json({ error: 'name, slug and priceCents required' });
+  if (!name || !slug || price == null)
+    return res.status(400).json({ error: 'name, slug and price required' });
 
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
     const [r]: any = await conn.query(
-      `INSERT INTO subscription_plans (name, slug, description, priceCents, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt)
+      `INSERT INTO subscription_plans (name, slug, description, price, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))`,
       [
         name,
         slug,
         description || null,
-        Number(priceCents),
+        Number(price),
         currency || 'INR',
         minMonths ?? 1,
         maxMonths || null,
@@ -96,7 +96,7 @@ router.put('/:id', async (req, res) => {
     name,
     slug,
     description,
-    priceCents,
+    price,
     currency,
     minMonths,
     maxMonths,
@@ -130,9 +130,9 @@ router.put('/:id', async (req, res) => {
       updates.push('description = ?');
       values.push(description);
     }
-    if (priceCents !== undefined) {
-      updates.push('priceCents = ?');
-      values.push(Number(priceCents));
+    if (price !== undefined) {
+      updates.push('price = ?');
+      values.push(Number(price));
     }
     if (currency !== undefined) {
       updates.push('currency = ?');

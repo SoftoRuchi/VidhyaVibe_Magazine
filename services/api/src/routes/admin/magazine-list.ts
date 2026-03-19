@@ -100,18 +100,18 @@ router.get('/:id/plans', async (req, res) => {
     const [magRows]: any = await conn.query('SELECT id FROM magazines WHERE id = ? LIMIT 1', [id]);
     if (!magRows[0]) return res.status(404).json({ error: 'magazine_not_found' });
     const [rows]: any = await conn.query(
-      `SELECT sp.id as planId, sp.name, sp.slug, sp.price_cents as defaultPriceCents, sp.currency as defaultCurrency
+      `SELECT sp.id as planId, sp.name, sp.slug, sp.price as defaultPrice, sp.currency as defaultCurrency
        FROM subscription_plans sp WHERE sp.active = 1`,
     );
     const [mpRows]: any = await conn.query(
-      `SELECT plan_id, delivery_mode, price_cents, currency, active
+      `SELECT plan_id, delivery_mode, price, currency, active
        FROM magazine_plans WHERE magazine_id = ?`,
       [id],
     );
-    const mpMap: Record<string, { priceCents: number; currency: string }> = {};
+    const mpMap: Record<string, { price: number; currency: string }> = {};
     for (const mp of mpRows) {
       mpMap[`${mp.plan_id}:${mp.delivery_mode}`] = {
-        priceCents: mp.price_cents,
+        price: mp.price,
         currency: mp.currency || 'INR',
       };
     }
@@ -121,26 +121,26 @@ router.get('/:id/plans', async (req, res) => {
         planId: r.planId,
         name: r.name,
         slug: r.slug,
-        defaultPriceCents: r.defaultPriceCents,
+        defaultPrice: r.defaultPrice,
         defaultCurrency: defC(r),
         prices: {
           ELECTRONIC: {
-            priceCents: mpMap[`${r.planId}:ELECTRONIC`]?.priceCents ?? r.defaultPriceCents,
+            price: mpMap[`${r.planId}:ELECTRONIC`]?.price ?? r.defaultPrice,
             currency: mpMap[`${r.planId}:ELECTRONIC`]?.currency ?? defC(r),
             hasOverride: !!mpMap[`${r.planId}:ELECTRONIC`],
           },
           PHYSICAL: {
-            priceCents: mpMap[`${r.planId}:PHYSICAL`]?.priceCents ?? r.defaultPriceCents,
+            price: mpMap[`${r.planId}:PHYSICAL`]?.price ?? r.defaultPrice,
             currency: mpMap[`${r.planId}:PHYSICAL`]?.currency ?? defC(r),
             hasOverride: !!mpMap[`${r.planId}:PHYSICAL`],
           },
           BOTH: {
-            priceCents: mpMap[`${r.planId}:BOTH`]?.priceCents ?? r.defaultPriceCents,
+            price: mpMap[`${r.planId}:BOTH`]?.price ?? r.defaultPrice,
             currency: mpMap[`${r.planId}:BOTH`]?.currency ?? defC(r),
             hasOverride: !!mpMap[`${r.planId}:BOTH`],
           },
         },
-        priceCents: mpMap[`${r.planId}:BOTH`]?.priceCents ?? r.defaultPriceCents,
+        price: mpMap[`${r.planId}:BOTH`]?.price ?? r.defaultPrice,
         currency: mpMap[`${r.planId}:BOTH`]?.currency ?? defC(r),
         hasOverride: !!mpMap[`${r.planId}:BOTH`],
       })),
@@ -156,7 +156,7 @@ router.get('/:id/plans', async (req, res) => {
 // PUT /api/admin/magazines/:id/plans - set pricing for this magazine (per delivery mode)
 router.put('/:id/plans', async (req, res) => {
   const id = Number(req.params.id);
-  const { planPrices } = req.body; // [{ planId, deliveryMode, priceCents, currency? }]
+  const { planPrices } = req.body; // [{ planId, deliveryMode, price, currency? }]
   if (!Array.isArray(planPrices))
     return res.status(400).json({ error: 'planPrices_array_required' });
   const pool = getPool();
@@ -165,15 +165,16 @@ router.put('/:id/plans', async (req, res) => {
     const [magRows]: any = await conn.query('SELECT id FROM magazines WHERE id = ? LIMIT 1', [id]);
     if (!magRows[0]) return res.status(404).json({ error: 'magazine_not_found' });
     for (const item of planPrices) {
-      const { planId, deliveryMode, priceCents, currency } = item;
-      if (!planId || priceCents == null) continue;
+      const { planId, deliveryMode, price, priceCents, currency } = item;
+      const p = price != null ? price : priceCents;
+      if (!planId || p == null) continue;
       const mode = ['ELECTRONIC', 'PHYSICAL', 'BOTH'].includes(deliveryMode)
         ? deliveryMode
         : 'BOTH';
       await conn.query(
-        `INSERT INTO magazine_plans (magazine_id, plan_id, delivery_mode, price_cents, currency, active) VALUES (?, ?, ?, ?, ?, 1)
-         ON DUPLICATE KEY UPDATE price_cents = VALUES(price_cents), currency = VALUES(currency), active = 1`,
-        [id, planId, mode, Number(priceCents), currency || 'INR'],
+        `INSERT INTO magazine_plans (magazine_id, plan_id, delivery_mode, price, currency, active) VALUES (?, ?, ?, ?, ?, 1)
+         ON DUPLICATE KEY UPDATE price = VALUES(price), currency = VALUES(currency), active = 1`,
+        [id, planId, mode, Number(p), currency || 'INR'],
       );
     }
     res.json({ ok: true });

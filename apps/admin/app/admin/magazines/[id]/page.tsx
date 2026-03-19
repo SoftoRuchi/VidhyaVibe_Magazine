@@ -41,7 +41,7 @@ function MagazinePricingTable({
   const priceFor = (p: any, mode: 'ELECTRONIC' | 'PHYSICAL' | 'BOTH') => {
     const k = key(p.planId, mode);
     if (edits[k] !== undefined) return edits[k];
-    return (p.prices?.[mode]?.priceCents ?? p.defaultPriceCents ?? 0) / 100;
+    return p.prices?.[mode]?.price ?? p.defaultPrice ?? 0;
   };
   const setPrice = (planId: number, mode: string, v: number) => {
     setEdits((prev) => ({ ...prev, [key(planId, mode)]: v }));
@@ -51,7 +51,7 @@ function MagazinePricingTable({
     const updates: {
       planId: number;
       deliveryMode: string;
-      priceCents: number;
+      price: number;
       currency: string;
     }[] = [];
     for (const p of planPrices) {
@@ -61,7 +61,7 @@ function MagazinePricingTable({
           updates.push({
             planId: p.planId,
             deliveryMode: mode,
-            priceCents: Math.round(edits[k] * 100),
+            price: edits[k],
             currency: p.prices?.[mode]?.currency || p.currency || 'INR',
           });
         }
@@ -84,8 +84,8 @@ function MagazinePricingTable({
             width: 100,
             render: (_: any, r: any) =>
               r.defaultCurrency === 'INR'
-                ? `₹${((r.defaultPriceCents || 0) / 100).toFixed(2)}`
-                : `${((r.defaultPriceCents || 0) / 100).toFixed(2)} ${r.defaultCurrency}`,
+                ? `₹${Number(r.defaultPrice || 0).toFixed(2)}`
+                : `${Number(r.defaultPrice || 0).toFixed(2)} ${r.defaultCurrency}`,
           },
           {
             title: 'E-Magazine',
@@ -176,7 +176,7 @@ export default function MagazineDetail({ params }: any) {
   }, [id]);
 
   const handleSavePricing = async (
-    updates: { planId: number; deliveryMode: string; priceCents: number; currency: string }[],
+    updates: { planId: number; deliveryMode: string; price: number; currency: string }[],
   ) => {
     setPricingLoading(true);
     try {

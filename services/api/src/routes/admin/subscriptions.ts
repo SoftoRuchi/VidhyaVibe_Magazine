@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     let query = `
-      SELECT us.id, us.userId, us.readerId, us.magazineId, us.planId, us.status, us.startsAt, us.endsAt, us.priceCents, us.currency, us.createdAt,
+      SELECT us.id, us.userId, us.readerId, us.magazineId, us.planId, us.status, us.startsAt, us.endsAt, us.price, us.currency, us.createdAt,
              u.email as userEmail, u.name as userName,
              m.title as magazineTitle, m.slug as magazineSlug,
              sp.name as planName, sp.slug as planSlug

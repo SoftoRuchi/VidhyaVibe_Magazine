@@ -59,7 +59,7 @@ export default function PlansPage() {
       name: plan.name,
       slug: plan.slug,
       description: plan.description,
-      price: plan.priceCents != null ? plan.priceCents / 100 : undefined,
+      price: plan.price != null ? plan.price : undefined,
       currency: plan.currency || 'INR',
       minMonths: plan.minMonths ?? 1,
       maxMonths: plan.maxMonths,
@@ -77,7 +77,7 @@ export default function PlansPage() {
         name: values.name,
         slug: values.slug,
         description: values.description,
-        priceCents: Math.round(Number(values.price) * 100),
+        price: Number(values.price),
         currency: values.currency || 'INR',
         minMonths: values.minMonths ?? 1,
         maxMonths: values.maxMonths || null,
@@ -116,10 +116,10 @@ export default function PlansPage() {
       title: 'Price',
       key: 'price',
       render: (_: any, r: any) =>
-        r.priceCents != null
+        r.price != null
           ? r.currency === 'INR'
-            ? `₹${(r.priceCents / 100).toFixed(2)}`
-            : `${(r.priceCents / 100).toFixed(2)} ${r.currency || 'USD'}`
+            ? `₹${Number(r.price).toFixed(2)}`
+            : `${Number(r.price).toFixed(2)} ${r.currency || 'USD'}`
           : '-',
     },
     {

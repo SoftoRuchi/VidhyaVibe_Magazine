@@ -2,8 +2,10 @@
 
 import { Button, Empty, Spin } from 'antd';
 import axios from 'axios';
+import Image from 'next/image';
 import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
+import libraryImg from '../../components/images/library.png';
 import MagazineCard from '../../components/MagazineCard';
 
 interface LibraryItem {
@@ -51,52 +53,107 @@ export default function DashboardPage() {
   };
 
   return (
-    <main style={{ padding: '4rem 0', minHeight: '80vh', backgroundColor: '#f9f9f9' }}>
+    <main style={{ minHeight: '80vh' }}>
       <div className="container">
+        {/* Themed heading (matches Subscribe/Profile) */}
         <div
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
+            display: 'grid',
+            gridTemplateColumns: '84px 1fr 84px',
             alignItems: 'center',
-            marginBottom: '3rem',
           }}
         >
-          <h1 style={{ fontSize: '3rem', color: 'var(--primary-color)' }}>My Library</h1>
-          <Link href="/magazines/8-11">
-            <Button type="primary" size="large">
-              Browse Magazines
-            </Button>
-          </Link>
+          <div />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Image
+              src={libraryImg}
+              alt="My Library"
+              width={84}
+              height={84}
+              style={{ width: 84, height: 84, objectFit: 'contain' }}
+              priority
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: '2.05rem',
+                  fontWeight: 800,
+                  color: '#3d2914',
+                  fontFamily: 'Georgia, serif',
+                  letterSpacing: '0.2px',
+                  textAlign: 'center',
+                }}
+              >
+                My Library
+              </h1>
+              <div
+                style={{
+                  width: '55%',
+                  maxWidth: 240,
+                  height: 3,
+                  backgroundColor: '#3d2914',
+                  borderRadius: 999,
+                  marginTop: 8,
+                  opacity: 0.95,
+                }}
+              />
+            </div>
+          </div>
+          <div />
         </div>
 
         <section style={{ marginBottom: '4rem' }}>
-          <h2 style={{ fontSize: '2rem', marginBottom: '1.5rem' }}>My Subscriptions & Purchases</h2>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '3rem' }}>
-              <Spin size="large" />
-            </div>
-          ) : items.length > 0 ? (
-            <div
+          <div
+            style={{
+              padding: '1.4rem 1.6rem',
+              borderRadius: 22,
+              backgroundColor: 'rgba(255, 255, 255, 0.78)',
+              border: '1px solid rgba(61,41,20,0.18)',
+              boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
+            }}
+          >
+            <h2
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-                gap: '2rem',
+                fontSize: '1.4rem',
+                margin: 0,
+                marginBottom: '1rem',
+                color: '#3d2914',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
               }}
             >
-              {items.map((item, index) => (
-                <MagazineCard
-                  key={`${item.accessType}-${item.magazineId}-${item.editionId || index}`}
-                  title={item.title}
-                  date={formatDate(item.publishedAt) || (item.volume ? `Vol. ${item.volume}` : '')}
-                  description={item.accessType === 'subscription' ? 'Subscribed' : 'Purchased'}
-                  image={item.coverKey ? `/api/assets/serve?key=${item.coverKey}` : ''}
-                  editionId={item.editionId || undefined}
-                />
-              ))}
-            </div>
-          ) : (
-            <Empty description="You haven't subscribed to or purchased any magazines yet. Browse and subscribe to get started!" />
-          )}
+              My Subscriptions & Purchases
+            </h2>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '3rem' }}>
+                <Spin size="large" />
+              </div>
+            ) : items.length > 0 ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  gap: '1.25rem',
+                }}
+              >
+                {items.map((item, index) => (
+                  <MagazineCard
+                    key={`${item.accessType}-${item.magazineId}-${item.editionId || index}`}
+                    title={item.title}
+                    date={
+                      formatDate(item.publishedAt) || (item.volume ? `Vol. ${item.volume}` : '')
+                    }
+                    description={item.accessType === 'subscription' ? 'Subscribed' : 'Purchased'}
+                    image={item.coverKey ? `/api/assets/serve?key=${item.coverKey}` : ''}
+                    editionId={item.editionId || undefined}
+                  />
+                ))}
+              </div>
+            ) : (
+              <Empty description="You haven't subscribed to or purchased any magazines yet. Browse and subscribe to get started!" />
+            )}
+          </div>
         </section>
       </div>
     </main>

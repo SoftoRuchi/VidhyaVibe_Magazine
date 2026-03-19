@@ -18,17 +18,17 @@ router.get('/plans', async (req, res) => {
       const [planRows]: any = await conn.query(
         `SELECT sp.id, sp.name, sp.slug, sp.description, sp.minMonths, sp.maxMonths,
                 sp.deliveryMode, sp.autoDispatch, sp.dispatchFrequencyDays,
-                sp.priceCents as defaultPriceCents, sp.currency as defaultCurrency
+                sp.price as defaultPrice, sp.currency as defaultCurrency
          FROM subscription_plans sp WHERE sp.active = 1`,
       );
       const [mpRows]: any = await conn.query(
-        `SELECT plan_id, delivery_mode, price_cents, currency FROM magazine_plans WHERE magazine_id = ? AND active = 1`,
+        `SELECT plan_id, delivery_mode, price, currency FROM magazine_plans WHERE magazine_id = ? AND active = 1`,
         [magazineId],
       );
-      const mpMap: Record<string, { priceCents: number; currency: string }> = {};
+      const mpMap: Record<string, { price: number; currency: string }> = {};
       for (const mp of mpRows) {
         mpMap[`${mp.plan_id}:${mp.delivery_mode}`] = {
-          priceCents: mp.price_cents,
+          price: mp.price,
           currency: mp.currency || 'INR',
         };
       }
@@ -44,25 +44,25 @@ router.get('/plans', async (req, res) => {
         dispatchFrequencyDays: p.dispatchFrequencyDays,
         prices: {
           ELECTRONIC: mpMap[`${p.id}:ELECTRONIC`] ?? {
-            priceCents: p.defaultPriceCents,
+            price: p.defaultPrice,
             currency: p.defaultCurrency || 'INR',
           },
           PHYSICAL: mpMap[`${p.id}:PHYSICAL`] ?? {
-            priceCents: p.defaultPriceCents,
+            price: p.defaultPrice,
             currency: p.defaultCurrency || 'INR',
           },
           BOTH: mpMap[`${p.id}:BOTH`] ?? {
-            priceCents: p.defaultPriceCents,
+            price: p.defaultPrice,
             currency: p.defaultCurrency || 'INR',
           },
         },
-        priceCents: mpMap[`${p.id}:BOTH`]?.priceCents ?? p.defaultPriceCents,
+        price: mpMap[`${p.id}:BOTH`]?.price ?? p.defaultPrice,
         currency: mpMap[`${p.id}:BOTH`]?.currency ?? (p.defaultCurrency || 'INR'),
       }));
       res.json(plans);
     } else {
       const [rows]: any = await conn.query(
-        'SELECT id, name, slug, description, priceCents, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays FROM subscription_plans WHERE active = 1',
+        'SELECT id, name, slug, description, price, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays FROM subscription_plans WHERE active = 1',
       );
       res.json(rows);
     }
@@ -141,8 +141,9 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
       }
     }
 
-    // compute price (simple: plan.priceCents * months)
-    const priceCents = Number(plan.priceCents) * Number(months);
+    // compute price (plan.price is whole currency units; payments table stores cents)
+    const price = Number(plan.price ?? 0) * Number(months);
+    const amountCents = Math.round(price * 100);
 
     // handle coupon validation via coupon service
     let couponId: number | null = null;
@@ -161,7 +162,7 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
     endsAt.setMonth(endsAt.getMonth() + Number(months));
 
     const [ins]: any = await conn.query(
-      'INSERT INTO user_subscriptions (userId, readerId, magazineId, planId, status, startsAt, endsAt, autoRenew, priceCents, currency, couponId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+      'INSERT INTO user_subscriptions (userId, readerId, magazineId, planId, status, startsAt, endsAt, autoRenew, price, currency, couponId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
       [
         userId,
         readerId || null,
@@ -171,7 +172,7 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
         startsAt,
         endsAt,
         1,
-        priceCents,
+        price,
         plan.currency || 'USD',
         couponId,
       ],
@@ -181,7 +182,7 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
     // create payment placeholder
     const [pay]: any = await conn.query(
       'INSERT INTO payments (userId, subscriptionId, amountCents, currency, provider, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-      [userId, subscriptionId, priceCents, plan.currency || 'USD', 'manual', 'PENDING'],
+      [userId, subscriptionId, amountCents, plan.currency || 'USD', 'manual', 'PENDING'],
     );
     const paymentId = pay.insertId;
 

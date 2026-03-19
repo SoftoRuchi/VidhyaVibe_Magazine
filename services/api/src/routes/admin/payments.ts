@@ -10,7 +10,7 @@ router.use(requireAdmin);
 
 /**
  * GET /api/admin/payments/orders
- * Combined view: subscription orders (payment_orders) + edition orders (edition_orders)
+ * Combined view: subscription orders (orders) + edition orders (edition_orders)
  */
 router.get('/orders', async (req, res) => {
   const pool = getPool();
@@ -19,11 +19,11 @@ router.get('/orders', async (req, res) => {
     const [subOrders]: any = await conn
       .query(
         `
-      SELECT po.id, po.user_id as userId, po.plan_id as planId, po.magazine_id as magazineId, po.months, po.amount_cents as amountCents, po.final_cents as finalCents, po.currency, po.status, po.created_at as createdAt,
+      SELECT po.id, po.user_id as userId, po.plan_id as planId, po.magazine_id as magazineId, po.months, po.amount as amount, po.final_amount as finalAmount, po.currency, po.status, po.rp_order_id as rpOrderId, po.created_at as createdAt,
              u.email as userEmail, u.name as userName,
              m.title as magazineTitle,
              sp.name as planName
-      FROM payment_orders po
+      FROM orders po
       LEFT JOIN users u ON u.id = po.user_id
       LEFT JOIN magazines m ON m.id = po.magazine_id
       LEFT JOIN subscription_plans sp ON sp.id = po.plan_id
@@ -60,7 +60,7 @@ router.get('/orders/pending', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT * FROM payment_orders WHERE status = ? ORDER BY created_at DESC',
+      'SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC',
       ['PENDING'],
     );
     res.json(rows);
@@ -77,7 +77,7 @@ router.get('/proofs/pending', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT p.*, o.final_cents FROM payment_proofs p JOIN payment_orders o ON p.order_id = o.id WHERE p.verified = 0 ORDER BY p.created_at DESC',
+      'SELECT p.*, o.final_amount FROM order_proofs p JOIN orders o ON p.order_id = o.id WHERE p.verified = 0 ORDER BY p.created_at DESC',
     );
     res.json(rows);
   } catch (e: any) {

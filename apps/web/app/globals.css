@@ -5,14 +5,30 @@
   --text-color: #2C3E50;
   --background-color: #F7F9FC;
   --font-family: 'Inter', sans-serif;
+  /* Vintage magazine / parchment theme */
+  --parchment-bg: #e8dcc4;
+  --parchment-dark: #c4a574;
+  --parchment-border: #b8956a;
+  --leather-brown: #3d2914;
+  --leather-dark: #2a1c0e;
+  --nav-oval-bg: #f5eedd;
+  --btn-view-green: #2d7a3e;
+  --btn-read-red: #c0392b;
 }
 
 body {
   margin: 0;
   padding: 0;
   font-family: var(--font-family);
-  background-color: var(--background-color);
+  background-color: transparent;
   color: var(--text-color);
+}
+
+/* Magazine listing page – white background */
+.parchment-page {
+  /* keep content readable but let global background show through */
+  /* background-color: rgba(255, 255, 255, 0.807); */
+  min-height: 100vh;
 }
 
 a {
@@ -26,9 +42,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 1200px; /* or 1300px */
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 16px;
 }
 
 .btn {

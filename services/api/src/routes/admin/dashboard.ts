@@ -22,7 +22,7 @@ router.get('/summary', async (req, res) => {
     );
     const [[pendingSubProofs]]: any = await conn
       .query(
-        'SELECT COUNT(*) as count FROM payment_proofs p JOIN payment_orders o ON p.order_id = o.id WHERE p.verified = 0',
+        'SELECT COUNT(*) as count FROM order_proofs p JOIN orders o ON p.order_id = o.id WHERE p.verified = 0',
       )
       .catch(() => [[{ count: 0 }]]);
     const [[pendingEdProofs]]: any = await conn
@@ -114,8 +114,8 @@ router.get('/payments/pending', async (req, res) => {
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
-    // Tables payment_orders and payment_proofs do not exist in schema.prisma
-    // const [rows]: any = await conn.query('SELECT o.*, p.final_cents FROM payment_orders o LEFT JOIN payment_proofs p ON p.order_id = o.id WHERE o.status = ? ORDER BY o.created_at DESC', ['PENDING']);
+    // Tables orders and order_proofs do not exist in schema.prisma
+    // const [rows]: any = await conn.query('SELECT o.*, p.final_amount FROM orders o LEFT JOIN order_proofs p ON p.order_id = o.id WHERE o.status = ? ORDER BY o.created_at DESC', ['PENDING']);
     res.json([]);
   } catch (e: any) {
     console.error(e);

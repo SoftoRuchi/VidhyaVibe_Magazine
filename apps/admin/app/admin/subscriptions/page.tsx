@@ -48,7 +48,7 @@ export default function SubscriptionsPage() {
       title: 'Amount',
       key: 'amount',
       render: (_: any, r: any) =>
-        r.priceCents ? `${(r.priceCents / 100).toFixed(2)} ${r.currency || 'USD'}` : '-',
+        r.price != null ? `${Number(r.price).toFixed(2)} ${r.currency || 'USD'}` : '-',
     },
   ];
 

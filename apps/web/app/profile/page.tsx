@@ -10,8 +10,10 @@ import {
 } from '@ant-design/icons';
 import { Card, Form, Input, Button, message, Spin, Tabs, Select, InputNumber, Divider } from 'antd';
 import axios from 'axios';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import profileImg from '../../components/images/profile.png';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
@@ -187,80 +189,316 @@ export default function ProfilePage() {
   );
 
   return (
-    <main style={{ padding: '3rem 0', minHeight: '80vh', backgroundColor: '#f7f8fa' }}>
-      <div className="container" style={{ maxWidth: 780 }}>
-        <h1 style={{ fontSize: '2.5rem', color: 'var(--primary-color)', marginBottom: '2rem' }}>
-          My Profile
-        </h1>
-
-        {/* ── Personal Information ── */}
-        <Card style={cardStyle}>
-          {sectionTitle(<UserOutlined />, 'Personal Information')}
-          {editingProfile ? (
-            <Form form={profileForm} layout="vertical">
-              <Form.Item name="name" label="Full Name">
-                <Input placeholder="Your name" size="large" />
-              </Form.Item>
-              <Form.Item name="phone" label="Phone Number">
-                <Input placeholder="Your phone number" size="large" />
-              </Form.Item>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <Button type="primary" icon={<SaveOutlined />} onClick={saveProfile} size="large">
-                  Save
-                </Button>
-                <Button
-                  icon={<CloseOutlined />}
-                  onClick={() => setEditingProfile(false)}
-                  size="large"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </Form>
-          ) : (
-            <>
-              <div
+    <main
+      style={{
+        minHeight: '80vh',
+        // padding: '1.25rem 0 2.25rem',
+      }}
+    >
+      <div className="container" style={{ maxWidth: 980 }}>
+        {/* Themed heading */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '84px 1fr 84px',
+            alignItems: 'center',
+            // padding: '0.35rem 0',
+            marginBottom: '1.0rem',
+          }}
+        >
+          <div />
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+          >
+            <Image
+              src={profileImg}
+              alt="Profile"
+              width={84}
+              height={84}
+              style={{ width: 84, height: 84, objectFit: 'contain' }}
+              priority
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <h1
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '1rem',
-                  marginBottom: 20,
+                  margin: 0,
+                  fontSize: '2.05rem',
+                  fontWeight: 800,
+                  color: '#3d2914',
+                  fontFamily: 'Georgia, serif',
+                  letterSpacing: '0.2px',
+                  textAlign: 'center',
                 }}
               >
-                <div>
-                  <div style={{ color: '#888', fontSize: 13 }}>Full Name</div>
-                  <div style={{ fontSize: 16, fontWeight: 500 }}>{user?.name || '—'}</div>
+                My Profile
+              </h1>
+              <div
+                style={{
+                  width: '55%',
+                  maxWidth: 240,
+                  height: 3,
+                  backgroundColor: '#3d2914',
+                  borderRadius: 999,
+                  marginTop: 8,
+                  opacity: 0.95,
+                }}
+              />
+            </div>
+          </div>
+          <div />
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(260px, 320px) minmax(0, 1fr)',
+            gap: '2rem',
+            alignItems: 'flex-start',
+          }}
+        >
+          {/* Left: Profile Summary / Edit */}
+          <Card
+            style={{
+              borderRadius: 22,
+              backgroundColor: 'rgba(255, 255, 255, 0.78)',
+              border: '1px solid rgba(61,41,20,0.18)',
+              boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
+              paddingTop: 12,
+            }}
+            bodyStyle={{ padding: '1.4rem 1.6rem 1.6rem' }}
+          >
+            {editingProfile ? (
+              <Form form={profileForm} layout="vertical">
+                <h3 style={{ marginBottom: 16 }}>Edit Profile Details</h3>
+                <Form.Item name="name" label="Full Name">
+                  <Input placeholder="Your name" size="large" />
+                </Form.Item>
+                <Form.Item name="phone" label="Phone Number">
+                  <Input placeholder="Your phone number" size="large" />
+                </Form.Item>
+                <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                  <Button type="primary" icon={<SaveOutlined />} onClick={saveProfile} size="large">
+                    Save
+                  </Button>
+                  <Button
+                    icon={<CloseOutlined />}
+                    onClick={() => setEditingProfile(false)}
+                    size="large"
+                  >
+                    Cancel
+                  </Button>
                 </div>
-                <div>
-                  <div style={{ color: '#888', fontSize: 13 }}>Email</div>
-                  <div style={{ fontSize: 16, fontWeight: 500 }}>{user?.email}</div>
+              </Form>
+            ) : (
+              <>
+                <div style={{ textAlign: 'center', marginBottom: 18 }}>
+                  <div
+                    style={{
+                      width: 80,
+                      height: 80,
+                      borderRadius: '50%',
+                      background: 'linear-gradient(145deg, #fee2e2, #e0f2fe)',
+                      margin: '0 auto 0.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 36,
+                    }}
+                  >
+                    <UserOutlined />
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>{user?.name || 'Parent User'}</div>
+                  <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+                    Active Parent Account
+                  </div>
                 </div>
-                <div>
-                  <div style={{ color: '#888', fontSize: 13 }}>Phone</div>
-                  <div style={{ fontSize: 16, fontWeight: 500 }}>{user?.phone || '—'}</div>
+
+                <div
+                  style={{
+                    backgroundColor: '#f3f4ff',
+                    borderRadius: 12,
+                    padding: '0.75rem 0.9rem',
+                    marginBottom: 14,
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: '#4b5563' }}>{user?.email}</div>
+                  {user?.phone && (
+                    <div style={{ fontSize: 13, color: '#4b5563', marginTop: 4 }}>{user.phone}</div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    textAlign: 'center',
+                    marginBottom: 16,
+                    fontSize: 13,
+                    color: '#6b7280',
+                  }}
+                >
+                  <strong>{readers.length}</strong> Registered Readers
+                </div>
+
+                <Button
+                  block
+                  type="default"
+                  icon={<EditOutlined />}
+                  onClick={startEditProfile}
+                  style={{ borderRadius: 999 }}
+                >
+                  Edit Profile Details
+                </Button>
+              </>
+            )}
+          </Card>
+
+          {/* Right: Readers list */}
+          <Card
+            style={{
+              borderRadius: 22,
+              backgroundColor: 'rgba(255, 255, 255, 0.78)',
+              border: '1px solid rgba(61,41,20,0.18)',
+              boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
+            }}
+            bodyStyle={{ padding: '1.4rem 1.6rem 1.6rem' }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>Your Registered Readers</div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  Manage child reader profiles and delivery details.
                 </div>
               </div>
-              <Button icon={<EditOutlined />} onClick={startEditProfile}>
-                Edit Personal Info
-              </Button>
-            </>
-          )}
-        </Card>
+            </div>
 
-        {/* ── Readers / School Information ── */}
-        <Card style={cardStyle}>
-          {sectionTitle(<BookOutlined />, 'Readers & School Information')}
-          <p style={{ color: '#666', marginBottom: 20 }}>
-            Each reader profile tracks a child's details including school information.
-          </p>
+            {readers.map((r) => (
+              <Card
+                key={r.id}
+                style={{
+                  marginBottom: 14,
+                  borderRadius: 16,
+                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#ffffff',
+                }}
+                bodyStyle={{ padding: '0.9rem 1rem 0.85rem' }}
+              >
+                {editingReaderId === r.id ? (
+                  <Form form={readerForm} layout="vertical">
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                      <Form.Item name="name" label="Reader Name" rules={[{ required: true }]}>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item name="age" label="Age">
+                        <InputNumber min={1} max={100} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name="dob" label="Date of Birth">
+                        <Input type="date" />
+                      </Form.Item>
+                      <Form.Item name="className" label="Class / Grade">
+                        <Input placeholder="e.g. 6th Grade" />
+                      </Form.Item>
+                      <Form.Item name="schoolName" label="School Name">
+                        <Input placeholder="e.g. ABC Public School" />
+                      </Form.Item>
+                      <Form.Item name="schoolCity" label="School City">
+                        <Input placeholder="e.g. Mumbai" />
+                      </Form.Item>
+                      <Form.Item name="deliveryMode" label="Preferred Delivery">
+                        <Select>
+                          <Option value="ELECTRONIC">E-Magazine</Option>
+                          <Option value="PHYSICAL">Physical Copy</Option>
+                          <Option value="BOTH">Both</Option>
+                        </Select>
+                      </Form.Item>
+                    </div>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <Button type="primary" icon={<SaveOutlined />} onClick={saveReader}>
+                        Save
+                      </Button>
+                      <Button icon={<CloseOutlined />} onClick={() => setEditingReaderId(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </Form>
+                ) : (
+                  <>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 8,
+                      }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{r.name}</div>
+                      <span
+                        style={{
+                          padding: '2px 10px',
+                          borderRadius: 999,
+                          backgroundColor: '#dcfce7',
+                          color: '#15803d',
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}
+                      >
+                        Active (Subscribed)
+                      </span>
+                    </div>
 
-          {readers.map((r) => (
-            <div key={r.id}>
-              <Divider orientation="left" style={{ color: '#555', fontWeight: 600 }}>
-                {r.name}
-              </Divider>
-              {editingReaderId === r.id ? (
-                <Form form={readerForm} layout="vertical">
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+                        gap: '0.5rem 1.25rem',
+                        marginBottom: 8,
+                        fontSize: 12,
+                      }}
+                    >
+                      {[
+                        ['Age', r.age],
+                        ['Grade', r.className],
+                        ['School', r.schoolName],
+                        ['City', r.schoolCity],
+                        ['Delivery Method', r.deliveryMode],
+                      ].map(([label, val]) => (
+                        <div key={String(label)}>
+                          <div style={{ color: '#9ca3af', fontSize: 11 }}>{label}</div>
+                          <div style={{ fontSize: 13, fontWeight: 500 }}>{val || '—'}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <Button icon={<EditOutlined />} onClick={() => startEditReader(r)} size="small">
+                      Edit
+                    </Button>
+                  </>
+                )}
+              </Card>
+            ))}
+
+            {readers.length === 0 && !addingReader && (
+              <p style={{ color: '#9ca3af', fontStyle: 'italic', marginBottom: 0 }}>
+                No readers added yet.
+              </p>
+            )}
+
+            <Divider />
+
+            {addingReader ? (
+              <>
+                <h3 style={{ marginBottom: 16 }}>Add New Reader</h3>
+                <Form form={newReaderForm} layout="vertical">
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
                     <Form.Item name="name" label="Reader Name" rules={[{ required: true }]}>
                       <Input />
@@ -280,7 +518,11 @@ export default function ProfilePage() {
                     <Form.Item name="schoolCity" label="School City">
                       <Input placeholder="e.g. Mumbai" />
                     </Form.Item>
-                    <Form.Item name="deliveryMode" label="Preferred Delivery">
+                    <Form.Item
+                      name="deliveryMode"
+                      label="Preferred Delivery"
+                      initialValue="ELECTRONIC"
+                    >
                       <Select>
                         <Option value="ELECTRONIC">E-Magazine</Option>
                         <Option value="PHYSICAL">Physical Copy</Option>
@@ -289,102 +531,22 @@ export default function ProfilePage() {
                     </Form.Item>
                   </div>
                   <div style={{ display: 'flex', gap: 12 }}>
-                    <Button type="primary" icon={<SaveOutlined />} onClick={saveReader}>
-                      Save
+                    <Button type="primary" icon={<SaveOutlined />} onClick={createReader}>
+                      Add Reader
                     </Button>
-                    <Button icon={<CloseOutlined />} onClick={() => setEditingReaderId(null)}>
+                    <Button icon={<CloseOutlined />} onClick={() => setAddingReader(false)}>
                       Cancel
                     </Button>
                   </div>
                 </Form>
-              ) : (
-                <>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '0.75rem 1.5rem',
-                      marginBottom: 12,
-                    }}
-                  >
-                    {[
-                      ['Age', r.age],
-                      ['Class', r.className],
-                      ['School', r.schoolName],
-                      ['City', r.schoolCity],
-                      ['Delivery', r.deliveryMode],
-                    ].map(([label, val]) => (
-                      <div key={String(label)}>
-                        <div style={{ color: '#888', fontSize: 12 }}>{label}</div>
-                        <div style={{ fontSize: 15, fontWeight: 500 }}>{val || '—'}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <Button icon={<EditOutlined />} onClick={() => startEditReader(r)} size="small">
-                    Edit
-                  </Button>
-                </>
-              )}
-            </div>
-          ))}
-
-          {readers.length === 0 && !addingReader && (
-            <p style={{ color: '#aaa', fontStyle: 'italic' }}>No readers added yet.</p>
-          )}
-
-          <Divider />
-
-          {addingReader ? (
-            <>
-              <h3 style={{ marginBottom: 16 }}>Add New Reader</h3>
-              <Form form={newReaderForm} layout="vertical">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-                  <Form.Item name="name" label="Reader Name" rules={[{ required: true }]}>
-                    <Input />
-                  </Form.Item>
-                  <Form.Item name="age" label="Age">
-                    <InputNumber min={1} max={100} style={{ width: '100%' }} />
-                  </Form.Item>
-                  <Form.Item name="dob" label="Date of Birth">
-                    <Input type="date" />
-                  </Form.Item>
-                  <Form.Item name="className" label="Class / Grade">
-                    <Input placeholder="e.g. 6th Grade" />
-                  </Form.Item>
-                  <Form.Item name="schoolName" label="School Name">
-                    <Input placeholder="e.g. ABC Public School" />
-                  </Form.Item>
-                  <Form.Item name="schoolCity" label="School City">
-                    <Input placeholder="e.g. Mumbai" />
-                  </Form.Item>
-                  <Form.Item
-                    name="deliveryMode"
-                    label="Preferred Delivery"
-                    initialValue="ELECTRONIC"
-                  >
-                    <Select>
-                      <Option value="ELECTRONIC">E-Magazine</Option>
-                      <Option value="PHYSICAL">Physical Copy</Option>
-                      <Option value="BOTH">Both</Option>
-                    </Select>
-                  </Form.Item>
-                </div>
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <Button type="primary" icon={<SaveOutlined />} onClick={createReader}>
-                    Add Reader
-                  </Button>
-                  <Button icon={<CloseOutlined />} onClick={() => setAddingReader(false)}>
-                    Cancel
-                  </Button>
-                </div>
-              </Form>
-            </>
-          ) : (
-            <Button type="dashed" onClick={() => setAddingReader(true)} style={{ width: '100%' }}>
-              + Add Reader Profile
-            </Button>
-          )}
-        </Card>
+              </>
+            ) : (
+              <Button type="dashed" onClick={() => setAddingReader(true)} style={{ width: '100%' }}>
+                + Add Reader Profile
+              </Button>
+            )}
+          </Card>
+        </div>
       </div>
     </main>
   );

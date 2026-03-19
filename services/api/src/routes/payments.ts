@@ -9,6 +9,7 @@ import {
   attachProof,
   createEditionOrder,
   attachEditionProof,
+  confirmRazorpayPayment,
 } from '../services/payments';
 
 const router = Router();
@@ -35,6 +36,29 @@ router.post('/create-order', async (req: AuthRequest, res) => {
   } catch (e: any) {
     console.error(e);
     res.status(400).json({ error: 'create_order_failed', message: e.message });
+  }
+});
+
+// confirm Razorpay payment + update order status (user-facing)
+router.post('/razorpay/confirm', async (req: AuthRequest, res) => {
+  const userId = Number(req.user?.id);
+  const { orderId, razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body || {};
+  if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+  if (!orderId || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+    return res.status(400).json({ error: 'missing_fields' });
+  }
+  try {
+    const result = await confirmRazorpayPayment({
+      userId,
+      orderId: Number(orderId),
+      razorpay_payment_id: String(razorpay_payment_id),
+      razorpay_order_id: String(razorpay_order_id),
+      razorpay_signature: String(razorpay_signature),
+    });
+    res.json(result);
+  } catch (e: any) {
+    console.error(e);
+    res.status(400).json({ error: 'confirm_failed', message: e.message });
   }
 });
 

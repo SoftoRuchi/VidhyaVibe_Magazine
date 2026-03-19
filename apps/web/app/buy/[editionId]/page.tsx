@@ -5,6 +5,7 @@ import { Card, Button, message } from 'antd';
 import axios from 'axios';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { QRCodeCanvas } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
 
 interface EditionInfo {
@@ -114,13 +115,12 @@ export default function BuyPage() {
             <div style={{ marginTop: 20 }}>
               <h3>Pay via UPI</h3>
               <p>
-                Amount: {(order.finalCents / 100).toFixed(2)} {order.currency}
+                Amount: {Number(order.finalAmount ?? order.finalCents ?? 0).toFixed(2)}{' '}
+                {order.currency}
               </p>
-              <img
-                src={`https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=${encodeURIComponent(order.upi)}`}
-                alt="QR"
-                style={{ maxWidth: 200 }}
-              />
+              <div style={{ display: 'inline-block', padding: 10, background: '#fff' }}>
+                <QRCodeCanvas value={String(order.upi || '')} size={220} includeMargin />
+              </div>
               <p style={{ wordBreak: 'break-all' }}>UPI: {order.upi}</p>
               <p>
                 <label>

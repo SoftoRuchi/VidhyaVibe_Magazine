@@ -147,7 +147,7 @@ model MagazinePlan {
   magazineId   BigInt       @map("magazine_id")
   planId       BigInt       @map("plan_id")
   deliveryMode DeliveryMode @default(BOTH) @map("delivery_mode")
-  priceCents   Int          @map("price_cents")
+  price        Int          @map("price")
   currency     String       @default("INR")
   active       Boolean      @default(true)
 
@@ -193,7 +193,7 @@ model SubscriptionPlan {
   name               String
   slug               String    @unique
   description        String?
-  priceCents         Int
+  price              Int
   currency           String    @default("INR")
   minMonths          Int       @default(1)
   maxMonths          Int?
@@ -220,7 +220,7 @@ model UserSubscription {
   startsAt       DateTime
   endsAt         DateTime?
   autoRenew      Boolean           @default(true)
-  priceCents     Int
+  price          Int
   currency       String            @default("USD")
   couponId       BigInt?
   createdAt      DateTime          @default(now())
