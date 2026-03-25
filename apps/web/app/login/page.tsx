@@ -5,38 +5,60 @@ import { Card, Form, Input, Button, message } from 'antd';
 import axios from 'axios';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import React from 'react';
 import loginImg from '../../components/images/login.png';
+import { clearViewingContext } from '../../lib/viewingContext';
 
 export default function LoginPage() {
   const [loading, setLoading] = React.useState(false);
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams?.get('redirect');
 
   const onFinish = async (values: any) => {
     setLoading(true);
     try {
-      // In a real app, this would be an API call
-      // For now, mirroring the demo logic but adding token storage
-      const res = await axios.post('/api/auth/login', values);
+      const res = await axios.post('/api/auth/login', values, { withCredentials: true });
 
       if (res.data.access_token) {
         localStorage.setItem('access_token', res.data.access_token);
+        clearViewingContext();
         message.success('Logged in successfully');
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('show_post_login_setup', '1');
+        }
 
         if (redirect) {
           window.location.href = redirect;
         } else {
-          window.location.href = '/dashboard';
+          window.location.href = '/';
         }
       } else {
         message.error('Login failed. Invalid response from server.');
       }
     } catch (error: any) {
       console.error('Login error:', error);
-      message.error(error.response?.data?.error || 'Login failed. Please try again.');
+      if (!error.response) {
+        message.error('Cannot reach server. Ensure the backend is running on port 4001.');
+        return;
+      }
+      const data = error.response?.data;
+      const errCode = typeof data?.error === 'string' ? data.error : data?.error?.code;
+      let errMsg = 'Login failed. Please try again.';
+      if (errCode === 'invalid_credentials') {
+        errMsg = 'Invalid email or password.';
+      } else if (errCode === 'login_failed' && data?.details) {
+        errMsg = data.details;
+      } else if (data?.details) {
+        errMsg = data.details;
+      } else if (typeof data?.error === 'object' && data?.error?.message) {
+        errMsg = data.error.message;
+      } else if (data?.message) {
+        errMsg = data.message;
+      } else if (errCode) {
+        errMsg = String(errCode);
+      }
+      message.error(errMsg);
     } finally {
       setLoading(false);
     }

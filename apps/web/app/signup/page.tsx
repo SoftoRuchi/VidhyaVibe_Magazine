@@ -1,6 +1,6 @@
 'use client';
 
-import { Card, Form, Input, Button, message, Select } from 'antd';
+import { Card, Form, Input, Button, message, Select, Row, Col } from 'antd';
 import axios from 'axios';
 import Link from 'next/link';
 import React from 'react';
@@ -16,22 +16,22 @@ export default function SignupPage() {
       const payload = {
         email: values.email,
         password: values.password,
-        name: values.name,
-        phone: values.phone || undefined,
-        guardians: [
-          {
-            name: values.guardianName,
-            phone: values.guardianPhone || undefined,
-            relation: values.guardianRelation || undefined,
-          },
-        ],
+        name: values.parentName?.trim(),
+        phone: values.phone?.trim(),
+        relation: values.relation,
+        deliveryAddress: values.deliveryAddress?.trim(),
       };
 
       await axios.post('/api/auth/register', payload);
-      message.success('Account created successfully! Please login.');
+      message.success('Account created! Log in to add your children.');
       window.location.href = '/login';
     } catch (error: any) {
-      const msg = error.response?.data?.error || 'Signup failed. Please try again.';
+      const data = error.response?.data;
+      const msg =
+        data?.message ||
+        data?.error ||
+        (typeof data?.error === 'string' ? data.error : null) ||
+        'Signup failed. Please try again.';
       message.error(msg);
     } finally {
       setLoading(false);
@@ -63,98 +63,109 @@ export default function SignupPage() {
           <h1 style={{ color: 'var(--primary-color)', fontSize: '2rem', marginBottom: '0.5rem' }}>
             Join the Fun!
           </h1>
-          <p style={{ color: '#888' }}>Create your account to start exploring.</p>
+          <p style={{ color: '#888' }}>
+            Create your guardian account first. After you log in, you can add your children.
+          </p>
         </div>
 
         <Form name="signup" onFinish={onFinish} layout="vertical" size="large" scrollToFirstError>
-          <Form.Item
-            name="name"
-            label="Child's Full Name"
-            rules={[
-              { required: true, message: "Please input the child's name!", whitespace: true },
-            ]}
-          >
-            <Input placeholder="Enter child's full name" />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="parentName"
+                label="Parent / guardian full name"
+                rules={[
+                  { required: true, message: 'Please enter your full name', whitespace: true },
+                ]}
+              >
+                <Input placeholder="Your full name" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="email"
+                label="E-mail"
+                rules={[
+                  { type: 'email', message: 'The input is not valid E-mail!' },
+                  { required: true, message: 'Please input your E-mail!' },
+                ]}
+              >
+                <Input placeholder="Enter email address" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="phone"
+                label="Phone"
+                rules={[{ required: true, message: 'Please enter phone number' }]}
+              >
+                <Input placeholder="Enter phone number" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="relation"
+                label="Relation to child"
+                rules={[{ required: true, message: 'Please select relation' }]}
+              >
+                <Select placeholder="Select relation">
+                  <Option value="Parent">Parent</Option>
+                  <Option value="Father">Father</Option>
+                  <Option value="Mother">Mother</Option>
+                  <Option value="Guardian">Guardian</Option>
+                  <Option value="Other">Other</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="password"
+                label="Password"
+                rules={[
+                  { required: true, message: 'Please input your password!' },
+                  { min: 6, message: 'Password must be at least 6 characters!' },
+                ]}
+                hasFeedback
+              >
+                <Input.Password placeholder="Create a password" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="confirm"
+                label="Confirm Password"
+                dependencies={['password']}
+                hasFeedback
+                rules={[
+                  { required: true, message: 'Please confirm your password!' },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || getFieldValue('password') === value) {
+                        return Promise.resolve();
+                      }
+                      return Promise.reject(new Error('The two passwords do not match!'));
+                    },
+                  }),
+                ]}
+              >
+                <Input.Password placeholder="Confirm your password" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item
-            name="email"
-            label="E-mail"
-            rules={[
-              { type: 'email', message: 'The input is not valid E-mail!' },
-              { required: true, message: 'Please input your E-mail!' },
-            ]}
+            name="deliveryAddress"
+            label="Delivery Address"
+            rules={[{ required: true, message: 'Please enter delivery address' }]}
           >
-            <Input placeholder="Enter email address" />
+            <Input.TextArea rows={3} placeholder="House no, street, area, city, state, pincode" />
           </Form.Item>
-
-          <Form.Item
-            name="password"
-            label="Password"
-            rules={[
-              { required: true, message: 'Please input your password!' },
-              { min: 6, message: 'Password must be at least 6 characters!' },
-            ]}
-            hasFeedback
-          >
-            <Input.Password placeholder="Create a password" />
-          </Form.Item>
-
-          <Form.Item
-            name="confirm"
-            label="Confirm Password"
-            dependencies={['password']}
-            hasFeedback
-            rules={[
-              { required: true, message: 'Please confirm your password!' },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue('password') === value) {
-                    return Promise.resolve();
-                  }
-                  return Promise.reject(new Error('The two passwords do not match!'));
-                },
-              }),
-            ]}
-          >
-            <Input.Password placeholder="Confirm your password" />
-          </Form.Item>
-
-          <Form.Item name="phone" label="Phone (optional)">
-            <Input placeholder="Enter phone number" />
-          </Form.Item>
-
-          <div
-            style={{
-              background: '#f9f9f9',
-              padding: '1rem',
-              borderRadius: '12px',
-              marginBottom: '1.5rem',
-            }}
-          >
-            <h3 style={{ marginBottom: '1rem', color: '#555' }}>Guardian / Parent Information</h3>
-
-            <Form.Item
-              name="guardianName"
-              label="Guardian Name"
-              rules={[{ required: true, message: 'Please input guardian name!' }]}
-            >
-              <Input placeholder="Enter guardian's full name" />
-            </Form.Item>
-
-            <Form.Item name="guardianPhone" label="Guardian Phone (optional)">
-              <Input placeholder="Enter guardian's phone number" />
-            </Form.Item>
-
-            <Form.Item name="guardianRelation" label="Relation">
-              <Select placeholder="Select relation">
-                <Option value="father">Father</Option>
-                <Option value="mother">Mother</Option>
-                <Option value="guardian">Guardian</Option>
-                <Option value="other">Other</Option>
-              </Select>
-            </Form.Item>
-          </div>
 
           <Form.Item>
             <Button

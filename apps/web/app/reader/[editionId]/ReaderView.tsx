@@ -1,14 +1,17 @@
 'use client';
-import { Button, Switch } from 'antd';
+import { Button } from 'antd';
 import axios from 'axios';
 import { useParams, useSearchParams } from 'next/navigation';
 import React from 'react';
+import HTMLFlipBook from 'react-pageflip';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
+// Same-origin worker (public/pdf.worker.min.mjs via postinstall) avoids null worker / sendWithPromise failures
+// from cross-origin CDN workers, Strict Mode double-mount, or blocked third-party scripts.
 if (typeof window !== 'undefined') {
-  pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 }
 
 function getAuthHeaders() {
@@ -32,20 +35,29 @@ export default function ReaderView() {
   }, [editionId, searchParams]);
   const [pages, setPages] = React.useState<any[]>([]);
   const [current, setCurrent] = React.useState(1);
-  const [low, setLow] = React.useState(false);
+  const [low, _setLow] = React.useState(false);
   const [readerId, setReaderId] = React.useState<number | null>(null);
-  const [readers, setReaders] = React.useState<any[]>([]);
-  const [animClass, setAnimClass] = React.useState<string>('');
+  const [_readers, setReaders] = React.useState<any[]>([]);
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [numPdfPages, setNumPdfPages] = React.useState<number>(0);
   const [pageWidth, setPageWidth] = React.useState(800);
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [dataLoaded, setDataLoaded] = React.useState(false);
+  const [_dataLoaded, setDataLoaded] = React.useState(false);
   const [pdfLoadError, setPdfLoadError] = React.useState<string | null>(null);
+  const [imageLoadFailed, setImageLoadFailed] = React.useState(false);
+  /** Defer mounting react-pdf until client-only; reduces PDF.js worker teardown issues under React Strict Mode. */
+  const [pdfMountReady, setPdfMountReady] = React.useState(false);
+  const [pdfDocReady, setPdfDocReady] = React.useState(false);
+  const flipBookRef = React.useRef<any>(null);
+  React.useEffect(() => {
+    setPdfMountReady(true);
+    return () => setPdfMountReady(false);
+  }, []);
 
   React.useEffect(() => {
     setLoadError(null);
     setDataLoaded(false);
+    setImageLoadFailed(false);
     const headers = getAuthHeaders();
     if (!headers.Authorization) {
       const redirect = encodeURIComponent(`/reader/${editionId}`);
@@ -96,9 +108,9 @@ export default function ReaderView() {
   }, [editionId]);
 
   React.useEffect(() => {
-    const w = Math.min(800, window.innerWidth - 80);
+    const w = Math.min(1100, window.innerWidth - 300);
     setPageWidth(w);
-    const onResize = () => setPageWidth(Math.min(800, window.innerWidth - 80));
+    const onResize = () => setPageWidth(Math.min(1100, window.innerWidth - 300));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -109,7 +121,7 @@ export default function ReaderView() {
   React.useEffect(() => {
     const t = setTimeout(() => {
       if (!readerId) return;
-      const total = pdfUrl && token ? numPdfPages : pages.length || 1;
+      const total = usePdfReader ? numPdfPages : pages.length || 1;
       if (total < 1) return;
       axios.post(
         `/api/reader-progress/${readerId}/progress`,
@@ -161,92 +173,82 @@ export default function ReaderView() {
       });
   }, [readerId, editionId]);
 
-  const totalPages = pdfUrl && token ? numPdfPages : pages.length || 1;
+  const useImageReader = pages.length > 0 && !imageLoadFailed;
+  const usePdfReader = !!pdfUrl && !!token && !useImageReader;
+  const totalPages = usePdfReader ? numPdfPages : pages.length || 1;
+  const pdfFile = React.useMemo(() => {
+    if (!pdfUrl || typeof window === 'undefined') return null;
+    return { url: `${window.location.origin}${pdfUrl}` };
+  }, [pdfUrl]);
+  const pdfOptions = React.useMemo(
+    () => (token ? { httpHeaders: { Authorization: `Bearer ${token}` } } : undefined),
+    [token],
+  );
 
   // keyboard navigation
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft') {
-        flipTo(current - 1, 'left');
+        flipTo(current - 1);
       } else if (e.key === 'ArrowRight' || e.key === ' ') {
-        flipTo(current + 1, 'right');
+        flipTo(current + 1);
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [current, totalPages]);
-  const prev = () => setCurrent((c) => Math.max(1, c - 1));
-  const next = () => setCurrent((c) => Math.min(totalPages, c + 1));
-
-  function flipTo(target: number, direction: 'left' | 'right') {
+  const prev = () => flipBookRef.current?.pageFlip()?.flipPrev();
+  const next = () => flipBookRef.current?.pageFlip()?.flipNext();
+  const flipTo = (target: number) => {
     if (target < 1 || target > totalPages) return;
-    setAnimClass(direction === 'right' ? 'flip-right' : 'flip-left');
-    setTimeout(() => {
-      setCurrent(target);
-      setAnimClass('flip-reset');
-      setTimeout(() => setAnimClass(''), 50);
-    }, 300);
-  }
+    flipBookRef.current?.pageFlip()?.flip(target - 1);
+  };
+
+  const flipPageWidth = Math.max(290, Math.min(460, Math.floor(pageWidth / 2)));
+  const flipPageHeight = Math.floor(flipPageWidth * 1.36);
+  const centerSinglePage = totalPages <= 1 || current <= 1;
+  const singlePageOffset = centerSinglePage ? -Math.floor(flipPageWidth / 2) : 0;
+
+  const hasContent = pdfUrl || pages.length > 0;
 
   return (
-    <main style={{ padding: 20 }}>
-      <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div>
-          <label style={{ marginRight: 8 }}>Reader:</label>
-          <select
-            value={readerId || ''}
-            onChange={(e) => setReaderId(Number(e.target.value))}
-            style={{ padding: 6, minWidth: 200 }}
-          >
-            {readers.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <Button onClick={() => flipTo(current - 1, 'left')} disabled={current <= 1}>
-            Prev
-          </Button>{' '}
-          <Button onClick={() => flipTo(current + 1, 'right')} disabled={current >= totalPages}>
-            Next
-          </Button>
-        </div>
-        <div style={{ marginLeft: 'auto' }}>
-          Low bandwidth mode <Switch checked={low} onChange={(v) => setLow(v)} />
-        </div>
-      </div>
-      <div>
-        {pdfUrl && token ? (
-          <div>
-            <div
-              className={`page-container ${animClass}`}
-              style={{ perspective: 1000, display: 'flex', justifyContent: 'center' }}
+    <main>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 20,
+          flexWrap: 'wrap',
+        }}
+      >
+        <aside
+          style={{
+            width: 240,
+            minWidth: 220,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          {/* <div>
+            <label style={{ marginBottom: 6, display: 'block', fontWeight: 600 }}>Reader</label>
+            <select
+              value={readerId || ''}
+              onChange={(e) => setReaderId(Number(e.target.value))}
+              style={{ padding: 8, minWidth: 210, width: '100%' }}
             >
-              <Document
-                file={{
-                  url: `${typeof window !== 'undefined' ? window.location.origin : ''}${pdfUrl}`,
-                }}
-                options={token ? { httpHeaders: { Authorization: `Bearer ${token}` } } : undefined}
-                onLoadSuccess={({ numPages }) => {
-                  setNumPdfPages(numPages);
-                  setPdfLoadError(null);
-                }}
-                onLoadError={(e) => setPdfLoadError(e?.message || 'Failed to load PDF')}
-                loading={<p>Loading PDF…</p>}
-                error={pdfLoadError ? <p>{pdfLoadError}</p> : <p>Failed to load PDF.</p>}
-              >
-                <Page
-                  pageNumber={current}
-                  width={pageWidth}
-                  renderTextLayer={true}
-                  renderAnnotationLayer={true}
-                />
-              </Document>
-            </div>
-            <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+              {readers.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </div> */}
+
+          {hasContent && (
+            <div className="actions-panel">
               <button
+                className="reader-action-btn bookmark-btn"
                 onClick={async () => {
                   if (!readerId) return;
                   try {
@@ -263,7 +265,8 @@ export default function ReaderView() {
               >
                 Bookmark
               </button>
-              <button
+              {/* <button
+                className="reader-action-btn note-btn"
                 onClick={async () => {
                   const content = prompt('Enter note for page ' + current);
                   if (!content || !readerId) return;
@@ -280,8 +283,9 @@ export default function ReaderView() {
                 }}
               >
                 Add Note
-              </button>
-              <button
+              </button> */}
+              {/* <button
+                className="reader-action-btn highlight-btn"
                 onClick={async () => {
                   const text = prompt('Highlight text (short)');
                   if (!text || !readerId) return;
@@ -306,12 +310,12 @@ export default function ReaderView() {
                 Highlight
               </button>
               <button
+                className="reader-action-btn video-btn"
                 onClick={async () => {
                   try {
-                    const res = await axios.get(
-                      `/api/editions/${editionId}/videos?page=${current}`,
-                      { headers: getAuthHeaders() },
-                    );
+                    const res = await axios.get(`/api/editions/${editionId}/videos?page=${current}`, {
+                      headers: getAuthHeaders(),
+                    });
                     const vids = res.data || [];
                     if (!vids.length) return alert('No videos for this page');
                     window.open(vids[0].url, '_blank');
@@ -321,136 +325,254 @@ export default function ReaderView() {
                 }}
               >
                 Videos
-              </button>
+              </button> */}
             </div>
+          )}
+        </aside>
+
+        <div style={{ flex: 1, minWidth: 320, paddingTop: 10, paddingLeft: 10, paddingRight: 10 }}>
+          <div
+            className="book-with-side-nav"
+            style={{
+              display: hasContent ? 'flex' : 'block',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 16,
+            }}
+          >
+            {hasContent && (
+              <Button
+                className="nav-btn prev-nav-btn side-nav-btn"
+                onClick={prev}
+                disabled={current <= 1}
+              >
+                Previous
+              </Button>
+            )}
+            {usePdfReader ? (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  {!pdfMountReady ? (
+                    <p>Loading PDF…</p>
+                  ) : (
+                    <Document
+                      key={`${editionId}-${pdfUrl}`}
+                      file={pdfFile}
+                      options={pdfOptions}
+                      onLoadSuccess={({ numPages }) => {
+                        setNumPdfPages(numPages);
+                        setCurrent((prev) => Math.min(Math.max(prev, 1), Math.max(numPages, 1)));
+                        setPdfDocReady(true);
+                        setPdfLoadError(null);
+                      }}
+                      onLoadError={(e) => {
+                        setPdfDocReady(false);
+                        setPdfLoadError(e?.message || 'Failed to load PDF');
+                      }}
+                      onSourceError={(e) => {
+                        setPdfDocReady(false);
+                        setPdfLoadError(e?.message || 'Failed to load PDF source');
+                      }}
+                      loading={<p>Loading PDF…</p>}
+                      error={pdfLoadError ? <p>{pdfLoadError}</p> : <p>Failed to load PDF.</p>}
+                    >
+                      {pdfDocReady && numPdfPages > 0 ? (
+                        <HTMLFlipBook
+                          key={`pdf-book-${numPdfPages}-${flipPageWidth}`}
+                          ref={flipBookRef}
+                          width={flipPageWidth}
+                          height={flipPageHeight}
+                          size="fixed"
+                          minWidth={220}
+                          maxWidth={800}
+                          minHeight={300}
+                          maxHeight={1200}
+                          drawShadow={true}
+                          flippingTime={700}
+                          usePortrait={false}
+                          startZIndex={0}
+                          autoSize={false}
+                          maxShadowOpacity={0.5}
+                          showCover={true}
+                          startPage={Math.max(0, current - 1)}
+                          mobileScrollSupport={true}
+                          clickEventForward={true}
+                          useMouseEvents={true}
+                          swipeDistance={30}
+                          showPageCorners={true}
+                          disableFlipByClick={false}
+                          className="flip-book"
+                          style={{
+                            marginLeft: singlePageOffset,
+                            transition: 'margin-left 180ms ease',
+                          }}
+                          onFlip={(e: any) => setCurrent((e?.data ?? 0) + 1)}
+                        >
+                          {Array.from({ length: numPdfPages }, (_, i) => (
+                            <div
+                              key={`pdf-page-${i + 1}`}
+                              className="flip-page"
+                              style={{
+                                background: '#fff',
+                                display: 'flex',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              <Page
+                                pageNumber={i + 1}
+                                width={flipPageWidth - 24}
+                                renderTextLayer={true}
+                                renderAnnotationLayer={true}
+                              />
+                            </div>
+                          ))}
+                        </HTMLFlipBook>
+                      ) : (
+                        <p>Loading page…</p>
+                      )}
+                    </Document>
+                  )}
+                </div>
+              </div>
+            ) : useImageReader ? (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <HTMLFlipBook
+                    key={`img-book-${pages.length}-${flipPageWidth}-${low ? 'low' : 'hi'}`}
+                    ref={flipBookRef}
+                    width={flipPageWidth}
+                    height={flipPageHeight}
+                    size="fixed"
+                    minWidth={220}
+                    maxWidth={800}
+                    minHeight={300}
+                    maxHeight={1200}
+                    drawShadow={true}
+                    flippingTime={700}
+                    usePortrait={false}
+                    startZIndex={0}
+                    autoSize={false}
+                    maxShadowOpacity={0.5}
+                    showCover={true}
+                    startPage={Math.max(0, current - 1)}
+                    mobileScrollSupport={true}
+                    clickEventForward={true}
+                    useMouseEvents={true}
+                    swipeDistance={30}
+                    showPageCorners={true}
+                    disableFlipByClick={false}
+                    className="flip-book"
+                    style={{ marginLeft: singlePageOffset, transition: 'margin-left 180ms ease' }}
+                    onFlip={(e: any) => setCurrent((e?.data ?? 0) + 1)}
+                  >
+                    {pages.map((_: any, index: number) => {
+                      const pageNo = index + 1;
+                      return (
+                        <div
+                          key={`img-page-${pageNo}`}
+                          className="flip-page"
+                          style={{ background: '#fff', display: 'flex', alignItems: 'center' }}
+                        >
+                          <img
+                            src={pageUrl(pageNo)}
+                            onError={() => setImageLoadFailed(true)}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'contain',
+                              display: 'block',
+                            }}
+                            alt={`Page ${pageNo}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </HTMLFlipBook>
+                </div>
+              </div>
+            ) : loadError ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
+                <p style={{ marginBottom: 16 }}>{loadError}</p>
+                <Button type="primary" onClick={() => (window.location.href = '/')}>
+                  Go to Home
+                </Button>
+              </div>
+            ) : (
+              <p>Loading...</p>
+            )}
+            {hasContent && (
+              <Button
+                className="nav-btn next-nav-btn side-nav-btn"
+                onClick={next}
+                disabled={current >= totalPages}
+              >
+                Next
+              </Button>
+            )}
           </div>
-        ) : pages.length ? (
-          <div>
-            <div className={`page-container ${animClass}`} style={{ perspective: 1000 }}>
-              <img
-                key={current}
-                src={pageUrl(current)}
-                style={{
-                  maxWidth: '100%',
-                  height: 'auto',
-                  display: 'block',
-                  backfaceVisibility: 'hidden',
-                }}
-                alt={`Page ${current}`}
-              />
-            </div>
-            <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-              <button
-                onClick={async () => {
-                  if (!readerId) return;
-                  try {
-                    await axios.post(
-                      '/api/interactions/bookmarks',
-                      { readerId, editionId: Number(editionId), pageNumber: current },
-                      { headers: getAuthHeaders() },
-                    );
-                    alert('Bookmarked');
-                  } catch (e: any) {
-                    alert('Bookmark failed');
-                  }
-                }}
-              >
-                Bookmark
-              </button>
-              <button
-                onClick={async () => {
-                  const content = prompt('Enter note for page ' + current);
-                  if (!content || !readerId) return;
-                  try {
-                    await axios.post(
-                      '/api/interactions/notes',
-                      { readerId, editionId: Number(editionId), pageNumber: current, content },
-                      { headers: getAuthHeaders() },
-                    );
-                    alert('Note saved');
-                  } catch (e: any) {
-                    alert('Save note failed');
-                  }
-                }}
-              >
-                Add Note
-              </button>
-              <button
-                onClick={async () => {
-                  const text = prompt('Highlight text (short)');
-                  if (!text || !readerId) return;
-                  try {
-                    await axios.post(
-                      '/api/interactions/highlights',
-                      {
-                        readerId,
-                        editionId: Number(editionId),
-                        pageNumber: current,
-                        text,
-                        color: '#ff0',
-                      },
-                      { headers: getAuthHeaders() },
-                    );
-                    alert('Highlight saved');
-                  } catch (e: any) {
-                    alert('Save highlight failed');
-                  }
-                }}
-              >
-                Highlight
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    const res = await axios.get(
-                      `/api/editions/${editionId}/videos?page=${current}`,
-                      { headers: getAuthHeaders() },
-                    );
-                    const vids = res.data || [];
-                    if (!vids.length) return alert('No videos for this page');
-                    window.open(vids[0].url, '_blank');
-                  } catch (e: any) {
-                    alert('Failed to fetch videos');
-                  }
-                }}
-              >
-                Videos
-              </button>
-            </div>
-          </div>
-        ) : loadError ? (
-          <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
-            <p style={{ marginBottom: 16 }}>{loadError}</p>
-            <Button type="primary" onClick={() => (window.location.href = '/')}>
-              Go to Home
-            </Button>
-          </div>
-        ) : (
-          <p>Loading...</p>
-        )}
+        </div>
       </div>
       <p>
         Page {current} / {totalPages}
       </p>
       <style>{`
-        .page-container {
-          display: inline-block;
-          transition:
-            transform 0.3s ease,
-            box-shadow 0.3s ease;
-          transform-origin: center;
+        .flip-page {
+          border: 1px solid #e5e7eb;
+          border-radius: 4px;
+          overflow: hidden;
         }
-        .page-container.flip-right {
-          transform: rotateY(-20deg) translateX(10px);
-          box-shadow: -8px 8px 24px rgba(0, 0, 0, 0.2);
+        .actions-panel {
+          margin-top: 4px;
+          padding: 10px;
+          background: rgba(255, 255, 255, 0.22);
+          border: 1px solid rgba(255, 255, 255, 0.38);
+          border-radius: 12px;
+          backdrop-filter: blur(3px);
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
         }
-        .page-container.flip-left {
-          transform: rotateY(20deg) translateX(-10px);
-          box-shadow: 8px 8px 24px rgba(0, 0, 0, 0.2);
+        .reader-action-btn {
+          border: none;
+          border-radius: 8px;
+          padding: 8px 10px;
+          color: #fff;
+          font-weight: 600;
+          cursor: pointer;
+          transition: transform 0.15s ease, opacity 0.15s ease;
         }
-        .page-container.flip-reset {
-          transform: none;
+        .reader-action-btn:hover {
+          opacity: 0.92;
+          transform: translateY(-1px);
         }
+        .book-with-side-nav {
+          flex-wrap: wrap;
+        }
+        .side-nav-btn {
+          flex-shrink: 0;
+        }
+        .nav-btn {
+          min-width: 108px;
+          height: 38px;
+          border: none !important;
+          color: #fff !important;
+          font-weight: 600;
+          border-radius: 8px !important;
+        }
+        .prev-nav-btn {
+          background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+        }
+        .next-nav-btn {
+          background: linear-gradient(135deg, #16a34a, #15803d) !important;
+        }
+        .nav-btn[disabled] {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+        .bookmark-btn { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .note-btn { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+        .highlight-btn { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .video-btn { background: linear-gradient(135deg, #ef4444, #dc2626); }
       `}</style>
     </main>
   );

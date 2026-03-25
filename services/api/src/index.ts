@@ -1,4 +1,13 @@
 import './dotenv-loader';
+
+// Prevent process exit on unhandled errors so we can log and keep running
+process.on('uncaughtException', (err) => {
+  console.error('[api] uncaughtException:', err);
+});
+process.on('unhandledRejection', (reason, _promise) => {
+  console.error('[api] unhandledRejection:', reason);
+});
+
 import { createLogger, getEnv } from '@magazine/config';
 import cookieParser from 'cookie-parser';
 import express from 'express';
@@ -34,6 +43,19 @@ const logger = createLogger('api');
 const env = getEnv();
 
 const app = express();
+// Minimal routes first so a browser/curl check always gets a response even if
+// later middleware (rate limit, DB audit, etc.) misbehaves on some setups.
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', env: env.NODE_ENV });
+});
+app.get('/', (_req, res) => {
+  res.type('application/json');
+  res.json({
+    message: 'VidhyaVibe API (use the web app on port 3000, or call /api/* from the frontend)',
+    health: '/api/health',
+  });
+});
+
 // Trust proxy so express-rate-limit can correctly identify clients via X-Forwarded-For
 app.set('trust proxy', 1);
 // Security headers
@@ -82,16 +104,17 @@ app.use('/api/assets', assetsRoutes);
 // Register provider adapters (storage, cache, db) based on env
 registerAdapters(env, { logger });
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', env: env.NODE_ENV });
+app.use((req, res) => {
+  res.status(404).json({ error: 'not_found', path: req.path });
 });
 
 // Central error handler
 app.use(errorHandler(logger));
 
-const port = Number(env.PORT || 4000);
-app.listen(port, () => {
-  logger.info(`API listening on ${port}`);
+const port = Number(env.PORT || 4001);
+// Listen on all interfaces so both 127.0.0.1 and localhost (IPv4/IPv6) behave consistently on Windows.
+app.listen(port, '0.0.0.0', () => {
+  logger.info(`API listening on ${port} (0.0.0.0)`);
 });
 
 // Optional dispatch scheduler worker

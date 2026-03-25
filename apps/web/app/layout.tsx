@@ -6,6 +6,7 @@ import AuthProvider from '../components/AuthProvider';
 import Footer from '../components/Footer';
 import backgroundImg from '../components/images/background.png';
 import Navbar from '../components/Navbar';
+import PostLoginChildSetupModal from '../components/PostLoginChildSetupModal';
 import StyledComponentsRegistry from '../lib/AntdRegistry';
 
 export const metadata = {
@@ -56,6 +57,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <AuthProvider>
                   <Navbar />
                   <div style={{ flex: 1, minHeight: 0 }}>{children}</div>
+                  <PostLoginChildSetupModal />
                 </AuthProvider>
               </App>
               <Footer />

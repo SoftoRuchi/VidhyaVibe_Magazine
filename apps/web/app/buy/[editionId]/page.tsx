@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { QRCodeCanvas } from 'qrcode.react';
 import React, { useEffect, useState } from 'react';
+import { isChildAudience } from '../../../lib/viewingContext';
 
 interface EditionInfo {
   id: number;
@@ -19,18 +20,33 @@ interface EditionInfo {
 
 export default function BuyPage() {
   const params = useParams();
-  const editionId = params?.editionId as string;
+  // const editionId = params?.editionId as string;
+  const editionId = React.useMemo(() => {
+    if (!params?.editionId) return null;
+    return Array.isArray(params.editionId) ? params.editionId[0] : params.editionId;
+  }, [params]);
+
   const [edition, setEdition] = useState<EditionInfo | null>(null);
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [childMode, setChildMode] = useState(false);
 
   useEffect(() => {
+    setChildMode(isChildAudience());
+  }, []);
+
+  useEffect(() => {
+    if (childMode) {
+      message.info('Buy is not available in child mode.');
+      window.location.href = '/dashboard';
+      return;
+    }
     if (!editionId) return;
     axios
       .get(`/api/editions/${editionId}/info`)
       .then((r) => setEdition(r.data))
       .catch(() => setEdition({ id: Number(editionId), magazineId: 0 }));
-  }, [editionId]);
+  }, [editionId, childMode]);
 
   const handleBuy = async () => {
     const token = localStorage.getItem('access_token');
@@ -71,7 +87,7 @@ export default function BuyPage() {
       .then((r) => {
         if (r.data?.proofId) message.success('Proof uploaded. Awaiting verification.');
       })
-      .catch((e) => message.error('Upload failed'));
+      .catch((_e) => message.error('Upload failed'));
   };
 
   return (

@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.string().default('4000'),
-  DATABASE_URL: z.string().min(1),
+  PORT: z.string().default('4001'),
+  DATABASE_URL: z.string().min(1).optional(),
   REDIS_URL: z.string().optional(),
   STORAGE_PROVIDER: z.enum(['local', 'minio', 's3']).default('local'),
   STORAGE_ENDPOINT: z.string().optional(),

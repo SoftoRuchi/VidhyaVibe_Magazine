@@ -1,21 +1,13 @@
 'use client';
 
-import {
-  UserOutlined,
-  TeamOutlined,
-  BookOutlined,
-  EditOutlined,
-  SaveOutlined,
-  CloseOutlined,
-} from '@ant-design/icons';
-import { Card, Form, Input, Button, message, Spin, Tabs, Select, InputNumber, Divider } from 'antd';
+import { UserOutlined, EditOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Button, message, Spin, Select, InputNumber, Divider } from 'antd';
 import axios from 'axios';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import profileImg from '../../components/images/profile.png';
 
-const { TabPane } = Tabs;
 const { Option } = Select;
 
 interface UserProfile {
@@ -47,17 +39,17 @@ export default function ProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [guardians, setGuardians] = useState<Guardian[]>([]);
+  const [_guardians, setGuardians] = useState<Guardian[]>([]);
   const [readers, setReaders] = useState<Reader[]>([]);
 
   // Edit states
   const [editingProfile, setEditingProfile] = useState(false);
-  const [editingGuardianId, setEditingGuardianId] = useState<number | null>(null);
+  const [_editingGuardianId, _setEditingGuardianId] = useState<number | null>(null);
   const [editingReaderId, setEditingReaderId] = useState<number | null>(null);
   const [addingReader, setAddingReader] = useState(false);
 
   const [profileForm] = Form.useForm();
-  const [guardianForm] = Form.useForm();
+  const [_guardianForm] = Form.useForm();
   const [readerForm] = Form.useForm();
   const [newReaderForm] = Form.useForm();
 
@@ -79,9 +71,7 @@ export default function ProfilePage() {
       ]);
       setUser(meRes.data);
       setReaders(readersRes.data || []);
-
-      // Fetch guardians - not a dedicated API, we read from user profile
-      // We'll store guardian data fetched during me lookup
+      setGuardians(meRes.data?.guardians || []);
     } catch (err: any) {
       if (err?.response?.status === 401) {
         localStorage.removeItem('access_token');
@@ -174,19 +164,6 @@ export default function ProfilePage() {
       </div>
     );
   }
-
-  const cardStyle: React.CSSProperties = {
-    borderRadius: 16,
-    boxShadow: '0 4px 20px rgba(0,0,0,0.07)',
-    marginBottom: 24,
-  };
-
-  const sectionTitle = (icon: React.ReactNode, text: string) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-      <span style={{ fontSize: 22, color: 'var(--primary-color)' }}>{icon}</span>
-      <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#333' }}>{text}</h2>
-    </div>
-  );
 
   return (
     <main

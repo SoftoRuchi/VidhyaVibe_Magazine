@@ -3,10 +3,9 @@ import { Card, Form, Select, InputNumber, Button, Input, message, Radio, Alert }
 import axios from 'axios';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { QRCodeCanvas } from 'qrcode.react';
 import React from 'react';
-import childImg from '../../components/images/child.png';
 import subscribeImg from '../../components/images/subscribe.png';
+import { isChildAudience } from '../../lib/viewingContext';
 
 const DELIVERY_OPTIONS = [
   { value: 'ELECTRONIC', label: 'E-Magazine only (digital access)' },
@@ -29,21 +28,40 @@ export default function SubscribePage() {
     'ELECTRONIC',
   );
   const [selectedPlanId, setSelectedPlanId] = React.useState<number | null>(null);
+  const [childMode, setChildMode] = React.useState(false);
+
+  React.useEffect(() => {
+    setChildMode(isChildAudience());
+  }, []);
+
+  React.useEffect(() => {
+    if (childMode) {
+      message.info('Subscribe is not available in child mode.');
+      router.replace('/dashboard');
+    }
+  }, [childMode, router]);
 
   React.useEffect(() => {
     axios.get('/api/magazines').then((r) => setMagazines(r.data || []));
   }, []);
 
   React.useEffect(() => {
-    const id = magazineIdParam ? Number(magazineIdParam) : selectedMagazineId;
-    if (id) {
-      axios.get(`/api/subscriptions/plans?magazineId=${id}`).then((r) => setPlans(r.data || []));
-    } else {
+    const id = selectedMagazineId;
+    if (!id) {
       setPlans([]);
+      return;
     }
-  }, [selectedMagazineId, magazineIdParam]);
+    axios.get(`/api/subscriptions/plans?magazineId=${id}`).then((r) => setPlans(r.data || []));
+  }, [selectedMagazineId]);
 
-  const filteredPlans = plans.filter((p) => p.deliveryMode === deliveryMode);
+  // Show plans that have a price for the selected delivery type (not only by plan.deliveryMode).
+  // This way plans with prices.PHYSICAL show under "Physical", prices.BOTH under "Both", etc.
+  const filteredPlans = plans.filter(
+    (p) =>
+      p.prices &&
+      typeof p.prices[deliveryMode] === 'object' &&
+      p.prices[deliveryMode]?.price != null,
+  );
   const selectedPlan = selectedPlanId ? plans.find((p) => p.id === selectedPlanId) : null;
   const price = selectedPlan?.prices?.[deliveryMode]?.price ?? selectedPlan?.price ?? 0;
   const currency =
@@ -93,7 +111,7 @@ export default function SubscribePage() {
     }
   }
 
-  async function uploadProof(file: File) {
+  async function _uploadProof(file: File) {
     if (!order) return;
     const fd = new FormData();
     fd.append('proof', file);

@@ -6,9 +6,10 @@ const router = Router();
 // Public endpoint to list all active magazines with optional category filtering
 router.get('/', async (req, res) => {
   const { category } = req.query;
-  const pool = getPool();
-  const conn = await pool.getConnection();
+  let conn: any;
   try {
+    const pool = getPool();
+    conn = await pool.getConnection();
     let query =
       'SELECT id, title, slug, publisher, description, category, active, coverKey, createdAt FROM magazines WHERE active = 1';
     const params: any[] = [];
@@ -26,16 +27,21 @@ router.get('/', async (req, res) => {
     console.error(e);
     res.status(500).json({ error: 'list_failed', details: e.message });
   } finally {
-    conn.release();
+    try {
+      conn?.release?.();
+    } catch {
+      // ignore release errors
+    }
   }
 });
 
 // Public endpoint to list editions for a magazine (by id or slug)
 router.get('/:identifier/editions', async (req, res) => {
   const identifier = req.params.identifier;
-  const pool = getPool();
-  const conn = await pool.getConnection();
+  let conn: any;
   try {
+    const pool = getPool();
+    conn = await pool.getConnection();
     const isNumeric = /^\d+$/.test(identifier);
     const [magRows]: any = await conn.query(
       isNumeric
@@ -69,16 +75,21 @@ router.get('/:identifier/editions', async (req, res) => {
     console.error(e);
     res.status(500).json({ error: 'list_editions_failed' });
   } finally {
-    conn.release();
+    try {
+      conn?.release?.();
+    } catch {
+      // ignore release errors
+    }
   }
 });
 
 // Public endpoint to get a single magazine by slug or ID
 router.get('/:identifier', async (req, res) => {
   const identifier = req.params.identifier;
-  const pool = getPool();
-  const conn = await pool.getConnection();
+  let conn: any;
   try {
+    const pool = getPool();
+    conn = await pool.getConnection();
     // Try to parse as ID first, otherwise treat as slug
     const isNumeric = /^\d+$/.test(identifier);
     const query = isNumeric
@@ -97,7 +108,11 @@ router.get('/:identifier', async (req, res) => {
     console.error(e);
     res.status(500).json({ error: 'get_failed' });
   } finally {
-    conn.release();
+    try {
+      conn?.release?.();
+    } catch {
+      // ignore release errors
+    }
   }
 });
 

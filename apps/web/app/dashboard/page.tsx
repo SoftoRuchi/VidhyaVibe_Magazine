@@ -1,12 +1,12 @@
 'use client';
 
-import { Button, Empty, Spin } from 'antd';
+import { Empty, Spin } from 'antd';
 import axios from 'axios';
 import Image from 'next/image';
-import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
 import libraryImg from '../../components/images/library.png';
 import MagazineCard from '../../components/MagazineCard';
+import { getSelectedReaderId, isChildAudience } from '../../lib/viewingContext';
 
 interface LibraryItem {
   type: string;
@@ -33,7 +33,9 @@ export default function DashboardPage() {
         return;
       }
       try {
-        const res = await axios.get('/api/library', {
+        const readerId = isChildAudience() ? getSelectedReaderId() : null;
+        const suffix = readerId ? `?readerId=${readerId}` : '';
+        const res = await axios.get(`/api/library${suffix}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setItems(res.data?.items || []);

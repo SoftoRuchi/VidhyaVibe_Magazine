@@ -1,4 +1,5 @@
 'use client';
+import { DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import {
   Card,
   Table,
@@ -8,8 +9,8 @@ import {
   Form,
   Input,
   InputNumber,
-  Select,
   Switch,
+  Popconfirm,
   message,
 } from 'antd';
 import React, { useEffect, useState } from 'react';
@@ -39,15 +40,7 @@ export default function PlansPage() {
     setEditingId(null);
     form.setFieldsValue({
       name: undefined,
-      slug: undefined,
-      description: undefined,
-      price: undefined,
-      currency: 'INR',
-      minMonths: 1,
-      maxMonths: undefined,
-      deliveryMode: 'BOTH',
-      autoDispatch: true,
-      dispatchFrequencyDays: undefined,
+      month: 1,
       active: true,
     });
     setModalOpen(true);
@@ -57,33 +50,28 @@ export default function PlansPage() {
     setEditingId(plan.id);
     form.setFieldsValue({
       name: plan.name,
-      slug: plan.slug,
-      description: plan.description,
-      price: plan.price != null ? plan.price : undefined,
-      currency: plan.currency || 'INR',
-      minMonths: plan.minMonths ?? 1,
-      maxMonths: plan.maxMonths,
-      deliveryMode: plan.deliveryMode || 'BOTH',
-      autoDispatch: plan.autoDispatch !== false,
-      dispatchFrequencyDays: plan.dispatchFrequencyDays,
+      month: plan.month ?? 1,
       active: plan.active !== false,
     });
     setModalOpen(true);
   };
 
+  const deletePlan = (id: number) => {
+    api
+      .delete(`/admin/plans/${id}`)
+      .then(() => {
+        message.success('Plan deleted');
+        load();
+      })
+      .catch((e: any) => message.error(e.response?.data?.error || 'Delete failed'));
+  };
+
   const handleSubmit = () => {
     form.validateFields().then((values) => {
+      const month = Number(values.month ?? 1);
       const payload = {
         name: values.name,
-        slug: values.slug,
-        description: values.description,
-        price: Number(values.price),
-        currency: values.currency || 'INR',
-        minMonths: values.minMonths ?? 1,
-        maxMonths: values.maxMonths || null,
-        deliveryMode: values.deliveryMode || 'BOTH',
-        autoDispatch: values.autoDispatch !== false,
-        dispatchFrequencyDays: values.dispatchFrequencyDays || null,
+        month,
         active: values.active !== false,
       };
       if (editingId) {
@@ -109,28 +97,13 @@ export default function PlansPage() {
   };
 
   const columns = [
-    { title: 'ID', dataIndex: 'id', width: 60 },
     { title: 'Name', dataIndex: 'name' },
-    { title: 'Slug', dataIndex: 'slug' },
     {
-      title: 'Price',
-      key: 'price',
-      render: (_: any, r: any) =>
-        r.price != null
-          ? r.currency === 'INR'
-            ? `₹${Number(r.price).toFixed(2)}`
-            : `${Number(r.price).toFixed(2)} ${r.currency || 'USD'}`
-          : '-',
+      title: 'Month',
+      dataIndex: 'month',
     },
     {
-      title: 'Months',
-      key: 'months',
-      render: (_: any, r: any) =>
-        r.maxMonths ? `${r.minMonths || 1}-${r.maxMonths}` : (r.minMonths || 1).toString(),
-    },
-    { title: 'Delivery', dataIndex: 'deliveryMode' },
-    {
-      title: 'Active',
+      title: 'Status',
       dataIndex: 'active',
       render: (a: any) => (a ? <Tag color="green">Active</Tag> : <Tag>Inactive</Tag>),
     },
@@ -138,15 +111,28 @@ export default function PlansPage() {
       title: 'Actions',
       key: 'actions',
       render: (_: any, r: any) => (
-        <Button type="link" size="small" onClick={() => openEdit(r)}>
-          Edit
-        </Button>
+        <>
+          <Button type="link" size="small" onClick={() => openEdit(r)}>
+            <EditOutlined />
+          </Button>
+
+          <Popconfirm
+            title="Delete this plan?"
+            okText="Delete"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => deletePlan(Number(r.id))}
+          >
+            <Button type="link" size="small" danger>
+              <DeleteOutlined />
+            </Button>
+          </Popconfirm>
+        </>
       ),
     },
   ];
 
   return (
-    <main style={{ padding: 24 }}>
+    <main>
       <Card
         title="Subscription Plans"
         extra={
@@ -175,52 +161,10 @@ export default function PlansPage() {
           <Form.Item name="name" label="Name" rules={[{ required: true }]}>
             <Input placeholder="e.g. Monthly Subscription" />
           </Form.Item>
-          <Form.Item
-            name="slug"
-            label="Slug"
-            rules={[{ required: true }]}
-            extra="Unique identifier (e.g. monthly)"
-          >
-            <Input placeholder="e.g. monthly" disabled={!!editingId} />
-          </Form.Item>
-          <Form.Item name="description" label="Description">
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Form.Item name="currency" label="Currency" initialValue="INR">
-            <Select>
-              <Select.Option value="INR">INR (₹)</Select.Option>
-              <Select.Option value="USD">USD ($)</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="price" label="Price" rules={[{ required: true }]}>
-            <InputNumber
-              min={0}
-              step={0.01}
-              precision={2}
-              style={{ width: '100%' }}
-              placeholder="e.g. 99 or 99.50"
-            />
-          </Form.Item>
-          <Form.Item name="minMonths" label="Min Months">
+          <Form.Item name="month" label="Month" rules={[{ required: true }]}>
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="maxMonths" label="Max Months (optional)">
-            <InputNumber min={1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="deliveryMode" label="Delivery Mode">
-            <Select>
-              <Select.Option value="ELECTRONIC">Electronic</Select.Option>
-              <Select.Option value="PHYSICAL">Physical</Select.Option>
-              <Select.Option value="BOTH">Both</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="autoDispatch" label="Auto Dispatch" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-          <Form.Item name="dispatchFrequencyDays" label="Dispatch Frequency (days)">
-            <InputNumber min={1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="active" label="Active" valuePropName="checked">
+          <Form.Item name="active" label="Status" valuePropName="checked">
             <Switch defaultChecked />
           </Form.Item>
         </Form>

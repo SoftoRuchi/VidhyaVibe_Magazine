@@ -13,10 +13,19 @@ router.use(requireAuth);
 router.get('/', async (req: AuthRequest, res) => {
   const userId = Number(req.user?.id);
   if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+  const readerId = req.query.readerId ? Number(req.query.readerId) : null;
 
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    if (readerId) {
+      const [readerRows]: any = await conn.query(
+        'SELECT id FROM readers WHERE id = ? AND userId = ? LIMIT 1',
+        [readerId, userId],
+      );
+      if (!readerRows[0]) return res.status(403).json({ error: 'reader_not_owned_by_user' });
+    }
+
     // 1. Subscribed magazines (active subscriptions with magazineId)
     const [subRows]: any = await conn.query(
       `SELECT us.id as subscriptionId, us.magazineId, us.status, us.endsAt,
@@ -28,8 +37,9 @@ router.get('/', async (req: AuthRequest, res) => {
        FROM user_subscriptions us
        JOIN magazines m ON m.id = us.magazineId
        WHERE us.userId = ? AND us.status = 'ACTIVE' AND (us.endsAt IS NULL OR us.endsAt > NOW()) AND us.magazineId IS NOT NULL
+       ${readerId ? 'AND us.readerId = ?' : ''}
        ORDER BY us.endsAt DESC`,
-      [userId],
+      readerId ? [userId, readerId] : [userId],
     );
 
     const subscribed = subRows.map((r: any) => ({
@@ -54,8 +64,9 @@ router.get('/', async (req: AuthRequest, res) => {
        JOIN magazine_editions me ON me.id = ep.editionId
        JOIN magazines m ON m.id = me.magazineId
        WHERE ep.userId = ?
+       ${readerId ? 'AND ep.readerId = ?' : ''}
        ORDER BY ep.purchasedAt DESC`,
-      [userId],
+      readerId ? [userId, readerId] : [userId],
     );
 
     const purchased = purchaseRows.map((r: any) => ({

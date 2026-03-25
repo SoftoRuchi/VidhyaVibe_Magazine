@@ -6,6 +6,7 @@ import axios from 'axios';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import { isChildAudience } from '../../../lib/viewingContext';
 
 interface Magazine {
   id: number;
@@ -34,6 +35,11 @@ export default function MagazineDetailPage() {
   const [editions, setEditions] = useState<Edition[]>([]);
   const [loading, setLoading] = useState(true);
   const [subscribed, setSubscribed] = useState<boolean | null>(null);
+  const [childMode, setChildMode] = useState(false);
+
+  useEffect(() => {
+    setChildMode(isChildAudience());
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -203,25 +209,27 @@ export default function MagazineDetailPage() {
                   />
                 </div>
               </div>
-              <Link href={`/subscribe?magazineId=${magazine.id}`}>
-                <Button
-                  type="default"
-                  size="large"
-                  style={{
-                    borderRadius: 10,
-                    paddingInline: 28,
-                    fontWeight: 600,
-                    alignSelf: 'center',
-                    marginTop: '0.25rem',
-                    width: '100%',
-                    background: 'var(--btn-view-green, #2d7a3e)',
-                    borderColor: 'var(--btn-view-green, #2d7a3e)',
-                    color: '#fff',
-                  }}
-                >
-                  Subscribe Now
-                </Button>
-              </Link>
+              {!childMode && (
+                <Link href={`/subscribe?magazineId=${magazine.id}`}>
+                  <Button
+                    type="default"
+                    size="large"
+                    style={{
+                      borderRadius: 10,
+                      paddingInline: 28,
+                      fontWeight: 600,
+                      alignSelf: 'center',
+                      marginTop: '0.25rem',
+                      width: '100%',
+                      background: 'var(--btn-view-green, #2d7a3e)',
+                      borderColor: 'var(--btn-view-green, #2d7a3e)',
+                      color: '#fff',
+                    }}
+                  >
+                    Subscribe Now
+                  </Button>
+                </Link>
+              )}
             </div>
 
             <div style={{ minWidth: 260 }}>
@@ -370,20 +378,22 @@ export default function MagazineDetailPage() {
                                   <Button block>📖 Read Free Sample</Button>
                                 </a>
                               )}
-                              <Link href={`/buy/${ed.id}`}>
-                                <Button
-                                  type="default"
-                                  block
-                                  style={{
-                                    background: 'var(--btn-read-red, #c0392b)',
-                                    borderColor: 'var(--btn-read-red, #c0392b)',
-                                    color: '#fff',
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  Buy This Edition
-                                </Button>
-                              </Link>
+                              {!childMode && (
+                                <Link href={`/buy/${ed.id}`}>
+                                  <Button
+                                    type="default"
+                                    block
+                                    style={{
+                                      background: 'var(--btn-read-red, #c0392b)',
+                                      borderColor: 'var(--btn-read-red, #c0392b)',
+                                      color: '#fff',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    Buy This Edition
+                                  </Button>
+                                </Link>
+                              )}
                             </>
                           )}
                         </div>

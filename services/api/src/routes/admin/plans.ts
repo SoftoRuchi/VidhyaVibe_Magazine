@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT id, name, slug, description, price, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt FROM subscription_plans ORDER BY createdAt DESC',
+      'SELECT id, name, minMonths as month, active FROM subscription_plans ORDER BY createdAt DESC',
     );
     res.json(rows);
   } catch (e: any) {
@@ -29,7 +29,7 @@ router.get('/:id', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT id, name, slug, description, price, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt FROM subscription_plans WHERE id = ? LIMIT 1',
+      'SELECT id, name, minMonths as month, active FROM subscription_plans WHERE id = ? LIMIT 1',
       [id],
     );
     const plan = rows[0];
@@ -44,41 +44,24 @@ router.get('/:id', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const {
-    name,
-    slug,
-    description,
-    price,
-    currency,
-    minMonths,
-    maxMonths,
-    deliveryMode,
-    autoDispatch,
-    dispatchFrequencyDays,
-    active,
-  } = req.body;
-  if (!name || !slug || price == null)
-    return res.status(400).json({ error: 'name, slug and price required' });
+  const { name, month, active } = req.body;
+  if (!name || month == null) return res.status(400).json({ error: 'name and month required' });
 
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    const monthNum = Number(month);
+    if (!Number.isFinite(monthNum) || monthNum < 1) {
+      return res.status(400).json({ error: 'invalid_month' });
+    }
+    const slug = `${String(name)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
     const [r]: any = await conn.query(
       `INSERT INTO subscription_plans (name, slug, description, price, currency, minMonths, maxMonths, deliveryMode, autoDispatch, dispatchFrequencyDays, active, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3))`,
-      [
-        name,
-        slug,
-        description || null,
-        Number(price),
-        currency || 'INR',
-        minMonths ?? 1,
-        maxMonths || null,
-        deliveryMode || 'BOTH',
-        autoDispatch !== false ? 1 : 0,
-        dispatchFrequencyDays || null,
-        active !== false ? 1 : 0,
-      ],
+      [name, slug, null, 0, 'INR', monthNum, monthNum, 'BOTH', 1, null, active !== false ? 1 : 0],
     );
     res.status(201).json({ id: r.insertId });
   } catch (e: any) {
@@ -92,19 +75,7 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const {
-    name,
-    slug,
-    description,
-    price,
-    currency,
-    minMonths,
-    maxMonths,
-    deliveryMode,
-    autoDispatch,
-    dispatchFrequencyDays,
-    active,
-  } = req.body;
+  const { name, month, active } = req.body;
 
   const pool = getPool();
   const conn = await pool.getConnection();
@@ -122,41 +93,14 @@ router.put('/:id', async (req, res) => {
       updates.push('name = ?');
       values.push(name);
     }
-    if (slug !== undefined) {
-      updates.push('slug = ?');
-      values.push(slug);
-    }
-    if (description !== undefined) {
-      updates.push('description = ?');
-      values.push(description);
-    }
-    if (price !== undefined) {
-      updates.push('price = ?');
-      values.push(Number(price));
-    }
-    if (currency !== undefined) {
-      updates.push('currency = ?');
-      values.push(currency);
-    }
-    if (minMonths !== undefined) {
+    if (month !== undefined) {
+      const monthNum = Number(month);
+      if (!Number.isFinite(monthNum) || monthNum < 1) {
+        return res.status(400).json({ error: 'invalid_month' });
+      }
       updates.push('minMonths = ?');
-      values.push(minMonths);
-    }
-    if (maxMonths !== undefined) {
       updates.push('maxMonths = ?');
-      values.push(maxMonths);
-    }
-    if (deliveryMode !== undefined) {
-      updates.push('deliveryMode = ?');
-      values.push(deliveryMode);
-    }
-    if (autoDispatch !== undefined) {
-      updates.push('autoDispatch = ?');
-      values.push(autoDispatch ? 1 : 0);
-    }
-    if (dispatchFrequencyDays !== undefined) {
-      updates.push('dispatchFrequencyDays = ?');
-      values.push(dispatchFrequencyDays);
+      values.push(monthNum, monthNum);
     }
     if (active !== undefined) {
       updates.push('active = ?');
@@ -172,6 +116,27 @@ router.put('/:id', async (req, res) => {
     console.error(e);
     if (e.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'slug_already_exists' });
     res.status(500).json({ error: 'update_plan_failed' });
+  } finally {
+    conn.release();
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    const [existing]: any = await conn.query(
+      'SELECT id FROM subscription_plans WHERE id = ? LIMIT 1',
+      [id],
+    );
+    if (!existing[0]) return res.status(404).json({ error: 'plan_not_found' });
+
+    await conn.query('DELETE FROM subscription_plans WHERE id = ? LIMIT 1', [id]);
+    res.json({ id, deleted: true });
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).json({ error: 'delete_plan_failed' });
   } finally {
     conn.release();
   }

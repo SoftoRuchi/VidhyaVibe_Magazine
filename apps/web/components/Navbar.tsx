@@ -5,17 +5,39 @@ import axios from 'axios';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import React from 'react';
+import { clearViewingContext, getSelectedReaderName, isChildAudience } from '../lib/viewingContext';
 
 const Navbar = () => {
   const [loggedIn, setLoggedIn] = React.useState(false);
+  const [welcomeName, setWelcomeName] = React.useState<string>('');
   const pathname = usePathname();
 
-  // Hide header on auth pages
-  if (pathname === '/login' || pathname === '/signup') return null;
+  const hideOnAuthPages = pathname === '/login' || pathname === '/signup';
 
   React.useEffect(() => {
-    setLoggedIn(!!(typeof window !== 'undefined' && localStorage.getItem('access_token')));
-  }, []);
+    if (hideOnAuthPages) return;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const isLoggedIn = !!token;
+    setLoggedIn(isLoggedIn);
+    if (!isLoggedIn) {
+      setWelcomeName('');
+      return;
+    }
+    if (isChildAudience()) {
+      setWelcomeName(getSelectedReaderName() || 'Child');
+      return;
+    }
+    axios
+      .get('/api/auth/me', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((res) => {
+        const name = res.data?.name || res.data?.email || 'User';
+        setWelcomeName(name);
+      })
+      .catch(() => setWelcomeName('User'));
+  }, [hideOnAuthPages]);
+
+  // Hide header on auth pages (after hooks are called)
+  if (hideOnAuthPages) return null;
 
   const handleLogout = async () => {
     try {
@@ -24,8 +46,10 @@ const Navbar = () => {
       // ignore logout API errors
     }
     localStorage.removeItem('access_token');
+    clearViewingContext();
+    sessionStorage.removeItem('show_post_login_setup');
     setLoggedIn(false);
-    window.location.href = '/';
+    window.location.href = '/login';
   };
 
   const navLinks = [
@@ -38,8 +62,8 @@ const Navbar = () => {
   return (
     <nav
       style={{
-        display: 'flex',
-        justifyContent: 'space-between',
+        display: 'grid',
+        gridTemplateColumns: 'auto 1fr auto',
         alignItems: 'center',
         padding: '0.75rem 2rem',
         background: 'linear-gradient(180deg, #f5eedd 0%, #e8dfc8 100%)',
@@ -88,6 +112,23 @@ const Navbar = () => {
         </div>
       </Link>
 
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        {loggedIn && (
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: '#3d2914',
+              fontFamily: 'Georgia, serif',
+              whiteSpace: 'nowrap',
+              transform: 'translateX(150px)',
+            }}
+          >
+            Welcome, {welcomeName}
+          </div>
+        )}
+      </div>
+
       {/* Oval nav buttons on parchment strip */}
       <div
         style={{
@@ -124,19 +165,21 @@ const Navbar = () => {
           );
         })}
         {loggedIn ? (
-          <Button
-            type="default"
-            danger
-            onClick={handleLogout}
-            style={{
-              borderRadius: 999,
-              marginLeft: 4,
-              borderColor: 'var(--parchment-border, #b8956a)',
-              color: '#c0392b',
-            }}
-          >
-            Logout
-          </Button>
+          <>
+            <Button
+              type="default"
+              danger
+              onClick={handleLogout}
+              style={{
+                borderRadius: 999,
+                marginLeft: 4,
+                borderColor: 'var(--parchment-border, #b8956a)',
+                color: '#c0392b',
+              }}
+            >
+              Logout
+            </Button>
+          </>
         ) : (
           <>
             <Link href="/login">

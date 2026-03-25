@@ -3,7 +3,7 @@
 # Create admin user via registration API
 echo "🔐 Creating admin user via API..."
 
-curl -X POST http://localhost:4000/api/auth/register \
+curl -X POST http://localhost:4001/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "admin@magazine.com",

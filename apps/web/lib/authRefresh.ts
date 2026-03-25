@@ -15,10 +15,21 @@ function processQueue(error: any, token: string | null = null) {
   pendingQueue = [];
 }
 
+function isPublicAuthUrl(url: string) {
+  // Relative: /api/auth/login — or absolute URLs containing the same path
+  return (
+    url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/refresh')
+  );
+}
+
 export function setupAxiosRefresh() {
-  // Request interceptor — attach access token
+  // Request interceptor — attach access token (never on login/register/refresh)
   axios.interceptors.request.use((config) => {
     if (typeof window !== 'undefined') {
+      const url = String(config.url || '');
+      if (isPublicAuthUrl(url)) {
+        return config;
+      }
       const token = localStorage.getItem('access_token');
       if (token) {
         config.headers = config.headers || {};

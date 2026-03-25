@@ -16,7 +16,7 @@ router.get('/list', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT id, title, slug, coverKey FROM magazines ORDER BY createdAt DESC',
+      'SELECT id, title, slug, coverKey, createdAt FROM magazines ORDER BY createdAt DESC',
     );
     res.json(rows);
   } catch (e: any) {

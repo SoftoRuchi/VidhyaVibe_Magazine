@@ -1,6 +1,6 @@
 'use client';
-import { UploadOutlined } from '@ant-design/icons';
-import { Card, Form, Input, Button, Upload, message } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
+import { Card, Form, Input, Button, Upload, message, Row, Col } from 'antd';
 import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 import api from '../../../../lib/api';
@@ -9,6 +9,14 @@ export default function NewMagazine() {
   const router = useRouter();
   const [fileList, setFileList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  React.useEffect(() => {
+    return () => {
+      fileList.forEach((file: any) => {
+        if (file?.thumbUrl) URL.revokeObjectURL(file.thumbUrl);
+      });
+    };
+  }, [fileList]);
 
   const onFinish = async (values: any) => {
     setLoading(true);
@@ -47,7 +55,15 @@ export default function NewMagazine() {
       setFileList(newFileList);
     },
     beforeUpload: (file: any) => {
-      setFileList([file]);
+      setFileList([
+        {
+          uid: file.uid,
+          name: file.name,
+          status: 'done',
+          originFileObj: file,
+          thumbUrl: URL.createObjectURL(file),
+        },
+      ]);
       return false;
     },
     fileList,
@@ -55,32 +71,71 @@ export default function NewMagazine() {
 
   return (
     <main style={{ padding: 24 }}>
-      <Card title="New Magazine">
+      <Card title="New Magazine" style={{ borderRadius: 12 }}>
         <Form layout="vertical" onFinish={onFinish}>
-          <Form.Item name="title" label="Title" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="slug" label="Slug" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="publisher" label="Publisher">
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="Description">
-            <Input.TextArea />
-          </Form.Item>
-          <Form.Item name="category" label="Category">
-            <Input />
-          </Form.Item>
-          <Form.Item label="Cover Image">
-            <Upload {...uploadProps} listType="picture" maxCount={1}>
-              <Button icon={<UploadOutlined />}>Select Cover</Button>
-            </Upload>
-          </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading}>
-              Create
-            </Button>
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item name="title" label="Title" rules={[{ required: true }]}>
+                <Input placeholder="e.g. Science Weekly" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item name="slug" label="Slug" rules={[{ required: true }]}>
+                <Input placeholder="e.g. science-weekly" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item name="publisher" label="Publisher">
+                <Input placeholder="e.g. VidhyaVibe Media" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item name="category" label="Category">
+                <Input placeholder="e.g. Education / Technology" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item name="description" label="Description">
+                <Input.TextArea rows={4} placeholder="Short summary about this magazine..." />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="Cover Image">
+                <Upload
+                  {...uploadProps}
+                  listType="picture-card"
+                  accept="image/*"
+                  maxCount={1}
+                  showUploadList={{ showPreviewIcon: false }}
+                >
+                  {fileList.length >= 1 ? null : (
+                    <div>
+                      <PlusOutlined />
+                      <div style={{ marginTop: 8 }}>Select Cover</div>
+                    </div>
+                  )}
+                </Upload>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={loading}
+                style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+              >
+                Create
+              </Button>
+            </div>
           </Form.Item>
         </Form>
       </Card>

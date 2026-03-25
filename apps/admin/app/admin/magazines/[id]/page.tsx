@@ -1,11 +1,5 @@
 'use client';
-import {
-  UploadOutlined,
-  ReadOutlined,
-  FilePdfOutlined,
-  PlusOutlined,
-  DollarOutlined,
-} from '@ant-design/icons';
+import { UploadOutlined, ReadOutlined, FilePdfOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   Card,
   Button,
@@ -16,10 +10,13 @@ import {
   Table,
   Tag,
   Collapse,
+  Row,
+  Col,
   InputNumber,
   DatePicker,
   Switch,
   Input,
+  Modal,
 } from 'antd';
 import type { Dayjs } from 'dayjs';
 import React, { useState } from 'react';
@@ -157,6 +154,7 @@ export default function MagazineDetail({ params }: any) {
   const [planPrices, setPlanPrices] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [pricingLoading, setPricingLoading] = useState(false);
+  const [editionModalOpen, setEditionModalOpen] = useState(false);
   const [form] = Form.useForm();
 
   const loadData = () => {
@@ -232,9 +230,132 @@ export default function MagazineDetail({ params }: any) {
 
   const normFile = (e: any) => (Array.isArray(e) ? e : e?.fileList);
 
+  const editionFormContent = (
+    <Form form={form} layout="vertical" onFinish={onFinishEdition} style={{ maxWidth: 900 }}>
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item name="volume" label="Volume">
+            <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 1" />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item name="issueNumber" label="Issue Number">
+            <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 3" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item name="pages" label="Number of Pages">
+            <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 32" />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item name="sku" label="SKU (optional)">
+            <Input placeholder="Auto-generated if left blank" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea
+              rows={3}
+              placeholder="What's in this edition? Highlights, themes, special features..."
+            />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item
+            name="cover"
+            label="Cover Image"
+            valuePropName="fileList"
+            getValueFromEvent={normFile}
+          >
+            <Upload
+              beforeUpload={() => false}
+              maxCount={1}
+              listType="picture-card"
+              accept="image/*"
+            >
+              <div>
+                <UploadOutlined />
+              </div>
+            </Upload>
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item
+            name="editionPdf"
+            label="Magazine PDF (required)"
+            valuePropName="fileList"
+            getValueFromEvent={normFile}
+            rules={[{ required: true, message: 'Please upload the edition PDF' }]}
+          >
+            <Upload beforeUpload={() => false} maxCount={1} accept=".pdf">
+              <Button icon={<UploadOutlined />}>Select PDF</Button>
+            </Upload>
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item
+            name="samplePdf"
+            label="Sample PDF (optional)"
+            valuePropName="fileList"
+            getValueFromEvent={normFile}
+          >
+            <Upload beforeUpload={() => false} maxCount={1} accept=".pdf">
+              <Button icon={<UploadOutlined />}>Select Sample</Button>
+            </Upload>
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item name="publishNow" label="Publish immediately" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.publishNow !== curr.publishNow}>
+            {({ getFieldValue }) =>
+              !getFieldValue('publishNow') && (
+                <Form.Item name="publishedAt" label="Publish Date (when not publishing now)">
+                  <DatePicker style={{ width: '100%' }} />
+                </Form.Item>
+              )
+            }
+          </Form.Item>
+        </Col>
+      </Row>
+    </Form>
+  );
+
   return (
-    <main style={{ padding: 24 }}>
-      <Card title={mag?.title || 'Magazine'}>
+    <main>
+      <Card
+        title={mag?.title || 'Magazine'}
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditionModalOpen(true)}>
+            Add New Edition
+          </Button>
+        }
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+          }}
+        >
+          <div />
+        </div>
         <div style={{ display: 'flex', gap: 24, marginBottom: 24 }}>
           <div>
             {mag?.coverKey && (
@@ -265,89 +386,119 @@ export default function MagazineDetail({ params }: any) {
           </div>
         </div>
         <Divider />
-        <h3>Editions</h3>
-        {editions.length > 0 ? (
-          <Table
-            dataSource={editions}
-            rowKey="id"
-            size="small"
-            pagination={false}
-            columns={[
-              { title: 'ID', dataIndex: 'id', width: 60 },
-              {
-                title: 'Cover',
-                key: 'cover',
-                width: 60,
-                render: (_: any, ed: any) =>
-                  ed.coverUrl ? (
-                    <img
-                      src={ed.coverUrl}
-                      alt=""
-                      style={{ width: 40, height: 52, objectFit: 'cover', borderRadius: 4 }}
-                    />
-                  ) : (
-                    <span style={{ color: '#999' }}>-</span>
-                  ),
-              },
-              { title: 'Vol', dataIndex: 'volume', width: 60 },
-              { title: 'Issue', dataIndex: 'issueNumber', width: 60 },
-              { title: 'SKU', dataIndex: 'sku', ellipsis: true },
-              { title: 'Pages', dataIndex: 'pages', width: 70 },
-              {
-                title: 'Description',
-                dataIndex: 'description',
-                ellipsis: true,
-                render: (d: string) => (d ? (d.length > 40 ? d.slice(0, 40) + '…' : d) : '-'),
-              },
-              {
-                title: 'Published',
-                dataIndex: 'publishedAt',
-                width: 100,
-                render: (d: any) => (d ? <Tag color="green">Yes</Tag> : <Tag>No</Tag>),
-              },
-              {
-                title: 'Files',
-                key: 'files',
-                render: (_: any, ed: any) => (
-                  <span style={{ display: 'flex', gap: 8 }}>
-                    {ed.fileUrl && (
-                      <a href={ed.fileUrl} target="_blank" rel="noopener noreferrer">
-                        <FilePdfOutlined /> PDF
-                      </a>
-                    )}
-                    {ed.sampleUrl && (
-                      <a href={ed.sampleUrl} target="_blank" rel="noopener noreferrer">
-                        Sample
-                      </a>
-                    )}
-                  </span>
+        <Collapse
+          items={[
+            {
+              key: 'editions',
+              label: (
+                <span>
+                  <strong>Editions</strong>{' '}
+                  <span style={{ color: '#666' }}>({editions.length})</span>
+                </span>
+              ),
+              children:
+                editions.length > 0 ? (
+                  <Table
+                    dataSource={editions}
+                    rowKey="id"
+                    size="small"
+                    pagination={false}
+                    columns={[
+                      {
+                        title: 'S/N',
+                        key: 'serial',
+                        width: 60,
+                        render: (_: any, __: any, i: number) => i + 1,
+                      },
+                      {
+                        title: 'Cover',
+                        key: 'cover',
+                        width: 60,
+                        render: (_: any, ed: any) =>
+                          ed.coverUrl ? (
+                            <img
+                              src={ed.coverUrl}
+                              alt=""
+                              style={{ width: 40, height: 52, objectFit: 'cover', borderRadius: 4 }}
+                            />
+                          ) : (
+                            <span style={{ color: '#999' }}>-</span>
+                          ),
+                      },
+                      { title: 'Vol', dataIndex: 'volume', width: 60 },
+                      { title: 'Issue', dataIndex: 'issueNumber', width: 60 },
+                      { title: 'SKU', dataIndex: 'sku', ellipsis: true },
+                      { title: 'Pages', dataIndex: 'pages', width: 70 },
+                      {
+                        title: 'Description',
+                        dataIndex: 'description',
+                        ellipsis: true,
+                        render: (d: string) =>
+                          d ? (d.length > 40 ? d.slice(0, 40) + '…' : d) : '-',
+                      },
+                      {
+                        title: 'Published',
+                        dataIndex: 'publishedAt',
+                        width: 100,
+                        render: (d: any) => (d ? <Tag color="green">Yes</Tag> : <Tag>No</Tag>),
+                      },
+                      {
+                        title: 'Files',
+                        key: 'files',
+                        render: (_: any, ed: any) => (
+                          <span style={{ display: 'flex', gap: 8 }}>
+                            {ed.fileUrl && (
+                              <a href={ed.fileUrl} target="_blank" rel="noopener noreferrer">
+                                <FilePdfOutlined /> PDF
+                              </a>
+                            )}
+                            {ed.sampleUrl && (
+                              <a href={ed.sampleUrl} target="_blank" rel="noopener noreferrer">
+                                Sample
+                              </a>
+                            )}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: 'Actions',
+                        key: 'actions',
+                        width: 100,
+                        render: (_: any, ed: any) => {
+                          const handleRead = () => {
+                            const token =
+                              typeof window !== 'undefined'
+                                ? localStorage.getItem('access_token')
+                                : null;
+                            const url = token
+                              ? `${READER_BASE_URL}/reader/${ed.id}?token=${encodeURIComponent(token)}`
+                              : `${READER_BASE_URL}/reader/${ed.id}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          };
+                          return (
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<ReadOutlined />}
+                              onClick={handleRead}
+                            >
+                              Read
+                            </Button>
+                          );
+                        },
+                      },
+                    ]}
+                  />
+                ) : (
+                  <p style={{ color: '#888', margin: 0 }}>
+                    No editions yet. Add one using the form below.
+                  </p>
                 ),
-              },
-              {
-                title: 'Actions',
-                key: 'actions',
-                width: 100,
-                render: (_: any, ed: any) => {
-                  const handleRead = () => {
-                    const token =
-                      typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-                    const url = token
-                      ? `${READER_BASE_URL}/reader/${ed.id}?token=${encodeURIComponent(token)}`
-                      : `${READER_BASE_URL}/reader/${ed.id}`;
-                    window.open(url, '_blank', 'noopener,noreferrer');
-                  };
-                  return (
-                    <Button type="link" size="small" icon={<ReadOutlined />} onClick={handleRead}>
-                      Read
-                    </Button>
-                  );
-                },
-              },
-            ]}
-          />
-        ) : (
-          <p style={{ color: '#888' }}>No editions yet. Add one using the form below.</p>
-        )}
+            },
+          ]}
+          defaultActiveKey={['editions']}
+          style={{ marginTop: 8 }}
+        />
         <Divider />
         <h3>Pricing</h3>
         <p style={{ color: '#666', marginBottom: 16 }}>
@@ -362,109 +513,29 @@ export default function MagazineDetail({ params }: any) {
         ) : (
           <p style={{ color: '#888' }}>No plans available. Create plans in Admin → Plans first.</p>
         )}
-        <Divider />
-        <Collapse
-          items={[
-            {
-              key: '1',
-              label: (
-                <span>
-                  <PlusOutlined style={{ marginRight: 8 }} />
-                  <strong>Add New Edition</strong>
-                </span>
-              ),
-              children: (
-                <Form
-                  form={form}
-                  layout="vertical"
-                  onFinish={onFinishEdition}
-                  style={{ maxWidth: 600 }}
-                >
-                  <Form.Item name="volume" label="Volume">
-                    <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 1" />
-                  </Form.Item>
-                  <Form.Item name="issueNumber" label="Issue Number">
-                    <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 3" />
-                  </Form.Item>
-                  <Form.Item name="description" label="Description">
-                    <Input.TextArea
-                      rows={3}
-                      placeholder="What's in this edition? Highlights, themes, special features..."
-                    />
-                  </Form.Item>
-                  <Form.Item name="pages" label="Number of Pages">
-                    <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 32" />
-                  </Form.Item>
-                  <Form.Item name="sku" label="SKU (optional)">
-                    <Input placeholder="Auto-generated if left blank" />
-                  </Form.Item>
-                  <Form.Item
-                    name="cover"
-                    label="Cover Image"
-                    valuePropName="fileList"
-                    getValueFromEvent={normFile}
-                  >
-                    <Upload
-                      beforeUpload={() => false}
-                      maxCount={1}
-                      listType="picture-card"
-                      accept="image/*"
-                    >
-                      <div>
-                        <UploadOutlined />
-                      </div>
-                    </Upload>
-                  </Form.Item>
-                  <Form.Item
-                    name="editionPdf"
-                    label="Magazine PDF (required)"
-                    valuePropName="fileList"
-                    getValueFromEvent={normFile}
-                    rules={[{ required: true, message: 'Please upload the edition PDF' }]}
-                  >
-                    <Upload beforeUpload={() => false} maxCount={1} accept=".pdf">
-                      <Button icon={<UploadOutlined />}>Select PDF</Button>
-                    </Upload>
-                  </Form.Item>
-                  <Form.Item
-                    name="samplePdf"
-                    label="Sample PDF (optional)"
-                    valuePropName="fileList"
-                    getValueFromEvent={normFile}
-                  >
-                    <Upload beforeUpload={() => false} maxCount={1} accept=".pdf">
-                      <Button icon={<UploadOutlined />}>Select Sample</Button>
-                    </Upload>
-                  </Form.Item>
-                  <Form.Item name="publishNow" label="Publish immediately" valuePropName="checked">
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item
-                    noStyle
-                    shouldUpdate={(prev, curr) => prev.publishNow !== curr.publishNow}
-                  >
-                    {({ getFieldValue }) =>
-                      !getFieldValue('publishNow') && (
-                        <Form.Item
-                          name="publishedAt"
-                          label="Publish Date (when not publishing now)"
-                        >
-                          <DatePicker style={{ width: '100%' }} />
-                        </Form.Item>
-                      )
-                    }
-                  </Form.Item>
-                  <Form.Item>
-                    <Button type="primary" htmlType="submit" loading={loading}>
-                      Create Edition
-                    </Button>
-                  </Form.Item>
-                </Form>
-              ),
-            },
+        <Modal
+          title="Add New Edition"
+          open={editionModalOpen}
+          onCancel={() => setEditionModalOpen(false)}
+          width={980}
+          destroyOnClose={false}
+          footer={[
+            <Button key="cancel" onClick={() => setEditionModalOpen(false)}>
+              Cancel
+            </Button>,
+            <Button
+              key="create"
+              type="primary"
+              loading={loading}
+              onClick={() => form.submit()}
+              style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+            >
+              Create Edition
+            </Button>,
           ]}
-          defaultActiveKey={['1']}
-        />
+        >
+          {editionFormContent}
+        </Modal>
       </Card>
     </main>
   );
