@@ -14,24 +14,13 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Forward cookies to our API to validate session & role
-  const cookie = req.headers.get('cookie') || '';
-  try {
-    const res = await fetch(`${req.nextUrl.origin}/api/auth/me`, {
-      headers: {
-        cookie,
-      },
-      // ensure same-origin credentials are used
-      credentials: 'include',
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.isAdmin) {
-        return NextResponse.next();
-      }
-    }
-  } catch (e) {
-    // fallthrough to redirect
+  // In production, attempting to validate the session via fetch() from middleware can be
+  // unreliable (Edge runtime restrictions can prevent forwarding cookies).
+  // Instead, gate access on the presence of the refresh cookie and let the client-side
+  // layout verify admin role via /api/auth/me.
+  const hasRefreshCookie = !!req.cookies.get('refresh_token')?.value;
+  if (hasRefreshCookie) {
+    return NextResponse.next();
   }
 
   const loginPath = process.env.ADMIN_LOGIN_PATH || '/admin/login';
