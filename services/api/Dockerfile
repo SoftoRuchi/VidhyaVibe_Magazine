@@ -11,6 +11,8 @@ COPY services ./services
 COPY packages ./packages
 
 RUN pnpm install --frozen-lockfile
+# Ensure Prisma Client is generated (packages/db build runs `prisma generate`)
+RUN pnpm --filter @magazine/db build
 RUN pnpm --filter services-api build
 
 WORKDIR /repo/services/api

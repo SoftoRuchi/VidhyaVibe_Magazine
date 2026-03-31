@@ -2,8 +2,7 @@
 const nextConfig = {
   transpilePackages: ['@magazine/ui'],
   async rewrites() {
-    // In Docker, reach the API via the compose service name.
-    return [{ source: '/api/:path*', destination: 'http://api:2034/api/:path*' }];
+    return [{ source: '/api/:path*', destination: 'http://127.0.0.1:4001/api/:path*' }];
   },
 };
 
