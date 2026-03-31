@@ -20,7 +20,9 @@ export default function LoginPage() {
       }
       localStorage.setItem('access_token', access);
       axios.defaults.headers.common['Authorization'] = `Bearer ${access}`;
-      router.push(returnUrl);
+      // Use full-page navigation so middleware sees the fresh httpOnly cookie
+      // immediately in production deployments.
+      window.location.href = returnUrl;
     } catch (e: any) {
       message.error(e?.response?.data?.error || 'Login failed');
     }
