@@ -5,11 +5,13 @@ const nextConfig = {
     return config;
   },
   async rewrites() {
-    return [
-      // Use 127.0.0.1 (not localhost) so Node resolves IPv4; on Windows, localhost → ::1
-      // while the API often listens on 0.0.0.0 only → ECONNREFUSED to ::1:4001.
-      { source: '/api/:path*', destination: 'http://127.0.0.1:4001/api/:path*' },
-    ];
+    // In production we run API as a docker service (`api:2034`).
+    // For local dev, you can set NEXT_PUBLIC_API_BASE_URL or run API on 4001.
+    const apiBase =
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      (process.env.NODE_ENV === 'production' ? 'http://api:2034' : 'http://127.0.0.1:4001');
+
+    return [{ source: '/api/:path*', destination: `${apiBase}/api/:path*` }];
   },
 };
 
