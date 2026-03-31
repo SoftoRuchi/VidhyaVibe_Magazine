@@ -253,7 +253,7 @@ export default function QuizPage() {
 
           {submitted && (
             <div style={{ marginTop: 14 }}>
-              <Typography.Text style={{ color: '#5c4a3a' }}>{q.explanation || ''}</Typography.Text>
+              <Typography.Text style={{ color: '#5c4a3a' }}>{q?.explanation ?? ''}</Typography.Text>
             </div>
           )}
 
