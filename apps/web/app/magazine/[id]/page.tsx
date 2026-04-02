@@ -108,6 +108,7 @@ export default function MagazineDetailPage() {
         </Link>
 
         <div
+          className="vv-mag-detail-card"
           style={{
             padding: '1.8rem 3.0rem',
             borderRadius: 22,
@@ -119,6 +120,7 @@ export default function MagazineDetailPage() {
           }}
         >
           <div
+            className="vv-mag-detail-grid"
             style={{
               display: 'grid',
               gridTemplateColumns: 'minmax(260px, 320px) minmax(0, 1fr)',
@@ -128,6 +130,7 @@ export default function MagazineDetailPage() {
             }}
           >
             <div
+              className="vv-mag-detail-coverWrap"
               style={{
                 width: '100%',
                 maxWidth: 340,
@@ -139,6 +142,7 @@ export default function MagazineDetailPage() {
             >
               {/* 3D book cover (like Browse cards, but larger) */}
               <div
+                className="vv-mag-detail-cover3d"
                 style={{
                   width: '100%',
                   borderRadius: '0 18px 18px 0',
@@ -232,7 +236,7 @@ export default function MagazineDetailPage() {
               )}
             </div>
 
-            <div style={{ minWidth: 260 }}>
+            <div className="vv-mag-detail-info" style={{ minWidth: 260 }}>
               <h2
                 style={{
                   margin: 0,
@@ -267,7 +271,7 @@ export default function MagazineDetailPage() {
                 </div>
               )}
             </div>
-            <div style={{ gridColumn: '2 / 3' }}>
+            <div className="vv-mag-detail-editions" style={{ gridColumn: '2 / 3' }}>
               <h2
                 style={{
                   fontSize: '1.2rem',

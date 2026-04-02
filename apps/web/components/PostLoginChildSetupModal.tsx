@@ -183,7 +183,8 @@ export default function PostLoginChildSetupModal() {
               </Button>,
             ]
       }
-      width={560}
+      width="92vw"
+      style={{ maxWidth: 560 }}
       destroyOnClose={false}
     >
       <Spin spinning={loading}>
@@ -192,7 +193,7 @@ export default function PostLoginChildSetupModal() {
             <p style={{ color: '#666', marginBottom: 20 }}>
               Select who is using the app right now.
             </p>
-            <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="vv-login-chooser">
               <button
                 type="button"
                 onClick={chooseParent}

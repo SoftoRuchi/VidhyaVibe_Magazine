@@ -82,28 +82,12 @@ export default function LoginPage() {
             border: '1px solid rgba(61,41,20,0.18)',
             boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
           }}
+          className="vv-auth-card"
           bodyStyle={{ padding: '1.6rem 1.75rem' }}
         >
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 0.95fr) minmax(0, 1.05fr)',
-              gap: '1.5rem',
-              alignItems: 'center',
-            }}
-          >
+          <div className="vv-auth-grid">
             {/* Left: illustration */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '1rem',
-                borderRadius: 18,
-                background: 'rgba(255,255,255,0.65)',
-                border: '1px solid rgba(61,41,20,0.14)',
-              }}
-            >
+            <div className="vv-auth-illustration">
               <Image
                 src={loginImg}
                 alt="Login"
@@ -126,6 +110,7 @@ export default function LoginPage() {
                     fontFamily: 'Georgia, serif',
                     letterSpacing: '0.2px',
                   }}
+                  className="vv-auth-title"
                 >
                   Welcome Back
                 </h1>
@@ -138,6 +123,7 @@ export default function LoginPage() {
                     marginTop: 8,
                     opacity: 0.95,
                   }}
+                  className="vv-auth-underline"
                 />
                 <p style={{ margin: '0.6rem 0 0', color: '#5c4a3a', fontSize: 13 }}>
                   Login to continue reading your favourite magazines.

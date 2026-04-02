@@ -175,6 +175,7 @@ export default function ProfilePage() {
       <div className="container" style={{ maxWidth: 980 }}>
         {/* Themed heading */}
         <div
+          className="vv-profile-header"
           style={{
             display: 'grid',
             gridTemplateColumns: '84px 1fr 84px',
@@ -231,6 +232,7 @@ export default function ProfilePage() {
         </div>
 
         <div
+          className="vv-profile-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: 'minmax(260px, 320px) minmax(0, 1fr)',
@@ -372,7 +374,7 @@ export default function ProfilePage() {
               >
                 {editingReaderId === r.id ? (
                   <Form form={readerForm} layout="vertical">
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                    <div className="vv-profile-formGrid">
                       <Form.Item name="name" label="Reader Name" rules={[{ required: true }]}>
                         <Input />
                       </Form.Item>
@@ -434,6 +436,7 @@ export default function ProfilePage() {
                     </div>
 
                     <div
+                      className="vv-profile-readerMeta"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
@@ -476,7 +479,7 @@ export default function ProfilePage() {
               <>
                 <h3 style={{ marginBottom: 16 }}>Add New Reader</h3>
                 <Form form={newReaderForm} layout="vertical">
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+                  <div className="vv-profile-formGrid">
                     <Form.Item name="name" label="Reader Name" rules={[{ required: true }]}>
                       <Input />
                     </Form.Item>

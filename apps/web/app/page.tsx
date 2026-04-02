@@ -53,6 +53,7 @@ export default function Page() {
       <section>
         <div className="container">
           <div
+            className="vv-home-heroCard"
             style={{
               padding: '1.8rem 2rem',
               borderRadius: 22,
@@ -62,6 +63,7 @@ export default function Page() {
             }}
           >
             <div
+              className="vv-home-heroGrid"
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 0.9fr)',
@@ -90,6 +92,7 @@ export default function Page() {
                 </div>
 
                 <div
+                  className="vv-home-titleGrid"
                   style={{
                     display: 'grid',
                     gridTemplateColumns: '84px 1fr 84px',
@@ -111,11 +114,13 @@ export default function Page() {
                       alt="Welcome"
                       width={84}
                       height={84}
+                      className="vv-home-titleImg"
                       style={{ width: 84, height: 84, objectFit: 'contain' }}
                       priority
                     />
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <h1
+                        className="vv-home-titleText"
                         style={{
                           margin: 0,
                           fontSize: '2.05rem',
@@ -129,6 +134,7 @@ export default function Page() {
                         Magazine Kids
                       </h1>
                       <div
+                        className="vv-home-titleUnderline"
                         style={{
                           width: '55%',
                           maxWidth: 240,
@@ -211,6 +217,7 @@ export default function Page() {
               </div>
 
               <div
+                className="vv-home-sideCard"
                 style={{
                   borderRadius: 18,
                   padding: 14,
@@ -219,6 +226,7 @@ export default function Page() {
                 }}
               >
                 <div
+                  className="vv-home-sideHero"
                   style={{
                     borderRadius: 14,
                     overflow: 'hidden',

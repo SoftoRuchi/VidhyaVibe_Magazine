@@ -24,6 +24,11 @@ body {
   color: var(--text-color);
 }
 
+html,
+body {
+  overflow-x: hidden;
+}
+
 /* Magazine listing page – white background */
 .parchment-page {
   /* keep content readable but let global background show through */
@@ -45,6 +50,283 @@ h1, h2, h3, h4, h5, h6 {
   max-width: 1200px; /* or 1300px */
   margin: 0 auto;
   padding: 0 16px;
+}
+
+/* ---------- Mobile responsiveness ---------- */
+.vv-auth-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.vv-auth-illustration {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(61, 41, 20, 0.14);
+}
+
+@media (max-width: 860px) {
+  .vv-auth-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .vv-auth-card :where(.ant-card-body) {
+    padding: 1rem 1rem !important;
+  }
+
+  .vv-auth-illustration {
+    padding: 0.75rem;
+  }
+
+  .vv-auth-title {
+    font-size: 1.6rem !important;
+  }
+
+  .vv-auth-underline {
+    width: 120px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .vv-navbar-welcome {
+    transform: none !important;
+    font-size: 14px !important;
+    max-width: 46vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.vv-navbar-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 680px) {
+  .vv-navbar {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 0.6rem 0.9rem !important;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .vv-navbar-logo {
+    padding: 0.35rem 0.7rem 0.35rem 0.85rem !important;
+  }
+
+  .vv-navbar-logoText {
+    font-size: 1.1rem !important;
+  }
+
+  .vv-navbar-welcome {
+    display: none;
+  }
+
+  .vv-navbar-actions {
+    justify-content: center;
+    width: 100%;
+  }
+
+  /* Hide desktop tabs/buttons on mobile; use hamburger + drawer */
+  .vv-navbar-tab {
+    display: none !important;
+  }
+
+  .vv-navbar-hamburger {
+    display: inline-flex !important;
+  }
+}
+
+/* Profile page mobile fixes */
+.vv-profile-formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+@media (max-width: 900px) {
+  .vv-profile-grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .vv-profile-header {
+    grid-template-columns: 1fr !important;
+    justify-items: center;
+    row-gap: 8px;
+  }
+
+  .vv-profile-formGrid {
+    grid-template-columns: 1fr !important;
+    gap: 0 !important;
+  }
+
+  .vv-profile-readerMeta {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px 12px !important;
+  }
+}
+
+/* Home page mobile fixes */
+@media (max-width: 900px) {
+  .vv-home-heroGrid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .vv-home-heroCard :where(.ant-card-body),
+  .vv-home-heroCard {
+    padding: 1.1rem 1rem !important;
+  }
+
+  .vv-home-titleGrid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .vv-home-titleImg {
+    width: 64px !important;
+    height: 64px !important;
+  }
+
+  .vv-home-titleText {
+    font-size: 1.6rem !important;
+  }
+
+  .vv-home-titleUnderline {
+    width: 140px !important;
+    max-width: 140px !important;
+  }
+
+  .vv-home-sideHero {
+    height: 170px !important;
+    font-size: 18px !important;
+  }
+}
+
+/* Magazine detail page mobile fixes */
+@media (max-width: 900px) {
+  .vv-mag-detail-grid {
+    grid-template-columns: 1fr !important;
+    column-gap: 0 !important;
+  }
+  .vv-mag-detail-editions {
+    grid-column: auto !important;
+  }
+  .vv-mag-detail-coverWrap {
+    max-width: 520px !important;
+    grid-row: auto !important;
+    margin: 0 auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .vv-mag-detail-card {
+    padding: 1.15rem 1rem !important;
+  }
+
+  .vv-mag-detail-info {
+    min-width: 0 !important;
+  }
+
+  .vv-mag-detail-cover3d {
+    transform: none !important;
+  }
+
+  .vv-mag-detail-cover3d img {
+    height: 320px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .vv-navbar-actions {
+    gap: 6px !important;
+    padding: 0.3rem 0.5rem !important;
+  }
+}
+
+.vv-navbar-hamburger {
+  display: none;
+}
+
+.vv-mobile-panel {
+  display: none;
+}
+
+.vv-mobile-panel-inner {
+  padding: 10px 12px 14px;
+  background: linear-gradient(180deg, rgba(245, 238, 221, 0.95) 0%, rgba(232, 223, 200, 0.95) 100%);
+  border-bottom: 2px solid var(--parchment-border, #b8956a);
+  box-shadow: 0 6px 14px rgba(61, 41, 20, 0.08);
+}
+
+.vv-mobile-welcome {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(61, 41, 20, 0.18);
+  color: #3d2914;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vv-mobile-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vv-mobile-menu-item {
+  display: block;
+  padding: 12px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(61, 41, 20, 0.18);
+  color: #3d2914;
+  font-weight: 700;
+}
+
+.vv-mobile-auth {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 680px) {
+  .vv-mobile-panel[data-open='1'] {
+    display: block;
+  }
+}
+
+.vv-login-chooser {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 520px) {
+  .vv-login-chooser {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+  }
 }
 
 .btn {
