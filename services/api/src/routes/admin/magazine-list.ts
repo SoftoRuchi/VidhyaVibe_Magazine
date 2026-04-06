@@ -71,11 +71,8 @@ router.get('/:id/editions', async (req, res) => {
       'SELECT id, magazineId, volume, issueNumber, sku, description, publishedAt, pages, coverKey, fileKey, sampleKey, createdAt FROM magazine_editions WHERE magazineId = ? ORDER BY createdAt DESC',
       [id],
     );
-    const baseUrl = process.env.API_BASE_URL || '';
-    const assetPath = (key: string) =>
-      baseUrl
-        ? `${baseUrl}/api/assets/serve?key=${encodeURIComponent(key)}`
-        : `/api/assets/serve?key=${encodeURIComponent(key)}`;
+    // Relative URLs only — admin/web clients use their own origin + /api proxy (avoid localhost from API_BASE_URL).
+    const assetPath = (key: string) => `/api/assets/serve?key=${encodeURIComponent(key)}`;
     const editions = rows.map((ed: any) => ({
       ...ed,
       fileUrl: ed.fileKey ? assetPath(ed.fileKey) : null,

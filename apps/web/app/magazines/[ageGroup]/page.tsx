@@ -13,6 +13,7 @@ interface Magazine {
   coverKey?: string;
   category: string;
   createdAt: string;
+  sampleEditionId?: number | null;
 }
 
 export default function AgeGroupPage({ params }: { params: { ageGroup: string } }) {
@@ -111,6 +112,7 @@ export default function AgeGroupPage({ params }: { params: { ageGroup: string } 
                 description={mag.description}
                 date={new Date(mag.createdAt).getFullYear().toString()}
                 image={mag.coverKey ? `/api/assets/serve?key=${mag.coverKey}` : ''}
+                sampleEditionId={mag.sampleEditionId ?? undefined}
                 variant="vintage"
                 fullCover={index % 2 === 1}
               />

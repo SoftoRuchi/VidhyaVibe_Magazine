@@ -10,16 +10,23 @@ router.get('/', async (req, res) => {
   try {
     const pool = getPool();
     conn = await pool.getConnection();
-    let query =
-      'SELECT id, title, slug, publisher, description, category, active, coverKey, createdAt FROM magazines WHERE active = 1';
+    let query = `SELECT m.id, m.title, m.slug, m.publisher, m.description, m.category, m.active, m.coverKey, m.createdAt,
+        (SELECT me.id FROM magazine_editions me
+         WHERE me.magazineId = m.id
+           AND me.publishedAt IS NOT NULL
+           AND me.publishedAt <= NOW()
+           AND me.sampleKey IS NOT NULL
+         ORDER BY me.publishedAt DESC, me.id DESC
+         LIMIT 1) AS sampleEditionId
+       FROM magazines m WHERE m.active = 1`;
     const params: any[] = [];
 
     if (category) {
-      query += ' AND category = ?';
+      query += ' AND m.category = ?';
       params.push(category);
     }
 
-    query += ' ORDER BY createdAt DESC';
+    query += ' ORDER BY m.createdAt DESC';
 
     const [rows]: any = await conn.query(query, params);
     res.json(rows);

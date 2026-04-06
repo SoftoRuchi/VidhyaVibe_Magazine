@@ -34,6 +34,32 @@ router.get('/:editionId/info', async (req: Request, res: Response) => {
   }
 });
 
+// Reader metadata for sample (PUBLIC) — same shape as /pages but points at sample PDF for flipbook
+router.get('/:editionId/sample/pages', async (req: Request, res: Response) => {
+  const editionId = Number(req.params.editionId);
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    const [rows]: any = await conn.query(
+      'SELECT sampleKey FROM magazine_editions WHERE id = ? AND publishedAt IS NOT NULL LIMIT 1',
+      [editionId],
+    );
+    const ed = rows[0];
+    if (!ed) return res.status(404).json({ error: 'edition_not_found' });
+    if (!ed.sampleKey) return res.status(404).json({ error: 'no_sample_available' });
+    res.json({
+      pages: 1,
+      list: [],
+      pdfUrl: `/api/editions/${editionId}/sample`,
+    });
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).json({ error: 'list_failed' });
+  } finally {
+    conn.release();
+  }
+});
+
 // Stream sample PDF for an edition (PUBLIC - no auth required)
 router.get('/:editionId/sample', async (req: Request, res: Response) => {
   const editionId = Number(req.params.editionId);

@@ -374,13 +374,9 @@ export default function MagazineDetailPage() {
                           ) : (
                             <>
                               {(ed as any).hasSample && (
-                                <a
-                                  href={`/api/editions/${ed.id}/sample`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
+                                <Link href={`/reader/${ed.id}?sample=1`}>
                                   <Button block>📖 Read Free Sample</Button>
-                                </a>
+                                </Link>
                               )}
                               {!childMode && (
                                 <Link href={`/buy/${ed.id}`}>

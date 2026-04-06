@@ -14,6 +14,7 @@ interface Magazine {
   coverKey?: string;
   category?: string;
   createdAt: string;
+  sampleEditionId?: number | null;
 }
 
 const AGE_PILLS: { value: string; label: string }[] = [
@@ -161,6 +162,7 @@ export default function BrowseMagazinesPage() {
                   description={m.description || ''}
                   date={new Date(m.createdAt).getFullYear().toString()}
                   image={m.coverKey ? `/api/assets/serve?key=${m.coverKey}` : ''}
+                  sampleEditionId={m.sampleEditionId ?? undefined}
                   variant="vintage"
                   fullCover={index % 2 === 1}
                 />

@@ -1,5 +1,11 @@
 'use client';
-import { UploadOutlined, ReadOutlined, FilePdfOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  UploadOutlined,
+  ReadOutlined,
+  FilePdfOutlined,
+  PlusOutlined,
+  MoreOutlined,
+} from '@ant-design/icons';
 import {
   Card,
   Button,
@@ -17,12 +23,27 @@ import {
   Switch,
   Input,
   Modal,
+  Dropdown,
 } from 'antd';
+import type { MenuProps } from 'antd';
 import type { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import React, { useState } from 'react';
 import api from '../../../../lib/api';
 
 const READER_BASE_URL = process.env.NEXT_PUBLIC_READER_URL || 'http://localhost:3000';
+
+function fileNameFromStorageKey(key: string | null | undefined): string {
+  if (!key || typeof key !== 'string') return '';
+  const i = key.lastIndexOf('/');
+  return i >= 0 ? key.slice(i + 1) : key;
+}
+
+/** Asset link on the same host as the admin app (Next rewrites /api → API). Avoids server-injected localhost URLs. */
+function adminAssetServeUrl(key: string | null | undefined): string | undefined {
+  if (key == null || key === '') return undefined;
+  return `/api/assets/serve?key=${encodeURIComponent(key)}`;
+}
 
 function MagazinePricingTable({
   planPrices,
@@ -155,6 +176,7 @@ export default function MagazineDetail({ params }: any) {
   const [loading, setLoading] = useState(false);
   const [pricingLoading, setPricingLoading] = useState(false);
   const [editionModalOpen, setEditionModalOpen] = useState(false);
+  const [editingEditionId, setEditingEditionId] = useState<number | null>(null);
   const [form] = Form.useForm();
 
   const loadData = () => {
@@ -188,37 +210,135 @@ export default function MagazineDetail({ params }: any) {
     }
   };
 
+  const openReadMagazine = (ed: any) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const url = token
+      ? `${READER_BASE_URL}/reader/${ed.id}?token=${encodeURIComponent(token)}`
+      : `${READER_BASE_URL}/reader/${ed.id}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const openReadSample = (ed: any) => {
+    if (!ed.sampleKey) {
+      message.warning('No sample PDF for this edition. Add one in Edit edition.');
+      return;
+    }
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const qs = token ? `?sample=1&token=${encodeURIComponent(token)}` : '?sample=1';
+    window.open(`${READER_BASE_URL}/reader/${ed.id}${qs}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const openEditEdition = (ed: any) => {
+    setEditingEditionId(ed.id);
+    form.resetFields();
+    const editionPdfList =
+      ed.fileKey != null && ed.fileKey !== ''
+        ? [
+            {
+              uid: `edition-pdf-${ed.id}`,
+              name: fileNameFromStorageKey(ed.fileKey),
+              status: 'done' as const,
+              url: adminAssetServeUrl(ed.fileKey),
+            },
+          ]
+        : [];
+    const samplePdfList =
+      ed.sampleKey != null && ed.sampleKey !== ''
+        ? [
+            {
+              uid: `sample-pdf-${ed.id}`,
+              name: fileNameFromStorageKey(ed.sampleKey),
+              status: 'done' as const,
+              url: adminAssetServeUrl(ed.sampleKey),
+            },
+          ]
+        : [];
+    const coverList =
+      ed.coverKey != null && ed.coverKey !== ''
+        ? [
+            {
+              uid: `cover-${ed.id}`,
+              name: fileNameFromStorageKey(ed.coverKey),
+              status: 'done' as const,
+              url: adminAssetServeUrl(ed.coverKey),
+            },
+          ]
+        : [];
+    form.setFieldsValue({
+      volume: ed.volume ?? undefined,
+      issueNumber: ed.issueNumber ?? undefined,
+      pages: ed.pages ?? undefined,
+      sku: ed.sku ?? undefined,
+      description: ed.description ?? undefined,
+      publishNow: !!ed.publishedAt,
+      publishedAt: ed.publishedAt ? dayjs(ed.publishedAt) : undefined,
+      editionPdf: editionPdfList,
+      samplePdf: samplePdfList,
+      cover: coverList,
+    });
+    setEditionModalOpen(true);
+  };
+
+  const openAddEditionModal = () => {
+    setEditingEditionId(null);
+    form.resetFields();
+    setEditionModalOpen(true);
+  };
+
   const onFinishEdition = async (values: any) => {
-    if (!values.editionPdf?.[0]?.originFileObj) {
+    if (!editingEditionId && !values.editionPdf?.[0]?.originFileObj) {
       message.error('Please upload the edition PDF');
       return;
     }
     setLoading(true);
     try {
       const fd = new FormData();
-      fd.append('editionPdf', values.editionPdf[0].originFileObj);
-      if (values.samplePdf?.[0]?.originFileObj)
+      if (values.editionPdf?.[0]?.originFileObj) {
+        fd.append('editionPdf', values.editionPdf[0].originFileObj);
+      }
+      if (values.samplePdf?.[0]?.originFileObj) {
         fd.append('samplePdf', values.samplePdf[0].originFileObj);
-      if (values.cover?.[0]?.originFileObj) fd.append('cover', values.cover[0].originFileObj);
-      if (values.volume != null) fd.append('volume', String(values.volume));
-      if (values.issueNumber != null) fd.append('issueNumber', String(values.issueNumber));
-      if (values.description) fd.append('description', values.description);
-      if (values.pages != null) fd.append('pages', String(values.pages));
-      if (values.sku) fd.append('sku', values.sku);
+      }
+      if (values.cover?.[0]?.originFileObj) {
+        fd.append('cover', values.cover[0].originFileObj);
+      }
+      if (values.volume != null) {
+        fd.append('volume', String(values.volume));
+      }
+      if (values.issueNumber != null) {
+        fd.append('issueNumber', String(values.issueNumber));
+      }
+      if (values.description) {
+        fd.append('description', values.description);
+      }
+      if (values.pages != null) {
+        fd.append('pages', String(values.pages));
+      }
+      if (values.sku) {
+        fd.append('sku', values.sku);
+      }
       fd.append('publishNow', values.publishNow ? 'true' : 'false');
       if (values.publishedAt && !values.publishNow) {
         fd.append('publishedAt', (values.publishedAt as Dayjs).format('YYYY-MM-DD'));
       }
 
-      await api.post(`/admin/magazines/${id}/editions`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (evt) => {
+      const uploadOpts = {
+        onUploadProgress: (evt: any) => {
           const pct = Math.round((evt.loaded / (evt.total || 1)) * 100);
           message.loading({ content: `Uploading... ${pct}%`, key: 'upload' });
         },
-      });
-      message.success({ content: 'Edition created successfully', key: 'upload' });
+      };
+
+      if (editingEditionId) {
+        await api.put(`/admin/magazines/${id}/editions/${editingEditionId}`, fd, uploadOpts);
+        message.success({ content: 'Edition updated', key: 'upload' });
+      } else {
+        await api.post(`/admin/magazines/${id}/editions`, fd, uploadOpts);
+        message.success({ content: 'Edition created successfully', key: 'upload' });
+      }
       form.resetFields();
+      setEditingEditionId(null);
+      setEditionModalOpen(false);
       loadData();
     } catch (err: any) {
       console.error(err);
@@ -292,12 +412,26 @@ export default function MagazineDetail({ params }: any) {
         <Col xs={24} md={12}>
           <Form.Item
             name="editionPdf"
-            label="Magazine PDF (required)"
+            label="Magazine PDF"
+            extra={
+              editingEditionId
+                ? 'Current file is shown by name. Choose a new PDF only if you want to replace it.'
+                : 'Required when creating an edition.'
+            }
             valuePropName="fileList"
             getValueFromEvent={normFile}
-            rules={[{ required: true, message: 'Please upload the edition PDF' }]}
+            rules={[
+              {
+                validator: async (_: any, value: any) => {
+                  if (editingEditionId) return;
+                  if (!value?.[0]?.originFileObj) {
+                    throw new Error('Please upload the edition PDF');
+                  }
+                },
+              },
+            ]}
           >
-            <Upload beforeUpload={() => false} maxCount={1} accept=".pdf">
+            <Upload beforeUpload={() => false} maxCount={1} accept=".pdf" listType="text">
               <Button icon={<UploadOutlined />}>Select PDF</Button>
             </Upload>
           </Form.Item>
@@ -306,10 +440,15 @@ export default function MagazineDetail({ params }: any) {
           <Form.Item
             name="samplePdf"
             label="Sample PDF (optional)"
+            extra={
+              editingEditionId
+                ? 'Current sample is shown by name when present. Select a file to replace it.'
+                : undefined
+            }
             valuePropName="fileList"
             getValueFromEvent={normFile}
           >
-            <Upload beforeUpload={() => false} maxCount={1} accept=".pdf">
+            <Upload beforeUpload={() => false} maxCount={1} accept=".pdf" listType="text">
               <Button icon={<UploadOutlined />}>Select Sample</Button>
             </Upload>
           </Form.Item>
@@ -342,7 +481,7 @@ export default function MagazineDetail({ params }: any) {
       <Card
         title={mag?.title || 'Magazine'}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditionModalOpen(true)}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openAddEditionModal}>
             Add New Edition
           </Button>
         }
@@ -414,16 +553,19 @@ export default function MagazineDetail({ params }: any) {
                         title: 'Cover',
                         key: 'cover',
                         width: 60,
-                        render: (_: any, ed: any) =>
-                          ed.coverUrl ? (
+                        render: (_: any, ed: any) => {
+                          const ck = ed.coverKey || mag?.coverKey;
+                          const src = adminAssetServeUrl(ck);
+                          return src ? (
                             <img
-                              src={ed.coverUrl}
+                              src={src}
                               alt=""
                               style={{ width: 40, height: 52, objectFit: 'cover', borderRadius: 4 }}
                             />
                           ) : (
                             <span style={{ color: '#999' }}>-</span>
-                          ),
+                          );
+                        },
                       },
                       { title: 'Vol', dataIndex: 'volume', width: 60 },
                       { title: 'Issue', dataIndex: 'issueNumber', width: 60 },
@@ -445,45 +587,51 @@ export default function MagazineDetail({ params }: any) {
                       {
                         title: 'Files',
                         key: 'files',
-                        render: (_: any, ed: any) => (
-                          <span style={{ display: 'flex', gap: 8 }}>
-                            {ed.fileUrl && (
-                              <a href={ed.fileUrl} target="_blank" rel="noopener noreferrer">
-                                <FilePdfOutlined /> PDF
-                              </a>
-                            )}
-                            {ed.sampleUrl && (
-                              <a href={ed.sampleUrl} target="_blank" rel="noopener noreferrer">
-                                Sample
-                              </a>
-                            )}
-                          </span>
-                        ),
+                        render: (_: any, ed: any) => {
+                          const href = adminAssetServeUrl(ed.fileKey);
+                          return href ? (
+                            <a href={href} target="_blank" rel="noopener noreferrer">
+                              <FilePdfOutlined /> PDF
+                            </a>
+                          ) : (
+                            <span style={{ color: '#999' }}>-</span>
+                          );
+                        },
                       },
                       {
-                        title: 'Actions',
+                        title: 'Action',
                         key: 'actions',
-                        width: 100,
+                        width: 76,
+                        fixed: 'right' as const,
                         render: (_: any, ed: any) => {
-                          const handleRead = () => {
-                            const token =
-                              typeof window !== 'undefined'
-                                ? localStorage.getItem('access_token')
-                                : null;
-                            const url = token
-                              ? `${READER_BASE_URL}/reader/${ed.id}?token=${encodeURIComponent(token)}`
-                              : `${READER_BASE_URL}/reader/${ed.id}`;
-                            window.open(url, '_blank', 'noopener,noreferrer');
-                          };
+                          const items: MenuProps['items'] = [
+                            {
+                              key: 'read',
+                              label: 'Read Magazine',
+                              icon: <ReadOutlined />,
+                              onClick: () => openReadMagazine(ed),
+                            },
+                            {
+                              key: 'sample',
+                              label: 'Read Sample',
+                              disabled: !ed.sampleKey,
+                              onClick: () => openReadSample(ed),
+                            },
+                            {
+                              key: 'edit',
+                              label: 'Edit',
+                              onClick: () => openEditEdition(ed),
+                            },
+                          ];
                           return (
-                            <Button
-                              type="link"
-                              size="small"
-                              icon={<ReadOutlined />}
-                              onClick={handleRead}
-                            >
-                              Read
-                            </Button>
+                            <Dropdown menu={{ items }} trigger={['click']} placement="bottomRight">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<MoreOutlined style={{ fontSize: 18 }} />}
+                                aria-label="Edition actions"
+                              />
+                            </Dropdown>
                           );
                         },
                       },
@@ -514,23 +662,34 @@ export default function MagazineDetail({ params }: any) {
           <p style={{ color: '#888' }}>No plans available. Create plans in Admin → Plans first.</p>
         )}
         <Modal
-          title="Add New Edition"
+          title={editingEditionId ? 'Edit edition' : 'Add New Edition'}
           open={editionModalOpen}
-          onCancel={() => setEditionModalOpen(false)}
+          onCancel={() => {
+            setEditionModalOpen(false);
+            setEditingEditionId(null);
+            form.resetFields();
+          }}
           width={980}
-          destroyOnClose={false}
+          destroyOnClose
           footer={[
-            <Button key="cancel" onClick={() => setEditionModalOpen(false)}>
+            <Button
+              key="cancel"
+              onClick={() => {
+                setEditionModalOpen(false);
+                setEditingEditionId(null);
+                form.resetFields();
+              }}
+            >
               Cancel
             </Button>,
             <Button
-              key="create"
+              key="save"
               type="primary"
               loading={loading}
               onClick={() => form.submit()}
               style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
             >
-              Create Edition
+              {editingEditionId ? 'Save changes' : 'Create Edition'}
             </Button>,
           ]}
         >

@@ -11,6 +11,8 @@ interface MagazineCardProps {
   description: string;
   /** When provided (e.g. from library), Read Now goes directly to reader without subscription check */
   editionId?: number;
+  /** Latest published edition id that has a sample PDF (browse / home); Read Now opens flipbook sample */
+  sampleEditionId?: number | null;
   /** Show "FULL COVER" tag on card (vintage magazine style) */
   fullCover?: boolean;
   /** Use vintage leather-bound style (for magazines age-group page) */
@@ -24,6 +26,7 @@ const MagazineCard = ({
   date,
   description,
   editionId,
+  sampleEditionId,
   fullCover = false,
   variant = 'default',
 }: MagazineCardProps) => {
@@ -32,15 +35,26 @@ const MagazineCard = ({
   const handleReadNow = async () => {
     const token = localStorage.getItem('access_token');
 
+    if (editionId) {
+      if (!token) {
+        message.info('Please login to read the magazine');
+        const currentPath = window.location.pathname + window.location.search;
+        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+        return;
+      }
+      window.location.href = `/reader/${editionId}`;
+      return;
+    }
+
+    if (sampleEditionId) {
+      window.location.href = `/reader/${sampleEditionId}?sample=1`;
+      return;
+    }
+
     if (!token) {
       message.info('Please login to read the magazine');
       const currentPath = window.location.pathname + window.location.search;
       window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
-      return;
-    }
-
-    if (editionId) {
-      window.location.href = `/reader/${editionId}`;
       return;
     }
 
@@ -58,7 +72,9 @@ const MagazineCard = ({
           message.warning('No editions found for this magazine yet.');
         }
       } else {
-        message.error('You have not subscribed to this edition or magazine.');
+        message.error(
+          'You have not subscribed to this edition or magazine. Try a free sample from Browse if available.',
+        );
       }
     } catch (error: any) {
       if (error.response?.status === 401) {

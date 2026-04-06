@@ -23,13 +23,18 @@ export default function ReaderView() {
   const params = useParams();
   const searchParams = useSearchParams();
   const editionId = params?.editionId;
+  const sampleMode = searchParams?.get('sample') === '1' || searchParams?.get('sample') === 'true';
 
   // Support token passthrough when admin opens Read link (cross-origin, different localStorage)
   React.useEffect(() => {
     const token = searchParams?.get('token');
+    const sampleQ =
+      searchParams?.get('sample') === '1' || searchParams?.get('sample') === 'true'
+        ? '?sample=1'
+        : '';
     if (token && typeof window !== 'undefined') {
       localStorage.setItem('access_token', token);
-      window.history.replaceState({}, '', `/reader/${editionId}`);
+      window.history.replaceState({}, '', `/reader/${editionId}${sampleQ}`);
       window.location.reload();
     }
   }, [editionId, searchParams]);
@@ -58,6 +63,28 @@ export default function ReaderView() {
     setLoadError(null);
     setDataLoaded(false);
     setImageLoadFailed(false);
+
+    if (sampleMode) {
+      axios
+        .get(`/api/editions/${editionId}/sample/pages`)
+        .then((r) => {
+          setPages(r.data?.list || []);
+          setPdfUrl(r.data?.pdfUrl || null);
+          setDataLoaded(true);
+          setLoadError(null);
+        })
+        .catch((err) => {
+          setPages([]);
+          setPdfUrl(null);
+          setDataLoaded(true);
+          const status = err?.response?.status;
+          const msg = err?.response?.data?.error || err?.response?.data?.message;
+          if (status === 404) setLoadError('Sample not available for this edition.');
+          else setLoadError(msg || 'Failed to load sample. Please try again.');
+        });
+      return;
+    }
+
     const headers = getAuthHeaders();
     if (!headers.Authorization) {
       const redirect = encodeURIComponent(`/reader/${editionId}`);
@@ -88,7 +115,6 @@ export default function ReaderView() {
         else if (status === 404) setLoadError('Edition not found.');
         else setLoadError(msg || 'Failed to load edition. Please try again.');
       });
-    // fetch default reader for user (first reader)
     axios
       .get('/api/readers', { headers })
       .then((r) => {
@@ -105,7 +131,7 @@ export default function ReaderView() {
           return;
         }
       });
-  }, [editionId]);
+  }, [editionId, sampleMode]);
 
   React.useEffect(() => {
     const w = Math.min(1100, window.innerWidth - 300);
@@ -119,6 +145,7 @@ export default function ReaderView() {
 
   // save progress (debounced)
   React.useEffect(() => {
+    if (sampleMode) return;
     const t = setTimeout(() => {
       if (!readerId) return;
       const total = usePdfReader ? numPdfPages : pages.length || 1;
@@ -134,7 +161,7 @@ export default function ReaderView() {
       );
     }, 1000);
     return () => clearTimeout(t);
-  }, [current, readerId, editionId, pages.length, pdfUrl, token, numPdfPages]);
+  }, [current, readerId, editionId, pages.length, pdfUrl, token, numPdfPages, sampleMode]);
   const pageUrl = (p: number) =>
     `/api/editions/${editionId}/pages/${p}?lowBandwidth=${low ? '1' : '0'}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
 
@@ -165,24 +192,25 @@ export default function ReaderView() {
 
   // when reader selected, load progress
   React.useEffect(() => {
-    if (!readerId) return;
+    if (sampleMode || !readerId) return;
     axios
       .get(`/api/reader-progress/${readerId}/edition/${editionId}`, { headers: getAuthHeaders() })
       .then((pr) => {
         if (pr.data && pr.data.current_page) setCurrent(pr.data.current_page);
       });
-  }, [readerId, editionId]);
+  }, [readerId, editionId, sampleMode]);
 
   const useImageReader = pages.length > 0 && !imageLoadFailed;
-  const usePdfReader = !!pdfUrl && !!token && !useImageReader;
+  const usePdfReader = !!pdfUrl && !useImageReader && (!!token || sampleMode);
   const totalPages = usePdfReader ? numPdfPages : pages.length || 1;
   const pdfFile = React.useMemo(() => {
     if (!pdfUrl || typeof window === 'undefined') return null;
     return { url: `${window.location.origin}${pdfUrl}` };
   }, [pdfUrl]);
   const pdfOptions = React.useMemo(
-    () => (token ? { httpHeaders: { Authorization: `Bearer ${token}` } } : undefined),
-    [token],
+    () =>
+      token && !sampleMode ? { httpHeaders: { Authorization: `Bearer ${token}` } } : undefined,
+    [token, sampleMode],
   );
 
   // keyboard navigation
@@ -245,7 +273,7 @@ export default function ReaderView() {
             </select>
           </div> */}
 
-          {hasContent && (
+          {hasContent && !sampleMode && (
             <div className="actions-panel">
               <button
                 className="reader-action-btn bookmark-btn"
@@ -513,7 +541,7 @@ export default function ReaderView() {
         </div>
       </div>
       <p>
-        Page {current} / {totalPages}
+        {sampleMode ? 'Sample · ' : ''}Page {current} / {totalPages}
       </p>
       <style>{`
         .flip-page {

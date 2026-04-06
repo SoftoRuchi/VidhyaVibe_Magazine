@@ -15,6 +15,7 @@ interface Magazine {
   category?: string;
   createdAt: string;
   image: string;
+  sampleEditionId?: number | null;
 }
 
 export default function Page() {
@@ -341,6 +342,7 @@ export default function Page() {
                     description={magazine.description || ''}
                     date={new Date(magazine.createdAt).getFullYear().toString()}
                     image={magazine.image}
+                    sampleEditionId={magazine.sampleEditionId ?? undefined}
                   />
                 ))}
               </div>
@@ -395,6 +397,7 @@ export default function Page() {
                     description={magazine.description || ''}
                     date={new Date(magazine.createdAt).getFullYear().toString()}
                     image={magazine.image}
+                    sampleEditionId={magazine.sampleEditionId ?? undefined}
                   />
                 ))}
               </div>
@@ -602,6 +605,7 @@ export default function Page() {
                     description={magazine.description || ''}
                     date={new Date(magazine.createdAt).getFullYear().toString()}
                     image={magazine.image}
+                    sampleEditionId={magazine.sampleEditionId ?? undefined}
                   />
                 ))}
               </div>
