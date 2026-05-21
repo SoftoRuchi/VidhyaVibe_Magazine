@@ -45,9 +45,12 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://api:2034
     environment:
       NODE_ENV: production
       PORT: 1034
+      NEXT_PUBLIC_READER_URL: https://reader.vidhyavibe.in
     env_file:
       - ./.env
     depends_on:
@@ -60,9 +63,12 @@ services:
     build:
       context: .
       dockerfile: apps/admin/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://api:2034
     environment:
       NODE_ENV: production
       PORT: 3034
+      NEXT_PUBLIC_READER_URL: https://reader.vidhyavibe.in
     env_file:
       - ./.env
     depends_on:

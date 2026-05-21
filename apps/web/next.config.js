@@ -1,3 +1,5 @@
+const { getApiRewriteBase } = require('../../scripts/next-api-rewrite-base.cjs');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack: (config) => {
@@ -5,12 +7,7 @@ const nextConfig = {
     return config;
   },
   async rewrites() {
-    // In production we run API as a docker service (`api:2034`).
-    // For local dev, you can set NEXT_PUBLIC_API_BASE_URL or run API on 4001.
-    const apiBase =
-      process.env.NEXT_PUBLIC_API_BASE_URL ||
-      (process.env.NODE_ENV === 'production' ? 'http://api:2034' : 'http://127.0.0.1:4001');
-
+    const apiBase = getApiRewriteBase();
     return [{ source: '/api/:path*', destination: `${apiBase}/api/:path*` }];
   },
 };

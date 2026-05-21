@@ -66,11 +66,7 @@ router.get('/:identifier/editions', async (req, res) => {
              ORDER BY publishedAt DESC`,
       [mag.id],
     );
-    const baseUrl = process.env.API_BASE_URL || '';
-    const assetPath = (key: string) =>
-      baseUrl
-        ? `${baseUrl}/api/assets/serve?key=${encodeURIComponent(key)}`
-        : `/api/assets/serve?key=${encodeURIComponent(key)}`;
+    const assetPath = (key: string) => `/api/assets/serve?key=${encodeURIComponent(key)}`;
     const editions = rows.map((ed: any) => ({
       ...ed,
       coverUrl: ed.coverKey ? assetPath(ed.coverKey) : null,

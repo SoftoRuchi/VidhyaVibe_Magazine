@@ -11,6 +11,11 @@ COPY services ./services
 COPY packages ./packages
 
 RUN pnpm install --frozen-lockfile
+
+# Rewrites are fixed at build time — set your public API host for split deploy.
+ARG NEXT_PUBLIC_API_BASE_URL=https://readerapi.vidhyavibe.in
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+
 RUN pnpm --filter apps-web build
 
 WORKDIR /repo/apps/web
