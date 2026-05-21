@@ -31,7 +31,8 @@ import dayjs from 'dayjs';
 import React, { useState } from 'react';
 import api from '../../../../lib/api';
 
-const READER_BASE_URL = process.env.NEXT_PUBLIC_READER_URL || 'http://localhost:3000';
+const READER_BASE_URL =
+  process.env.NEXT_PUBLIC_READER_URL || 'https://reader.vidhyavibe.in';
 
 function fileNameFromStorageKey(key: string | null | undefined): string {
   if (!key || typeof key !== 'string') return '';
