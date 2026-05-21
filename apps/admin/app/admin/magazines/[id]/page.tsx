@@ -30,9 +30,7 @@ import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import React, { useState } from 'react';
 import api from '../../../../lib/api';
-
-const READER_BASE_URL =
-  process.env.NEXT_PUBLIC_READER_URL || 'https://reader.vidhyavibe.in';
+import { getReaderEditionUrl } from '../../../../lib/readerBaseUrl';
 
 function fileNameFromStorageKey(key: string | null | undefined): string {
   if (!key || typeof key !== 'string') return '';
@@ -213,10 +211,8 @@ export default function MagazineDetail({ params }: any) {
 
   const openReadMagazine = (ed: any) => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const url = token
-      ? `${READER_BASE_URL}/reader/${ed.id}?token=${encodeURIComponent(token)}`
-      : `${READER_BASE_URL}/reader/${ed.id}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const qs = token ? `token=${encodeURIComponent(token)}` : '';
+    window.open(getReaderEditionUrl(ed.id, qs), '_blank', 'noopener,noreferrer');
   };
 
   const openReadSample = (ed: any) => {
@@ -225,8 +221,8 @@ export default function MagazineDetail({ params }: any) {
       return;
     }
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const qs = token ? `?sample=1&token=${encodeURIComponent(token)}` : '?sample=1';
-    window.open(`${READER_BASE_URL}/reader/${ed.id}${qs}`, '_blank', 'noopener,noreferrer');
+    const qs = token ? `sample=1&token=${encodeURIComponent(token)}` : 'sample=1';
+    window.open(getReaderEditionUrl(ed.id, qs), '_blank', 'noopener,noreferrer');
   };
 
   const openEditEdition = (ed: any) => {

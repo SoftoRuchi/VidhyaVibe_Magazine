@@ -1,6 +1,7 @@
 import { App, ConfigProvider } from 'antd';
 import React from 'react';
 import DashboardLayout from '../components/DashboardLayout';
+import ReaderBaseUrlScript from '../components/ReaderBaseUrlScript';
 import StyledComponentsRegistry from '../lib/AntdRegistry';
 import './globals.css';
 
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: React.PropsWithChildren) {
   return (
     <html lang="en">
       <body>
+        <ReaderBaseUrlScript />
         <StyledComponentsRegistry>
           <ConfigProvider
             theme={{

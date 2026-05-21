@@ -14,6 +14,9 @@ COPY packages ./packages
 ARG NEXT_PUBLIC_API_BASE_URL=https://readerapi.vidhyavibe.in
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 
+ARG NEXT_PUBLIC_READER_URL=https://reader.vidhyavibe.in
+ENV NEXT_PUBLIC_READER_URL=$NEXT_PUBLIC_READER_URL
+
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter apps-admin build
 
@@ -21,6 +24,8 @@ WORKDIR /repo/apps/admin
 
 ENV NODE_ENV=production
 ENV PORT=3034
+# Runtime reader URL for "Read Magazine" (overrides any localhost baked at build)
+ENV READER_BASE_URL=https://reader.vidhyavibe.in
 
 EXPOSE 3034
 

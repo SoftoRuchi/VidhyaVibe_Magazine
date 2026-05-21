@@ -1,0 +1,8 @@
+# Keep localhost .env files out of Docker builds (they override production URLs)
+**/.env
+**/.env.local
+**/.env.*.local
+**/node_modules
+**/.next
+**/dist
+.git
