@@ -2,7 +2,7 @@ FROM node:20-alpine
 
 WORKDIR /repo
 
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY tsconfig.base.json tsconfig.json ./

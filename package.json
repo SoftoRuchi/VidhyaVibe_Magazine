@@ -17,6 +17,7 @@
     "build:packages": "pnpm --filter @magazine/config build && pnpm --filter @magazine/db build",
     "build:apps": "pnpm --filter services-api build"
   },
+  "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=18"
   },
