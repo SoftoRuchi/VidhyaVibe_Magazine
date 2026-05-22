@@ -79,6 +79,13 @@ export default function ReaderView() {
     setFlipDimensionsReady(false);
   }, [editionId, pdfUrl]);
 
+  /** If page-1 probe never fires, still open the book with default aspect ratio. */
+  React.useEffect(() => {
+    if (!pdfDocReady || flipDimensionsReady) return;
+    const t = window.setTimeout(() => setFlipDimensionsReady(true), 5000);
+    return () => window.clearTimeout(t);
+  }, [pdfDocReady, flipDimensionsReady]);
+
   React.useEffect(() => {
     setLoadError(null);
     setDataLoaded(false);
@@ -219,19 +226,37 @@ export default function ReaderView() {
     };
   }, [current, pages.length, editionId, low, token]);
 
-  // when reader selected, load progress
+  const startFromBeginning =
+    searchParams?.get('start') === '1' || searchParams?.get('start') === 'first';
+
+  // when reader selected, load saved progress (unless ?start=1)
   React.useEffect(() => {
-    if (sampleMode || !readerId) return;
+    if (sampleMode || !readerId || startFromBeginning) return;
     axios
       .get(`/api/reader-progress/${readerId}/edition/${editionId}`, { headers: getAuthHeaders() })
       .then((pr) => {
         if (pr.data && pr.data.current_page) setCurrent(pr.data.current_page);
       });
-  }, [readerId, editionId, sampleMode]);
+  }, [readerId, editionId, sampleMode, startFromBeginning]);
+
+  React.useEffect(() => {
+    if (!startFromBeginning) return;
+    setCurrent(1);
+  }, [startFromBeginning, editionId]);
 
   const useImageReader = pages.length > 0 && !imageLoadFailed;
   const usePdfReader = !!pdfUrl && !useImageReader && (!!token || sampleMode);
   const totalPages = usePdfReader ? numPdfPages : pages.length || 1;
+
+  React.useEffect(() => {
+    if (!flipDimensionsReady || totalPages < 1) return;
+    const pf = flipBookRef.current?.pageFlip();
+    if (!pf || typeof pf.getCurrentPageIndex !== 'function') return;
+    const targetIndex = current - 1;
+    if (pf.getCurrentPageIndex() !== targetIndex) {
+      pf.turnToPage(targetIndex);
+    }
+  }, [current, flipDimensionsReady, totalPages]);
   const pdfFile = React.useMemo(() => {
     if (!pdfUrl || typeof window === 'undefined') return null;
     return { url: `${window.location.origin}${pdfUrl}` };
@@ -249,6 +274,8 @@ export default function ReaderView() {
         flipTo(current - 1);
       } else if (e.key === 'ArrowRight' || e.key === ' ') {
         flipTo(current + 1);
+      } else if (e.key === 'Home') {
+        flipTo(1);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -256,20 +283,44 @@ export default function ReaderView() {
   }, [current, totalPages]);
   const prev = () => flipBookRef.current?.pageFlip()?.flipPrev();
   const next = () => flipBookRef.current?.pageFlip()?.flipNext();
+  /** Jump instantly to a page (flip() animates one page at a time). */
   const flipTo = (target: number) => {
     if (target < 1 || target > totalPages) return;
-    flipBookRef.current?.pageFlip()?.flip(target - 1);
+    const pf = flipBookRef.current?.pageFlip();
+    if (!pf) return;
+    pf.turnToPage(target - 1);
+    setCurrent(target);
   };
+  const goToStart = () => flipTo(1);
 
   const { width: viewportWidth, height: viewportHeight, isMobile } = viewport;
-  const layoutWidth = isMobile ? viewportWidth - 20 : Math.min(1100, viewportWidth - 300);
-  const flipPageWidth = isMobile
-    ? Math.max(260, Math.min(520, Math.floor(layoutWidth)))
-    : Math.max(290, Math.min(460, Math.floor(layoutWidth / 2)));
-  const naturalPageHeight = Math.ceil(flipPageWidth * pageAspectRatio * 1.02);
-  const flipPageHeight = isMobile
-    ? Math.min(naturalPageHeight, Math.max(320, Math.floor(viewportHeight * 0.58)))
-    : naturalPageHeight;
+
+  /** Size flip slots so the full page fits on screen (no vertical clipping on mobile). */
+  const { flipPageWidth, flipPageHeight } = React.useMemo(() => {
+    const ratio = pageAspectRatio * 1.02;
+    if (!isMobile) {
+      const availableWidth = Math.max(560, viewportWidth - 340);
+      const availableHeight = Math.max(480, viewportHeight - 100);
+      let w = Math.max(290, Math.min(460, Math.floor(availableWidth / 2)));
+      let h = Math.ceil(w * ratio);
+      if (h > availableHeight) {
+        h = availableHeight;
+        w = Math.max(280, Math.floor(h / ratio));
+        h = Math.ceil(w * ratio);
+      }
+      return { flipPageWidth: w, flipPageHeight: h };
+    }
+    const availableWidth = Math.max(240, viewportWidth - 16);
+    const availableHeight = Math.max(360, viewportHeight - 118);
+    let w = availableWidth;
+    let h = Math.ceil(w * ratio);
+    if (h > availableHeight) {
+      h = availableHeight;
+      w = Math.max(240, Math.floor(h / ratio));
+      h = Math.ceil(w * ratio);
+    }
+    return { flipPageWidth: w, flipPageHeight: h };
+  }, [isMobile, viewportWidth, viewportHeight, pageAspectRatio]);
 
   const applyPageAspectRatio = React.useCallback((ratio: number) => {
     if (!Number.isFinite(ratio) || ratio <= 0) return;
@@ -281,7 +332,7 @@ export default function ReaderView() {
     setCurrent((prev) => Math.min(Math.max(prev, 1), Math.max(pdf.numPages, 1)));
     setPdfDocReady(true);
     setPdfLoadError(null);
-    setFlipDimensionsReady(true);
+    // Flipbook mounts after page 1 probe sets aspect — avoids wrong-size remount and blank desktop pages.
   }, []);
 
   /** Use loaded Page viewport — avoid pdf.getPage() which can hit a destroyed PDF.js worker. */
@@ -289,8 +340,9 @@ export default function ReaderView() {
     (pageNo: number) =>
       (page: { getViewport: (opts: { scale: number }) => { width: number; height: number } }) => {
         if (pageNo !== 1) return;
-        const viewport = page.getViewport({ scale: 1 });
-        applyPageAspectRatio(viewport.height / viewport.width);
+        const vp = page.getViewport({ scale: 1 });
+        applyPageAspectRatio(vp.height / vp.width);
+        setFlipDimensionsReady(true);
       },
     [applyPageAspectRatio],
   );
@@ -309,10 +361,19 @@ export default function ReaderView() {
     img.src = pageUrl(1);
   }, [useImageReader, pages.length, editionId, low, token, applyPageAspectRatio]);
 
-  const centerSinglePage = isMobile || totalPages <= 1 || current <= 1;
-  const singlePageOffset = isMobile || centerSinglePage ? 0 : -Math.floor(flipPageWidth / 2);
+  /** Desktop first/last page alone — showCover spread leaves a blank companion page. */
+  const desktopSinglePageView =
+    !isMobile && totalPages > 0 && (current <= 1 || current >= totalPages);
+  const centerSinglePage = isMobile || totalPages <= 1 || desktopSinglePageView;
   const hasContent = pdfUrl || pages.length > 0;
   const bookStageWidth = centerSinglePage ? flipPageWidth : flipPageWidth * 2;
+  const flipLayoutKey = isMobile
+    ? 'm'
+    : current <= 1
+      ? 'cover'
+      : current >= totalPages
+        ? 'end'
+        : 'spread';
 
   const flipBookProps = {
     width: flipPageWidth,
@@ -321,14 +382,14 @@ export default function ReaderView() {
     minWidth: isMobile ? 240 : 220,
     maxWidth: isMobile ? 560 : 800,
     minHeight: 280,
-    maxHeight: isMobile ? Math.floor(viewportHeight * 0.65) : 1200,
+    maxHeight: isMobile ? flipPageHeight + 8 : 1200,
     drawShadow: true,
     flippingTime: isMobile ? 500 : 700,
-    usePortrait: isMobile,
+    usePortrait: isMobile || desktopSinglePageView,
     startZIndex: 0,
     autoSize: false,
     maxShadowOpacity: isMobile ? 0.45 : 0.72,
-    showCover: !isMobile,
+    showCover: !isMobile && !desktopSinglePageView,
     startPage: Math.max(0, current - 1),
     mobileScrollSupport: true,
     clickEventForward: true,
@@ -337,10 +398,6 @@ export default function ReaderView() {
     showPageCorners: true,
     disableFlipByClick: false,
     className: 'flip-book',
-    style: {
-      marginLeft: singlePageOffset,
-      transition: 'margin-left 180ms ease',
-    },
     onFlip: (e: { data?: number }) => setCurrent((e?.data ?? 0) + 1),
   };
 
@@ -365,6 +422,14 @@ export default function ReaderView() {
 
           {hasContent && !sampleMode && (
             <div className="actions-panel">
+              <button
+                type="button"
+                className="reader-action-btn reader-start-btn"
+                onClick={goToStart}
+                disabled={current <= 1}
+              >
+                Start
+              </button>
               <button
                 className="reader-action-btn bookmark-btn"
                 onClick={async () => {
@@ -448,7 +513,9 @@ export default function ReaderView() {
           )}
         </aside>
 
-        <div className="reader-main-column">
+        <div
+          className={`reader-main-column${hasContent && totalPages > 0 ? ' reader-main-column--toolbar' : ''}`}
+        >
           {hasContent && totalPages > 0 && (
             <div className="reader-page-indicator" aria-live="polite">
               {sampleMode ? <span className="reader-page-indicator__sample">Sample · </span> : null}
@@ -456,6 +523,15 @@ export default function ReaderView() {
             </div>
           )}
           <div className="book-with-side-nav">
+            {hasContent && !isMobile && (
+              <Button
+                className="nav-btn reader-start-btn side-nav-btn reader-desktop-nav"
+                onClick={goToStart}
+                disabled={current <= 1}
+              >
+                Start
+              </Button>
+            )}
             {hasContent && !isMobile && (
               <Button
                 className="nav-btn prev-nav-btn side-nav-btn reader-desktop-nav"
@@ -468,7 +544,7 @@ export default function ReaderView() {
             {usePdfReader ? (
               <div
                 className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isMobile ? ' book-reader-stage--mobile' : ''}`}
-                style={{ width: bookStageWidth, height: flipPageHeight, minHeight: flipPageHeight }}
+                style={{ width: bookStageWidth, height: flipPageHeight }}
               >
                 {!pdfMountReady ? (
                   <p>Loading PDF…</p>
@@ -492,9 +568,14 @@ export default function ReaderView() {
                     error={<p>Failed to load PDF.</p>}
                     className="flip-book-document"
                   >
+                    {pdfDocReady && !flipDimensionsReady && (
+                      <div className="pdf-aspect-probe" aria-hidden>
+                        <Page pageNumber={1} width={360} onLoadSuccess={onPdfPageLoad(1)} />
+                      </div>
+                    )}
                     {pdfDocReady && flipDimensionsReady && numPdfPages > 0 ? (
                       <HTMLFlipBook
-                        key={`pdf-book-${numPdfPages}-${flipPageWidth}-${flipPageHeight}-${isMobile ? 'm' : 'd'}`}
+                        key={`pdf-book-${numPdfPages}-${flipPageWidth}-${flipPageHeight}-${flipLayoutKey}`}
                         ref={flipBookRef}
                         {...flipBookProps}
                       >
@@ -505,14 +586,15 @@ export default function ReaderView() {
                               <Page
                                 pageNumber={pageNo}
                                 width={flipPageWidth}
-                                onLoadSuccess={onPdfPageLoad(pageNo)}
-                                renderTextLayer={true}
-                                renderAnnotationLayer={true}
+                                renderTextLayer={false}
+                                renderAnnotationLayer={false}
                               />
                             </FlipPageShell>
                           );
                         })}
                       </HTMLFlipBook>
+                    ) : pdfDocReady ? (
+                      <p>Preparing pages…</p>
                     ) : (
                       <p>Loading page…</p>
                     )}
@@ -522,11 +604,11 @@ export default function ReaderView() {
             ) : useImageReader ? (
               <div
                 className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isMobile ? ' book-reader-stage--mobile' : ''}`}
-                style={{ width: bookStageWidth, height: flipPageHeight, minHeight: flipPageHeight }}
+                style={{ width: bookStageWidth, height: flipPageHeight }}
               >
                 {(flipDimensionsReady || pages.length === 0) && (
                   <HTMLFlipBook
-                    key={`img-book-${pages.length}-${flipPageWidth}-${flipPageHeight}-${isMobile ? 'm' : 'd'}-${low ? 'low' : 'hi'}`}
+                    key={`img-book-${pages.length}-${flipPageWidth}-${flipPageHeight}-${flipLayoutKey}-${low ? 'low' : 'hi'}`}
                     ref={flipBookRef}
                     {...flipBookProps}
                   >
@@ -568,14 +650,20 @@ export default function ReaderView() {
           </div>
           {hasContent && isMobile && (
             <div className="reader-mobile-bar">
-              <Button className="nav-btn prev-nav-btn" onClick={prev} disabled={current <= 1} block>
+              <Button
+                className="nav-btn reader-start-btn"
+                onClick={goToStart}
+                disabled={current <= 1}
+              >
+                Start
+              </Button>
+              <Button className="nav-btn prev-nav-btn" onClick={prev} disabled={current <= 1}>
                 Previous
               </Button>
               <Button
                 className="nav-btn next-nav-btn"
                 onClick={next}
                 disabled={current >= totalPages}
-                block
               >
                 Next
               </Button>
@@ -610,10 +698,13 @@ export default function ReaderView() {
           min-height: 70vh;
           padding: 10px;
         }
+        .reader-main-column--toolbar {
+          padding-top: 40px;
+        }
         .reader-page-indicator {
           position: absolute;
-          bottom: 16px;
-          right: 16px;
+          top: 0;
+          right: 10px;
           z-index: 30;
           padding: 8px 14px;
           background: rgba(55, 65, 81, 0.88);
@@ -631,18 +722,34 @@ export default function ReaderView() {
         .book-reader-stage {
           position: relative;
           flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          background: #fff;
+          border-radius: 8px;
           filter: drop-shadow(0 14px 32px rgba(15, 23, 42, 0.28));
         }
         .flip-book-document {
-          width: 100%;
-          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          line-height: 0;
         }
         .flip-book-document .react-pdf__Document {
-          width: 100%;
-          height: 100%;
+          line-height: 0;
+        }
+        .pdf-aspect-probe {
+          position: absolute;
+          width: 0;
+          height: 0;
+          overflow: hidden;
+          opacity: 0;
+          pointer-events: none;
         }
         .book-reader-stage .flip-book,
-        .book-reader-stage .stf__parent {
+        .book-reader-stage .stf__parent,
+        .book-reader-stage .stf__wrapper {
           margin: 0 auto;
         }
         .book-reader-stage::after {
@@ -684,20 +791,36 @@ export default function ReaderView() {
           width: 100%;
           height: 100%;
           overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
         .flip-page-content img {
-          width: 100%;
-          height: 100%;
+          max-width: 100%;
+          max-height: 100%;
+          width: auto;
+          height: auto;
           object-fit: contain;
           display: block;
         }
         .flip-page-content .react-pdf__Page {
           margin: 0 !important;
           line-height: 0;
+          display: flex !important;
+          align-items: center;
+          justify-content: center;
+          width: 100% !important;
+          height: 100% !important;
+          max-width: 100%;
+          max-height: 100%;
         }
         .flip-page-content .react-pdf__Page__canvas {
           display: block;
           margin: 0 auto;
+          max-width: 100% !important;
+          max-height: 100% !important;
+          width: auto !important;
+          height: auto !important;
         }
         .actions-panel {
           margin-top: 4px;
@@ -745,6 +868,9 @@ export default function ReaderView() {
           .reader-main-column {
             min-height: auto;
             padding: 4px 8px 88px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
           }
           .book-with-side-nav {
             flex-direction: column;
@@ -764,8 +890,8 @@ export default function ReaderView() {
             margin: 0 auto;
           }
           .reader-page-indicator {
-            bottom: 72px;
-            right: 10px;
+            top: 4px;
+            right: 8px;
             font-size: 12px;
             padding: 6px 10px;
           }
@@ -776,8 +902,8 @@ export default function ReaderView() {
             right: 0;
             bottom: 0;
             z-index: 40;
-            gap: 10px;
-            padding: 10px 12px;
+            gap: 8px;
+            padding: 10px 10px;
             padding-bottom: max(10px, env(safe-area-inset-bottom));
             background: rgba(255, 255, 255, 0.94);
             border-top: 1px solid rgba(15, 23, 42, 0.1);
@@ -787,6 +913,11 @@ export default function ReaderView() {
             flex: 1;
             min-width: 0;
             height: 44px;
+            font-size: 13px;
+            padding: 0 6px;
+          }
+          .reader-mobile-bar .reader-start-btn {
+            flex: 0.85;
           }
         }
         .side-nav-btn {
@@ -799,6 +930,9 @@ export default function ReaderView() {
           color: #fff !important;
           font-weight: 600;
           border-radius: 8px !important;
+        }
+        .reader-start-btn {
+          background: linear-gradient(135deg, #64748b, #475569) !important;
         }
         .prev-nav-btn {
           background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
