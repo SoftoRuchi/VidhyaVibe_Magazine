@@ -57,7 +57,12 @@ export default function ReaderView() {
   const [_readers, setReaders] = React.useState<any[]>([]);
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [numPdfPages, setNumPdfPages] = React.useState<number>(0);
-  const [viewport, setViewport] = React.useState({ width: 800, height: 700, isMobile: false });
+  const [viewport, setViewport] = React.useState({
+    width: 800,
+    height: 700,
+    isPhone: false,
+    isCompact: true,
+  });
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [_dataLoaded, setDataLoaded] = React.useState(false);
   const [pdfLoadError, setPdfLoadError] = React.useState<string | null>(null);
@@ -161,12 +166,15 @@ export default function ReaderView() {
   }, [editionId, sampleMode]);
 
   React.useEffect(() => {
-    const MOBILE_MAX = 768;
+    const PHONE_MAX = 768;
+    /** Side nav + sidebar + 2-page spread needs ~1420px (Surface Pro 1368 uses bottom bar). */
+    const COMPACT_MAX = 1420;
     const update = () => {
       const width = window.innerWidth;
       const height = window.innerHeight;
-      const isMobile = width < MOBILE_MAX;
-      setViewport({ width, height, isMobile });
+      const isPhone = width < PHONE_MAX;
+      const isCompact = width < COMPACT_MAX;
+      setViewport({ width, height, isPhone, isCompact });
     };
     update();
     window.addEventListener('resize', update);
@@ -293,19 +301,43 @@ export default function ReaderView() {
   };
   const goToStart = () => flipTo(1);
 
-  const { width: viewportWidth, height: viewportHeight, isMobile } = viewport;
+  const { width: viewportWidth, height: viewportHeight, isPhone, isCompact } = viewport;
+  const isLandscape = viewportWidth > viewportHeight;
 
   /** Size flip slots so the full page fits on screen (no vertical clipping on mobile). */
   const { flipPageWidth, flipPageHeight } = React.useMemo(() => {
     const ratio = pageAspectRatio * 1.02;
-    if (!isMobile) {
-      const availableWidth = Math.max(560, viewportWidth - 340);
+    if (!isPhone && !isCompact) {
+      const availableWidth = Math.max(560, viewportWidth - 700);
       const availableHeight = Math.max(480, viewportHeight - 100);
       let w = Math.max(290, Math.min(460, Math.floor(availableWidth / 2)));
       let h = Math.ceil(w * ratio);
       if (h > availableHeight) {
         h = availableHeight;
         w = Math.max(280, Math.floor(h / ratio));
+        h = Math.ceil(w * ratio);
+      }
+      return { flipPageWidth: w, flipPageHeight: h };
+    }
+    if (!isPhone && isCompact) {
+      const availableWidth = Math.max(320, viewportWidth - 20);
+      const availableHeight = Math.max(300, viewportHeight - 96);
+      const useSpread = isLandscape;
+      if (useSpread) {
+        let w = Math.max(220, Math.min(360, Math.floor(availableWidth / 2)));
+        let h = Math.ceil(w * ratio);
+        if (h > availableHeight) {
+          h = availableHeight;
+          w = Math.max(200, Math.floor(h / ratio));
+          h = Math.ceil(w * ratio);
+        }
+        return { flipPageWidth: w, flipPageHeight: h };
+      }
+      let w = Math.min(availableWidth, 520);
+      let h = Math.ceil(w * ratio);
+      if (h > availableHeight) {
+        h = availableHeight;
+        w = Math.max(240, Math.floor(h / ratio));
         h = Math.ceil(w * ratio);
       }
       return { flipPageWidth: w, flipPageHeight: h };
@@ -320,7 +352,7 @@ export default function ReaderView() {
       h = Math.ceil(w * ratio);
     }
     return { flipPageWidth: w, flipPageHeight: h };
-  }, [isMobile, viewportWidth, viewportHeight, pageAspectRatio]);
+  }, [isPhone, isCompact, isLandscape, viewportWidth, viewportHeight, pageAspectRatio]);
 
   const applyPageAspectRatio = React.useCallback((ratio: number) => {
     if (!Number.isFinite(ratio) || ratio <= 0) return;
@@ -361,17 +393,17 @@ export default function ReaderView() {
     img.src = pageUrl(1);
   }, [useImageReader, pages.length, editionId, low, token, applyPageAspectRatio]);
 
-  /** Desktop first/last page alone — showCover spread leaves a blank companion page. */
-  const desktopSinglePageView =
-    !isMobile && totalPages > 0 && (current <= 1 || current >= totalPages);
-  const centerSinglePage = isMobile || totalPages <= 1 || desktopSinglePageView;
+  const soloEdgePage = totalPages > 0 && (current <= 1 || current >= totalPages);
+  const compactSpread = isCompact && !isPhone && isLandscape && !soloEdgePage;
+  const centerSinglePage =
+    isPhone || totalPages <= 1 || soloEdgePage || (isCompact && !compactSpread);
   const hasContent = pdfUrl || pages.length > 0;
   const bookStageWidth = centerSinglePage ? flipPageWidth : flipPageWidth * 2;
-  const flipLayoutKey = isMobile
+  const flipLayoutKey = isPhone
     ? 'm'
-    : current <= 1
+    : soloEdgePage && current <= 1
       ? 'cover'
-      : current >= totalPages
+      : soloEdgePage
         ? 'end'
         : 'spread';
 
@@ -380,17 +412,17 @@ export default function ReaderView() {
     width: flipPageWidth,
     height: flipPageHeight,
     size: 'fixed' as const,
-    minWidth: isMobile ? 240 : 220,
-    maxWidth: isMobile ? 560 : 800,
+    minWidth: isPhone ? 240 : 220,
+    maxWidth: isPhone ? 560 : isCompact ? 720 : 800,
     minHeight: 280,
-    maxHeight: isMobile ? flipPageHeight + 8 : 1200,
+    maxHeight: isPhone ? flipPageHeight + 8 : 1200,
     drawShadow: true,
-    flippingTime: isMobile ? 500 : 700,
-    usePortrait: isMobile || desktopSinglePageView,
+    flippingTime: isPhone ? 500 : 700,
+    usePortrait: isPhone || soloEdgePage,
     startZIndex: 0,
     autoSize: false,
-    maxShadowOpacity: isMobile ? 0.45 : 0.72,
-    showCover: !isMobile && !desktopSinglePageView,
+    maxShadowOpacity: isCompact ? 0.45 : 0.72,
+    showCover: !isCompact && !soloEdgePage,
     startPage: Math.max(0, current - 1),
     mobileScrollSupport: true,
     clickEventForward: true,
@@ -524,7 +556,7 @@ export default function ReaderView() {
             </div>
           )}
           <div className="book-with-side-nav">
-            {hasContent && !isMobile && (
+            {hasContent && !isCompact && (
               <Button
                 className="nav-btn reader-start-btn side-nav-btn reader-desktop-nav"
                 onClick={goToStart}
@@ -533,7 +565,7 @@ export default function ReaderView() {
                 Start
               </Button>
             )}
-            {hasContent && !isMobile && (
+            {hasContent && !isCompact && (
               <Button
                 className="nav-btn prev-nav-btn side-nav-btn reader-desktop-nav"
                 onClick={prev}
@@ -544,7 +576,7 @@ export default function ReaderView() {
             )}
             {usePdfReader ? (
               <div
-                className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isMobile ? ' book-reader-stage--mobile' : ''}`}
+                className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isCompact ? ' book-reader-stage--mobile' : ''}`}
                 style={{ width: bookStageWidth, height: flipPageHeight }}
               >
                 {!pdfMountReady ? (
@@ -604,7 +636,7 @@ export default function ReaderView() {
               </div>
             ) : useImageReader ? (
               <div
-                className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isMobile ? ' book-reader-stage--mobile' : ''}`}
+                className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isCompact ? ' book-reader-stage--mobile' : ''}`}
                 style={{ width: bookStageWidth, height: flipPageHeight }}
               >
                 {(flipDimensionsReady || pages.length === 0) && (
@@ -639,7 +671,7 @@ export default function ReaderView() {
             ) : (
               <p>Loading...</p>
             )}
-            {hasContent && !isMobile && (
+            {hasContent && !isCompact && (
               <Button
                 className="nav-btn next-nav-btn side-nav-btn reader-desktop-nav"
                 onClick={next}
@@ -649,7 +681,7 @@ export default function ReaderView() {
               </Button>
             )}
           </div>
-          {hasContent && isMobile && (
+          {hasContent && isCompact && (
             <div className="reader-mobile-bar">
               <Button
                 className="nav-btn reader-start-btn"
@@ -854,11 +886,13 @@ export default function ReaderView() {
           justify-content: center;
           gap: 16px;
           width: 100%;
+          max-width: 100%;
+          overflow-x: hidden;
         }
         .reader-mobile-bar {
           display: none;
         }
-        @media (max-width: 767px) {
+        @media (max-width: 1419px) {
           .reader-layout {
             flex-direction: column;
             gap: 8px;
