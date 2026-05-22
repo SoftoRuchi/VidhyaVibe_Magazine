@@ -376,6 +376,7 @@ export default function ReaderView() {
         : 'spread';
 
   const flipBookProps = {
+    style: {} as React.CSSProperties,
     width: flipPageWidth,
     height: flipPageHeight,
     size: 'fixed' as const,
