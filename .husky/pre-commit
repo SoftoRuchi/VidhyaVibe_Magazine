@@ -1,2 +1,12 @@
+#!/usr/bin/env sh
+cd "$(dirname "$0")/.." || exit 1
 
-npx lint-staged
+LINT_STAGED="node_modules/lint-staged/bin/lint-staged.js"
+
+if [ ! -f "$LINT_STAGED" ]; then
+  echo "husky pre-commit: lint-staged is not installed."
+  echo "Run from the repo root: pnpm install"
+  exit 1
+fi
+
+node "$LINT_STAGED"

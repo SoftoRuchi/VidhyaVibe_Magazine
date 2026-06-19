@@ -5,8 +5,14 @@ import { getPool } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
 import { requireAuth } from '../../middleware/auth';
 import { getStorageAdapter } from '../../providers/storage';
+import { createAdminEdition, updateAdminEdition } from '../../services/adminEditions';
 
 const upload = multer({ storage: multer.memoryStorage() });
+const editionUpload = upload.fields([
+  { name: 'editionPdf', maxCount: 1 },
+  { name: 'samplePdf', maxCount: 1 },
+  { name: 'cover', maxCount: 1 },
+]);
 const router = Router();
 router.use(requireAuth);
 router.use(requireAdmin);
@@ -87,6 +93,12 @@ router.get('/:id/editions', async (req, res) => {
     conn.release();
   }
 });
+
+// POST /api/admin/magazines/:id/editions - create edition (admin UI)
+router.post('/:id/editions', editionUpload, createAdminEdition);
+
+// PUT /api/admin/magazines/:id/editions/:editionId - update edition (admin UI)
+router.put('/:id/editions/:editionId', editionUpload, updateAdminEdition);
 
 // GET /api/admin/magazines/:id/plans - list plans with magazine-specific pricing per delivery mode
 router.get('/:id/plans', async (req, res) => {
