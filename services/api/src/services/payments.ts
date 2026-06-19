@@ -2,6 +2,114 @@ import crypto from 'crypto';
 import { getPool } from '../db';
 import { validateCoupon, recordCouponUsage } from './coupons';
 
+/** Create subscription, payment, coupon usage, and dispatch schedules after an order is paid. */
+async function fulfillOrderAfterPayment(
+  conn: any,
+  order: any,
+  opts: {
+    provider: string;
+    providerPaymentId: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<{ subscriptionId: number; paymentId: number }> {
+  const [existingByOrder]: any = await conn.query(
+    `SELECT id, subscriptionId FROM payments
+     WHERE subscriptionId IS NOT NULL
+       AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.orderId')) = ?
+     LIMIT 1`,
+    [String(order.id)],
+  );
+  if (existingByOrder?.[0]?.subscriptionId) {
+    return {
+      subscriptionId: Number(existingByOrder[0].subscriptionId),
+      paymentId: Number(existingByOrder[0].id),
+    };
+  }
+
+  const [existingPay]: any = await conn.query(
+    'SELECT id, subscriptionId FROM payments WHERE provider = ? AND providerPaymentId = ? LIMIT 1',
+    [opts.provider, opts.providerPaymentId],
+  );
+  if (existingPay?.[0]?.subscriptionId) {
+    return {
+      subscriptionId: Number(existingPay[0].subscriptionId),
+      paymentId: Number(existingPay[0].id),
+    };
+  }
+
+  const startsAt = new Date();
+  const endsAt = new Date(startsAt);
+  endsAt.setMonth(endsAt.getMonth() + Number(order.months));
+  const finalAmount = Number(order.final_amount ?? order.final_cents ?? 0);
+
+  const [insSub]: any = await conn.query(
+    'INSERT INTO user_subscriptions (userId, readerId, magazineId, planId, delivery_mode, status, startsAt, endsAt, autoRenew, price, currency, couponId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))',
+    [
+      order.user_id,
+      order.reader_id || null,
+      order.magazine_id || null,
+      order.plan_id,
+      order.delivery_mode || 'BOTH',
+      'ACTIVE',
+      startsAt,
+      endsAt,
+      1,
+      finalAmount,
+      order.currency,
+      order.coupon_id || null,
+    ],
+  );
+  const subscriptionId = insSub.insertId;
+
+  const [pay]: any = await conn.query(
+    'INSERT INTO payments (userId, subscriptionId, amountCents, currency, provider, providerPaymentId, status, metadata, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(3))',
+    [
+      order.user_id,
+      subscriptionId,
+      Math.round(finalAmount * 100),
+      order.currency,
+      opts.provider,
+      opts.providerPaymentId,
+      'SUCCESS',
+      JSON.stringify(opts.metadata ?? {}),
+    ],
+  );
+  const paymentId = pay.insertId;
+
+  if (order.coupon_id) {
+    await recordCouponUsage(order.coupon_id, order.user_id, subscriptionId);
+  }
+
+  await conn.query('UPDATE orders SET status = ? WHERE id = ?', ['PAID', order.id]);
+
+  const [planRows]: any = await conn.query(
+    'SELECT dispatchFrequencyDays, autoDispatch, deliveryMode FROM subscription_plans WHERE id = ? LIMIT 1',
+    [order.plan_id],
+  );
+  const plan = planRows[0];
+  if (plan?.autoDispatch && ['PHYSICAL', 'BOTH'].includes(order.delivery_mode)) {
+    const freqDays = plan.dispatchFrequencyDays || 30;
+    let next = new Date(startsAt);
+    while (next < endsAt) {
+      let editionIdForSchedule = null;
+      if (order.magazine_id) {
+        const [edRows]: any = await conn.query(
+          'SELECT id FROM magazine_editions WHERE magazineId = ? AND publishedAt <= ? ORDER BY publishedAt DESC LIMIT 1',
+          [order.magazine_id, next],
+        );
+        if (edRows?.[0]) editionIdForSchedule = edRows[0].id;
+      }
+      await conn.query(
+        'INSERT INTO dispatch_schedules (subscriptionId, editionId, scheduledAt, status, createdAt) VALUES (?, ?, ?, ?, NOW(3))',
+        [subscriptionId, editionIdForSchedule, next, 'SCHEDULED'],
+      );
+      next = new Date(next.getTime() + freqDays * 24 * 60 * 60 * 1000);
+    }
+  }
+
+  return { subscriptionId, paymentId };
+}
+
 async function createRazorpayOrder(params: { amount: number; currency: string; receipt: string }) {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -17,7 +125,8 @@ async function createRazorpayOrder(params: { amount: number; currency: string; r
       Authorization: `Basic ${auth}`,
     },
     body: JSON.stringify({
-      amount: params.amount,
+      // Razorpay expects amount in the smallest currency unit (paise for INR)
+      amount: Math.round(params.amount * 100),
       currency: params.currency,
       receipt: params.receipt,
     }),
@@ -69,13 +178,38 @@ export async function confirmRazorpayPayment(params: {
       throw new Error('invalid_signature');
     }
 
-    await conn.query(
-      'UPDATE orders SET rp_payment_id = ?, rp_signature = ?, status = ? WHERE id = ?',
-      [params.razorpay_payment_id, params.razorpay_signature, 'PAID', order.id],
-    );
+    if (order.status === 'PAID') {
+      const result = await fulfillOrderAfterPayment(conn, order, {
+        provider: 'razorpay',
+        providerPaymentId: params.razorpay_payment_id,
+        metadata: {
+          razorpay_order_id: params.razorpay_order_id,
+          razorpay_signature: params.razorpay_signature,
+          orderId: order.id,
+        },
+      });
+      await conn.commit();
+      return { ok: true, ...result };
+    }
+
+    await conn.query('UPDATE orders SET rp_payment_id = ?, rp_signature = ? WHERE id = ?', [
+      params.razorpay_payment_id,
+      params.razorpay_signature,
+      order.id,
+    ]);
+
+    const result = await fulfillOrderAfterPayment(conn, order, {
+      provider: 'razorpay',
+      providerPaymentId: params.razorpay_payment_id,
+      metadata: {
+        razorpay_order_id: params.razorpay_order_id,
+        razorpay_signature: params.razorpay_signature,
+        orderId: order.id,
+      },
+    });
 
     await conn.commit();
-    return { ok: true };
+    return { ok: true, ...result };
   } catch (e) {
     await conn.rollback();
     throw e;
@@ -360,84 +494,16 @@ export async function verifyProof(proofId: number, adminId: number) {
     if (!order) throw new Error('order_not_found');
     if (order.status === 'PAID') throw new Error('order_already_paid');
 
-    // create subscription
-    const startsAt = new Date();
-    const endsAt = new Date(startsAt);
-    endsAt.setMonth(endsAt.getMonth() + Number(order.months));
-    const [insSub]: any = await conn.query(
-      'INSERT INTO user_subscriptions (user_id, reader_id, magazine_id, plan_id, delivery_mode, status, starts_at, ends_at, auto_renew, price, currency, coupon_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [
-        order.user_id,
-        order.reader_id || null,
-        order.magazine_id || null,
-        order.plan_id,
-        order.delivery_mode || 'BOTH',
-        'ACTIVE',
-        startsAt,
-        endsAt,
-        1,
-        Number(order.final_amount ?? order.final_cents ?? 0),
-        order.currency,
-        order.coupon_id || null,
-      ],
-    );
-    const subscriptionId = insSub.insertId;
+    const { subscriptionId, paymentId } = await fulfillOrderAfterPayment(conn, order, {
+      provider: 'UPI',
+      providerPaymentId: proof.id.toString(),
+      metadata: { proofId: proof.id, orderId: order.id },
+    });
 
-    // create payment record (success)
-    const [pay]: any = await conn.query(
-      'INSERT INTO payments (user_id, subscription_id, amount_cents, currency, provider, provider_payment_id, status, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-      [
-        order.user_id,
-        subscriptionId,
-        // payments table still stores cents; convert only for payments if needed
-        Math.round(Number(order.final_amount ?? order.final_cents ?? 0) * 100),
-        order.currency,
-        'UPI',
-        proof.id.toString(),
-        'SUCCESS',
-        JSON.stringify({ proofId: proof.id }),
-      ],
-    );
-    const paymentId = pay.insertId;
-
-    // record coupon usage if exists
-    if (order.coupon_id) {
-      await recordCouponUsage(order.coupon_id, order.user_id, subscriptionId);
-    }
-
-    // mark order and proof as paid/verified
-    await conn.query('UPDATE orders SET status = ? WHERE id = ?', ['PAID', order.id]);
     await conn.query(
       'UPDATE order_proofs SET verified = 1, verified_at = NOW(), verified_by = ? WHERE id = ?',
       [adminId, proof.id],
     );
-
-    // generate dispatch schedules if necessary (attempt to attach edition by order.magazine_id)
-    const [planRows]: any = await conn.query(
-      'SELECT dispatch_frequency_days, auto_dispatch, delivery_mode FROM subscription_plans WHERE id = ? LIMIT 1',
-      [order.plan_id],
-    );
-    const plan = planRows[0];
-    if (plan.auto_dispatch && ['PHYSICAL', 'BOTH'].includes(order.delivery_mode)) {
-      const freqDays = plan.dispatch_frequency_days || 30;
-      let next = new Date(startsAt);
-      while (next < endsAt) {
-        // try to find edition for scheduled date if order.magazine_id provided
-        let editionIdForSchedule = null;
-        if (order.magazine_id) {
-          const [edRows]: any = await conn.query(
-            'SELECT id FROM magazine_editions WHERE magazine_id = ? AND published_at <= ? ORDER BY published_at DESC LIMIT 1',
-            [order.magazine_id, next],
-          );
-          if (edRows && edRows[0]) editionIdForSchedule = edRows[0].id;
-        }
-        await conn.query(
-          'INSERT INTO dispatch_schedules (subscription_id, edition_id, scheduled_at, status, created_at) VALUES (?, ?, ?, ?, NOW())',
-          [subscriptionId, editionIdForSchedule, next, 'SCHEDULED'],
-        );
-        next = new Date(next.getTime() + freqDays * 24 * 60 * 60 * 1000);
-      }
-    }
 
     await conn.commit();
     return { subscriptionId, paymentId };

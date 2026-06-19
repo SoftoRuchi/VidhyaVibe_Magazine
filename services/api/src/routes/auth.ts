@@ -8,7 +8,7 @@ import {
   verifyAccessToken,
 } from '../auth/jwt';
 import { hashPassword, comparePassword } from '../auth/password';
-import { getPool } from '../db';
+import { getPool, query } from '../db';
 import { loginRateLimiter } from '../middleware/rateLimiter';
 
 const env = getEnv();
@@ -17,19 +17,14 @@ const router = Router();
 // Sessions table may use snake_case (user_id, refresh_jti) or camelCase (userId, refreshJti)
 let sessionsSnakeCase: boolean | null = null;
 
-async function isSessionsSnakeCase(conn: any): Promise<boolean> {
+async function isSessionsSnakeCase(): Promise<boolean> {
   if (sessionsSnakeCase === true) return true;
   if (sessionsSnakeCase === false) return false;
-  try {
-    const [cols]: any = await conn.query('SHOW COLUMNS FROM sessions');
-    const names = (cols || []).map((c: any) => c.Field);
-    const snake = names.includes('refresh_jti');
-    sessionsSnakeCase = snake;
-    return snake;
-  } catch {
-    sessionsSnakeCase = false;
-    return false;
-  }
+  const [cols]: any = await query('SHOW COLUMNS FROM sessions');
+  const names = (cols || []).map((c: any) => c.Field);
+  const snake = names.includes('refresh_jti') || names.includes('user_id');
+  sessionsSnakeCase = snake;
+  return snake;
 }
 
 router.use(cookieParser());
@@ -139,48 +134,42 @@ router.post('/register', async (req, res) => {
 router.post('/login', loginRateLimiter, async (req, res) => {
   const { email, password, deviceName } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
-  let conn: any;
   try {
-    const pool = getPool();
-    conn = await pool.getConnection();
-    const [rows]: any = await conn.query(
+    const [rows]: any = await query(
       'SELECT id, email, isAdmin FROM users WHERE email = ? LIMIT 1',
       [email],
     );
     const user = rows[0];
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
-    const [authRows]: any = await conn.query(
+
+    const [authRows]: any = await query(
       'SELECT password_hash FROM user_auth WHERE user_id = ? LIMIT 1',
       [user.id],
     );
     const auth = authRows[0];
     if (!auth) return res.status(401).json({ error: 'invalid_credentials' });
+
+    // Do not hold a DB connection during bcrypt — remote MySQL may close idle connections.
     const ok = await comparePassword(password, auth.password_hash);
     if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
 
-    // create session and refresh token
     const ua = req.headers['user-agent'];
     const userAgent = ua ? String(ua).substring(0, 1000) : null;
-    const snake = await isSessionsSnakeCase(conn);
-    let sessionId: number;
+    const snake = await isSessionsSnakeCase();
     const role = user.isAdmin ? 'admin' : 'user';
     const access = signAccessToken({ sub: user.id, role });
     const { token: refreshToken, jti } = signRefreshToken({ sub: user.id });
 
     if (snake) {
-      const [sessionRes] = await conn.query(
+      await query(
         'INSERT INTO sessions (user_id, device_name, ip_address, user_agent, refresh_jti, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-        [user.id, deviceName || null, req.ip || null, userAgent, null],
+        [user.id, deviceName || null, req.ip || null, userAgent, jti],
       );
-      sessionId = sessionRes.insertId;
-      await conn.query('UPDATE sessions SET refresh_jti = ? WHERE id = ?', [jti, sessionId]);
     } else {
-      const [sessionRes] = await conn.query(
+      await query(
         'INSERT INTO sessions (userId, deviceName, ipAddress, userAgent, refreshJti, createdAt) VALUES (?, ?, ?, ?, ?, NOW(3))',
-        [user.id, deviceName || null, req.ip || null, userAgent, null],
+        [user.id, deviceName || null, req.ip || null, userAgent, jti],
       );
-      sessionId = sessionRes.insertId;
-      await conn.query('UPDATE sessions SET refreshJti = ? WHERE id = ?', [jti, sessionId]);
     }
 
     // set refresh token cookie (httpOnly)
@@ -203,12 +192,6 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       error: 'login_failed',
       details: e?.message || String(e),
     });
-  } finally {
-    try {
-      conn?.release?.();
-    } catch {
-      // ignore release errors
-    }
   }
 });
 
@@ -222,7 +205,7 @@ router.post('/refresh', async (req, res) => {
     if (!refreshToken) return res.status(401).json({ error: 'missing_refresh' });
     const payload: any = verifyRefreshToken(refreshToken);
     const jti = payload.jti;
-    const snake = await isSessionsSnakeCase(conn);
+    const snake = await isSessionsSnakeCase();
     const [rows]: any = await conn.query(
       snake
         ? 'SELECT id, user_id AS userId FROM sessions WHERE refresh_jti = ? LIMIT 1'
@@ -264,7 +247,7 @@ router.post('/logout', async (req, res) => {
       try {
         const payload: any = verifyRefreshToken(refreshToken);
         const jti = payload.jti;
-        const snake = await isSessionsSnakeCase(conn);
+        const snake = await isSessionsSnakeCase();
         await conn.query(
           snake
             ? 'DELETE FROM sessions WHERE refresh_jti = ?'
@@ -333,7 +316,7 @@ router.get('/me', async (req, res) => {
     try {
       const payload: any = verifyRefreshToken(refreshToken);
       const jti = payload.jti;
-      const snake = await isSessionsSnakeCase(conn);
+      const snake = await isSessionsSnakeCase();
       const [sessions]: any = await conn.query(
         snake
           ? 'SELECT user_id AS userId FROM sessions WHERE refresh_jti = ? LIMIT 1'

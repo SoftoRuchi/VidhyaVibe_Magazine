@@ -19,9 +19,26 @@ export function getPool(): mysql.Pool {
       database: u.pathname.replace(/^\//, ''),
       waitForConnections: true,
       connectionLimit: 10,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10_000,
+      connectTimeout: 60_000,
+    });
+    pool.on('connection', (connection) => {
+      connection.on('error', (err) => {
+        console.error('MySQL pool connection error:', err.message);
+      });
     });
     return pool;
   } catch (e: any) {
     throw new Error(`Invalid DATABASE_URL: ${e?.message || e}`);
   }
+}
+
+/** Run queries without holding a connection across slow CPU work (e.g. bcrypt). */
+export async function query<T = any>(
+  sql: string,
+  params?: unknown[],
+): Promise<[T, mysql.FieldPacket[]]> {
+  const p = getPool();
+  return p.query(sql, params) as Promise<[T, mysql.FieldPacket[]]>;
 }

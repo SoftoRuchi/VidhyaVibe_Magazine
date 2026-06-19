@@ -32,6 +32,10 @@ export default function RazorpayPage() {
   const [confirmStatus, setConfirmStatus] = React.useState<'idle' | 'saving' | 'saved' | 'failed'>(
     'idle',
   );
+  const [confirmResult, setConfirmResult] = React.useState<{
+    subscriptionId?: number;
+    paymentId?: number;
+  } | null>(null);
   const [confirmError, setConfirmError] = React.useState<string | null>(null);
   const canPay = Boolean(key && rpOrderId && amount && scriptReady);
 
@@ -42,8 +46,9 @@ export default function RazorpayPage() {
 
     setConfirmStatus('saving');
     setConfirmError(null);
+    setConfirmResult(null);
     try {
-      await axios.post(
+      const { data } = await axios.post(
         '/api/payments/razorpay/confirm',
         {
           orderId: Number(orderId),
@@ -53,6 +58,10 @@ export default function RazorpayPage() {
         },
         { withCredentials: true, headers: { Authorization: `Bearer ${token}` } },
       );
+      setConfirmResult({
+        subscriptionId: data?.subscriptionId,
+        paymentId: data?.paymentId,
+      });
       setConfirmStatus('saved');
     } catch (e: any) {
       setConfirmStatus('failed');
@@ -71,6 +80,7 @@ export default function RazorpayPage() {
     setFailureResponse(null);
     setConfirmStatus('idle');
     setConfirmError(null);
+    setConfirmResult(null);
 
     const options = {
       key,
@@ -155,7 +165,27 @@ export default function RazorpayPage() {
 
               {confirmStatus === 'saved' && (
                 <div style={{ marginTop: 8 }}>
-                  <Alert type="success" showIcon message="Saved to order and marked as PAID" />
+                  <Alert
+                    type="success"
+                    showIcon
+                    message="Subscription saved and activated"
+                    description={
+                      confirmResult?.subscriptionId ? (
+                        <div style={{ display: 'grid', gap: 6 }}>
+                          <div>
+                            <strong>Subscription ID:</strong> {confirmResult.subscriptionId}
+                          </div>
+                          {confirmResult.paymentId && (
+                            <div>
+                              <strong>Payment ID:</strong> {confirmResult.paymentId}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        'Payment saved to order and marked as PAID'
+                      )
+                    }
+                  />
                 </div>
               )}
               {confirmStatus === 'saving' && (

@@ -73,7 +73,26 @@ export default function ReaderView() {
   /** Height/width from PDF or first page image — keeps flip slots tall enough to avoid bottom clipping. */
   const [pageAspectRatio, setPageAspectRatio] = React.useState(1.414);
   const [flipDimensionsReady, setFlipDimensionsReady] = React.useState(false);
+  const [viewMode, setViewMode] = React.useState<'book' | 'pdf'>('book');
   const flipBookRef = React.useRef<any>(null);
+
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem('vv_reader_view_mode');
+      if (saved === 'book' || saved === 'pdf') setViewMode(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const persistViewMode = React.useCallback((mode: 'book' | 'pdf') => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('vv_reader_view_mode', mode);
+    } catch {
+      // ignore
+    }
+  }, []);
   React.useEffect(() => {
     setPdfMountReady(true);
     return () => setPdfMountReady(false);
@@ -192,7 +211,9 @@ export default function ReaderView() {
     if (sampleMode) return;
     const t = setTimeout(() => {
       if (!readerId) return;
-      const total = usePdfReader ? numPdfPages : pages.length || 1;
+      const usesPdfPages =
+        !!pdfUrl && (viewMode === 'pdf' || !(pages.length > 0 && !imageLoadFailed));
+      const total = usesPdfPages ? Math.max(numPdfPages, 1) : Math.max(pages.length, 1);
       if (total < 1) return;
       axios.post(
         `/api/reader-progress/${readerId}/progress`,
@@ -205,7 +226,18 @@ export default function ReaderView() {
       );
     }, 1000);
     return () => clearTimeout(t);
-  }, [current, readerId, editionId, pages.length, pdfUrl, token, numPdfPages, sampleMode]);
+  }, [
+    current,
+    readerId,
+    editionId,
+    pages.length,
+    pdfUrl,
+    token,
+    numPdfPages,
+    sampleMode,
+    viewMode,
+    imageLoadFailed,
+  ]);
   const pageUrl = (p: number) =>
     `/api/editions/${editionId}/pages/${p}?lowBandwidth=${low ? '1' : '0'}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
 
@@ -254,17 +286,22 @@ export default function ReaderView() {
 
   const useImageReader = pages.length > 0 && !imageLoadFailed;
   const usePdfReader = !!pdfUrl && !useImageReader && (!!token || sampleMode);
-  const totalPages = usePdfReader ? numPdfPages : pages.length || 1;
+  const useImageFlip = viewMode === 'book' && useImageReader;
+  const usePdfFlip = viewMode === 'book' && usePdfReader;
+  const useFlatPdf = viewMode === 'pdf' && !!pdfUrl;
+  const useFlatImages = viewMode === 'pdf' && !pdfUrl && pages.length > 0;
+  const totalPages =
+    useFlatPdf || usePdfFlip ? Math.max(numPdfPages, 1) : Math.max(pages.length, 1);
 
   React.useEffect(() => {
-    if (!flipDimensionsReady || totalPages < 1) return;
+    if (!flipDimensionsReady || totalPages < 1 || viewMode !== 'book') return;
     const pf = flipBookRef.current?.pageFlip();
     if (!pf || typeof pf.getCurrentPageIndex !== 'function') return;
     const targetIndex = current - 1;
     if (pf.getCurrentPageIndex() !== targetIndex) {
       pf.turnToPage(targetIndex);
     }
-  }, [current, flipDimensionsReady, totalPages]);
+  }, [current, flipDimensionsReady, totalPages, viewMode]);
   const pdfFile = React.useMemo(() => {
     if (!pdfUrl || typeof window === 'undefined') return null;
     return { url: `${window.location.origin}${pdfUrl}` };
@@ -288,15 +325,28 @@ export default function ReaderView() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [current, totalPages]);
-  const prev = () => flipBookRef.current?.pageFlip()?.flipPrev();
-  const next = () => flipBookRef.current?.pageFlip()?.flipNext();
+  }, [current, totalPages, viewMode]);
+  const prev = () => {
+    if (viewMode === 'book') {
+      flipBookRef.current?.pageFlip()?.flipPrev();
+      return;
+    }
+    setCurrent((c) => Math.max(1, c - 1));
+  };
+  const next = () => {
+    if (viewMode === 'book') {
+      flipBookRef.current?.pageFlip()?.flipNext();
+      return;
+    }
+    setCurrent((c) => Math.min(totalPages, c + 1));
+  };
   /** Jump instantly to a page (flip() animates one page at a time). */
   const flipTo = (target: number) => {
     if (target < 1 || target > totalPages) return;
-    const pf = flipBookRef.current?.pageFlip();
-    if (!pf) return;
-    pf.turnToPage(target - 1);
+    if (viewMode === 'book') {
+      const pf = flipBookRef.current?.pageFlip();
+      if (pf) pf.turnToPage(target - 1);
+    }
     setCurrent(target);
   };
   const goToStart = () => flipTo(1);
@@ -399,6 +449,7 @@ export default function ReaderView() {
     isPhone || totalPages <= 1 || soloEdgePage || (isCompact && !compactSpread);
   const hasContent = pdfUrl || pages.length > 0;
   const bookStageWidth = centerSinglePage ? flipPageWidth : flipPageWidth * 2;
+  const flatPageWidth = Math.min(Math.max(280, viewportWidth - 48), 960);
   const flipLayoutKey = isPhone
     ? 'm'
     : soloEdgePage && current <= 1
@@ -550,9 +601,33 @@ export default function ReaderView() {
           className={`reader-main-column${hasContent && totalPages > 0 ? ' reader-main-column--toolbar' : ''}`}
         >
           {hasContent && totalPages > 0 && (
-            <div className="reader-page-indicator" aria-live="polite">
-              {sampleMode ? <span className="reader-page-indicator__sample">Sample · </span> : null}
-              Page {current} / {totalPages}
+            <div className="reader-top-bar">
+              <div className="reader-mode-toggle" role="tablist" aria-label="Reader mode">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'book'}
+                  className={`reader-mode-btn${viewMode === 'book' ? ' reader-mode-btn--active' : ''}`}
+                  onClick={() => persistViewMode('book')}
+                >
+                  Book reader
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'pdf'}
+                  className={`reader-mode-btn${viewMode === 'pdf' ? ' reader-mode-btn--active' : ''}`}
+                  onClick={() => persistViewMode('pdf')}
+                >
+                  PDF reader
+                </button>
+              </div>
+              <div className="reader-page-indicator" aria-live="polite">
+                {sampleMode ? (
+                  <span className="reader-page-indicator__sample">Sample · </span>
+                ) : null}
+                Page {current} / {totalPages}
+              </div>
             </div>
           )}
           <div className="book-with-side-nav">
@@ -574,7 +649,7 @@ export default function ReaderView() {
                 Previous
               </Button>
             )}
-            {usePdfReader ? (
+            {usePdfFlip ? (
               <div
                 className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isCompact ? ' book-reader-stage--mobile' : ''}`}
                 style={{ width: bookStageWidth, height: flipPageHeight }}
@@ -634,7 +709,7 @@ export default function ReaderView() {
                   </Document>
                 )}
               </div>
-            ) : useImageReader ? (
+            ) : useImageFlip ? (
               <div
                 className={`book-reader-stage${centerSinglePage ? ' book-reader-stage--single' : ''}${isCompact ? ' book-reader-stage--mobile' : ''}`}
                 style={{ width: bookStageWidth, height: flipPageHeight }}
@@ -660,6 +735,53 @@ export default function ReaderView() {
                   </HTMLFlipBook>
                 )}
                 {!flipDimensionsReady && pages.length > 0 && <p>Loading pages…</p>}
+              </div>
+            ) : useFlatPdf ? (
+              <div className="pdf-flat-reader">
+                {!pdfMountReady ? (
+                  <p>Loading PDF…</p>
+                ) : pdfLoadError ? (
+                  <p>{pdfLoadError}</p>
+                ) : (
+                  <Document
+                    key={`flat-${editionId}-${pdfUrl}`}
+                    file={pdfFile}
+                    options={pdfOptions}
+                    onLoadSuccess={onPdfDocumentLoad}
+                    onLoadError={(e) => {
+                      setPdfDocReady(false);
+                      setPdfLoadError(e?.message || 'Failed to load PDF');
+                    }}
+                    onSourceError={(e) => {
+                      setPdfDocReady(false);
+                      setPdfLoadError(e?.message || 'Failed to load PDF source');
+                    }}
+                    loading={<p>Loading PDF…</p>}
+                    error={<p>Failed to load PDF.</p>}
+                    className="pdf-flat-document"
+                  >
+                    {pdfDocReady && numPdfPages > 0 ? (
+                      <Page
+                        key={`flat-page-${current}`}
+                        pageNumber={current}
+                        width={flatPageWidth}
+                        renderTextLayer
+                        renderAnnotationLayer={false}
+                      />
+                    ) : (
+                      <p>Loading page…</p>
+                    )}
+                  </Document>
+                )}
+              </div>
+            ) : useFlatImages ? (
+              <div className="pdf-flat-reader">
+                <img
+                  src={pageUrl(current)}
+                  alt={`Page ${current}`}
+                  className="pdf-flat-image"
+                  onError={() => setImageLoadFailed(true)}
+                />
               </div>
             ) : loadError ? (
               <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>
@@ -732,13 +854,50 @@ export default function ReaderView() {
           padding: 10px;
         }
         .reader-main-column--toolbar {
-          padding-top: 40px;
+          padding-top: 52px;
         }
-        .reader-page-indicator {
+        .reader-top-bar {
           position: absolute;
           top: 0;
+          left: 10px;
           right: 10px;
           z-index: 30;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .reader-mode-toggle {
+          display: inline-flex;
+          padding: 4px;
+          border-radius: 10px;
+          background: rgba(255, 255, 255, 0.92);
+          border: 1px solid rgba(61, 41, 20, 0.16);
+          box-shadow: 0 2px 10px rgba(15, 23, 42, 0.1);
+        }
+        .reader-mode-btn {
+          border: none;
+          background: transparent;
+          color: #5c4a3a;
+          font-size: 13px;
+          font-weight: 600;
+          padding: 7px 14px;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: background 0.15s ease, color 0.15s ease;
+        }
+        .reader-mode-btn:hover {
+          color: #2c1810;
+          background: rgba(61, 41, 20, 0.06);
+        }
+        .reader-mode-btn--active {
+          color: #fff;
+          background: linear-gradient(135deg, #8b4513, #6b3410);
+          box-shadow: 0 2px 8px rgba(107, 52, 16, 0.28);
+        }
+        .reader-page-indicator {
+          position: static;
           padding: 8px 14px;
           background: rgba(55, 65, 81, 0.88);
           color: #fff;
@@ -748,6 +907,32 @@ export default function ReaderView() {
           font-variant-numeric: tabular-nums;
           pointer-events: none;
           box-shadow: 0 2px 10px rgba(15, 23, 42, 0.18);
+          margin-left: auto;
+        }
+        .pdf-flat-reader {
+          width: 100%;
+          max-width: min(960px, 100%);
+          margin: 0 auto;
+          padding: 12px;
+          background: #fff;
+          border-radius: 10px;
+          box-shadow: 0 14px 32px rgba(15, 23, 42, 0.22);
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          min-height: 60vh;
+          overflow: auto;
+        }
+        .pdf-flat-document {
+          display: flex;
+          justify-content: center;
+          width: 100%;
+        }
+        .pdf-flat-image {
+          max-width: 100%;
+          height: auto;
+          display: block;
+          border-radius: 4px;
         }
         .reader-page-indicator__sample {
           opacity: 0.9;
@@ -924,11 +1109,22 @@ export default function ReaderView() {
           .book-reader-stage--mobile .stf__wrapper {
             margin: 0 auto;
           }
-          .reader-page-indicator {
-            top: 4px;
+          .reader-top-bar {
+            left: 8px;
             right: 8px;
+            gap: 8px;
+          }
+          .reader-mode-btn {
             font-size: 12px;
             padding: 6px 10px;
+          }
+          .reader-page-indicator {
+            font-size: 12px;
+            padding: 6px 10px;
+          }
+          .pdf-flat-reader {
+            min-height: 50vh;
+            padding: 8px;
           }
           .reader-mobile-bar {
             display: flex;
