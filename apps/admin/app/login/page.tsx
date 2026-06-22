@@ -2,44 +2,34 @@
 
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { Form, Input, Button, Card, message } from 'antd';
-import axios from 'axios';
-import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
+import { adminLogin } from '../../lib/adminLogin';
+
+function readQueryParam(name: string): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get(name);
+}
 
 export default function LoginPage() {
-  const router = useRouter();
+  const [returnUrl, setReturnUrl] = useState('/admin');
   const [loading, setLoading] = useState(false);
 
-  const onFinish = async (values: any) => {
+  React.useEffect(() => {
+    setReturnUrl(readQueryParam('returnUrl') || '/admin');
+  }, []);
+
+  const onFinish = async (values: { email: string; password: string }) => {
     setLoading(true);
     try {
-      const response = await axios.post(
-        '/api/auth/login',
-        {
-          email: values.email,
-          password: values.password,
-        },
-        { withCredentials: true },
-      );
-
-      const access = response.data.access_token;
-      if (!access) {
-        message.error('Login failed. Invalid response from server.');
-        setLoading(false);
-        return;
-      }
-      localStorage.setItem('access_token', access);
-
+      await adminLogin(values.email, values.password);
       message.success('Login successful!');
-
-      // Full-page navigation so the Next.js middleware re-reads the
-      // refresh_token cookie that was just set by the API.
-      const params = new URLSearchParams(window.location.search);
-      const returnUrl = params.get('returnUrl') || '/admin';
       window.location.href = returnUrl;
     } catch (error: any) {
-      const errorMsg = error.response?.data?.error || 'Login failed. Please try again.';
-      message.error(errorMsg);
+      if (error?.message === 'admin_required') {
+        message.error('This account is not an admin.');
+      } else {
+        message.error(error?.response?.data?.error || 'Login failed. Please try again.');
+      }
       setLoading(false);
     }
   };
@@ -70,7 +60,7 @@ export default function LoginPage() {
               { type: 'email', message: 'Please enter a valid email!' },
             ]}
           >
-            <Input prefix={<UserOutlined />} placeholder="Email" size="large" />
+            <Input prefix={<UserOutlined />} placeholder="admin@gmail.com" size="large" />
           </Form.Item>
 
           <Form.Item

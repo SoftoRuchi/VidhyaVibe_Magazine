@@ -1,46 +1,65 @@
 'use client';
 import { Spin } from 'antd';
-import axios from 'axios';
 import { useRouter, usePathname } from 'next/navigation';
-
 import React from 'react';
+import { clearAuthSession } from '../../lib/authStorage';
+import { verifyAdminSession } from '../../lib/session';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const isLoginRoute = pathname?.startsWith('/admin/login');
-  const [authChecked, setAuthChecked] = React.useState(isLoginRoute);
+  const isLoginRoute =
+    pathname?.startsWith('/admin/login') ||
+    pathname === '/login' ||
+    pathname?.startsWith('/login') ||
+    (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin/login'));
+  const [authChecked, setAuthChecked] = React.useState(false);
+  const verifiedRef = React.useRef(false);
 
   React.useEffect(() => {
-    // Don't block the login page with auth verification spinner.
-    if (isLoginRoute) {
+    if (!pathname || pathname.startsWith('/admin/login')) {
+      return;
+    }
+
+    const hasLocalToken = typeof window !== 'undefined' && !!localStorage.getItem('access_token');
+    if (!hasLocalToken) {
+      router.replace('/admin/login?error=session_expired');
+      return;
+    }
+
+    if (verifiedRef.current) {
       setAuthChecked(true);
       return;
     }
 
+    let cancelled = false;
     setAuthChecked(false);
-    // Session check via cookie-aware endpoint.
-    // Avoid strict localStorage token checks because access tokens can expire
-    // while a valid refresh cookie still exists.
-    axios
-      .get('/api/auth/me', { withCredentials: true })
-      .then((r) => {
-        if (!r.data?.isAdmin) {
-          localStorage.removeItem('access_token');
-          router.replace('/admin/login');
-        } else {
-          // Keep access token in sync if API returns one (defensive for future changes).
-          if (r.data?.access_token) {
-            localStorage.setItem('access_token', r.data.access_token);
-          }
-          setAuthChecked(true);
-        }
+
+    verifyAdminSession()
+      .then(() => {
+        if (cancelled) return;
+        verifiedRef.current = true;
+        setAuthChecked(true);
       })
-      .catch(() => {
-        localStorage.removeItem('access_token');
-        router.replace('/admin/login');
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        clearAuthSession();
+        const reason =
+          (err as { code?: string; message?: string })?.code === 'admin_required' ||
+          (err as { message?: string })?.message === 'admin_required'
+            ? 'admin_required'
+            : 'session_expired';
+        router.replace(`/admin/login?error=${reason}`);
       });
-  }, [router, pathname, isLoginRoute]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, pathname]);
+
+  if (isLoginRoute) {
+    return <>{children}</>;
+  }
 
   if (!authChecked) {
     return (

@@ -19,6 +19,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import React, { useState } from 'react';
+import { clearAuthSession, getStoredRefreshToken } from '../lib/authStorage';
 import magzineLogo from './images/magzineLogo.png';
 
 const { Sider, Content, Header, Footer } = Layout;
@@ -27,12 +28,18 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
   const [collapsed, setCollapsed] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const isLoginRoute = pathname?.startsWith('/admin/login');
+  const isLoginRoute =
+    pathname?.startsWith('/admin/login') || pathname === '/login' || pathname?.startsWith('/login');
   const {
     token: { colorBgContainer, borderRadiusLG },
   } = theme.useToken();
 
+  if (isLoginRoute) {
+    return <>{children}</>;
+  }
+
   const getSelectedKey = () => {
+    if (!pathname) return 'dashboard';
     if (pathname.includes('/users')) return 'users';
     if (pathname.includes('/magazines')) return 'magazines';
     if (pathname.includes('/plans')) return 'plans';
@@ -81,8 +88,8 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
   ];
 
   const handleLogout = async () => {
-    // Clear local auth first so any in-flight requests stop using the old token.
-    localStorage.removeItem('access_token');
+    const refreshToken = getStoredRefreshToken();
+    clearAuthSession();
     try {
       delete axios.defaults.headers.common['Authorization'];
     } catch {
@@ -90,17 +97,14 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
     }
 
     try {
-      await axios.post('/api/auth/logout', {}, { withCredentials: true });
-    } catch (e) {
+      await axios.post('/api/auth/logout', refreshToken ? { refresh_token: refreshToken } : {}, {
+        withCredentials: true,
+      });
+    } catch {
       // ignore logout API errors
     }
     window.location.href = '/admin/login';
   };
-
-  if (isLoginRoute) {
-    // Render login pages without sidebar/header chrome.
-    return <>{children}</>;
-  }
 
   return (
     <Layout style={{ height: '100vh', overflow: 'hidden' }}>
