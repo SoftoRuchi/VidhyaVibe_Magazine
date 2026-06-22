@@ -36,9 +36,9 @@ services:
       - minio
     environment:
       - NODE_ENV=development
-      - PORT=4001
+      - PORT=2034
     ports:
-      - "4001:4001"
+      - "2034:2034"
     volumes:
       - ./services/api:/usr/src/app
 

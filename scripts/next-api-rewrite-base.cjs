@@ -3,7 +3,7 @@
  *
  * - Set NEXT_PUBLIC_API_BASE_URL for split deploy (e.g. https://readerapi.vidhyavibe.in)
  * - Set INTERNAL_API_URL for Docker Compose (e.g. http://api:2034)
- * - Local dev default: http://127.0.0.1:4001
+ * - Local dev default: http://127.0.0.1:2034
  */
 function getApiRewriteBase() {
   const fromEnv = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.INTERNAL_API_URL;
@@ -12,7 +12,7 @@ function getApiRewriteBase() {
   if (process.env.NODE_ENV === 'production') {
     return 'https://readerapi.vidhyavibe.in';
   }
-  return 'http://127.0.0.1:4001';
+  return 'http://127.0.0.1:2034';
 }
 
 module.exports = { getApiRewriteBase };

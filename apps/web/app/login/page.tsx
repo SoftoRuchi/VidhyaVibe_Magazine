@@ -39,7 +39,7 @@ export default function LoginPage() {
     } catch (error: any) {
       console.error('Login error:', error);
       if (!error.response) {
-        message.error('Cannot reach server. Ensure the backend is running on port 4001.');
+        message.error('Cannot reach server. Ensure the backend is running on port 2034.');
         return;
       }
       const data = error.response?.data;

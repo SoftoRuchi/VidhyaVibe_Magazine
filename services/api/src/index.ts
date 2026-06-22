@@ -111,7 +111,7 @@ app.use((req, res) => {
 // Central error handler
 app.use(errorHandler(logger));
 
-const port = Number(env.PORT || 4001);
+const port = Number(env.PORT || 2034);
 // Listen on all interfaces so both 127.0.0.1 and localhost (IPv4/IPv6) behave consistently on Windows.
 app.listen(port, '0.0.0.0', () => {
   logger.info(`API listening on ${port} (0.0.0.0)`);

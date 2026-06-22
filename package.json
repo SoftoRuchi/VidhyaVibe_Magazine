@@ -11,6 +11,8 @@
     "dev:api": "pnpm --filter services-api dev",
     "dev:web": "pnpm --filter apps-web dev",
     "build": "pnpm run build:packages && pnpm run build:apps",
+    "build:web": "pnpm --filter apps-web build",
+    "build:admin": "pnpm --filter apps-admin build",
     "lint": "eslint . --ext .ts,.tsx,.js --max-warnings=0",
     "format": "prettier --write .",
     "prepare": "husky install",

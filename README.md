@@ -59,3 +59,5 @@ Copy `.env.example` to `.env` and set `DATABASE_URL` for the API. Run `pnpm run 
 # Run Admin
 
 pnpm --filter apps-admin dev
+
+Production manual deploy (fix ChunkLoadError / blank page): see `deployment/DEPLOY-MANUAL.md`.
