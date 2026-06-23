@@ -56,7 +56,16 @@ pnpm run migrate:deploy
 
 Copy `.env.example` to `.env` and set `DATABASE_URL` for the API. Run `pnpm run migrate:deploy` in `packages/db` to apply migrations.
 
-# Run Admin
+Optional JWT vars in `.env` (or dev defaults are used):
+
+```env
+JWT_ACCESS_SECRET=dev-access-secret-min-10-chars
+JWT_REFRESH_SECRET=dev-refresh-secret-min-10-chars
+JWT_ACCESS_EXPIRES=15m
+PORT=2034
+```
+
+# Run Admin (http://localhost:3000 — proxies /api to API on PORT, default 2034)
 
 pnpm --filter apps-admin dev
 

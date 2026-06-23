@@ -132,7 +132,7 @@ model Magazine {
   title       String
   slug        String            @unique
   publisher   String?
-  description String?
+  description String?          @db.Text
   category    String?
   active      Boolean           @default(true)
   createdAt   DateTime          @default(now())

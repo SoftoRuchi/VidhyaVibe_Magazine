@@ -4,6 +4,7 @@ import { Card, Form, Input, Button, Upload, message, Row, Col } from 'antd';
 import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 import api from '../../../../lib/api';
+import { apiUpload } from '../../../../lib/upload';
 
 export default function NewMagazine() {
   const router = useRouter();
@@ -32,16 +33,28 @@ export default function NewMagazine() {
         formData.append('cover', fileList[0].originFileObj);
       }
 
-      await api.post('/admin/magazines', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      await apiUpload('POST', '/admin/magazines', formData);
       message.success('Magazine created successfully');
       router.push('/admin/magazines');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      message.error('Failed to create magazine');
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      const msg = (
+        err as { response?: { data?: { error?: string; message?: string } }; message?: string }
+      )?.response?.data?.error;
+      const detail = (err as { response?: { data?: { message?: string } } })?.response?.data
+        ?.message;
+      if (status === 401 || (err as Error)?.message === 'session_expired') {
+        message.error('Session expired. Please log in again and retry.');
+      } else if (msg === 'description_too_long') {
+        message.error(
+          detail || 'Description is too long. Shorten it or run the database migration.',
+        );
+      } else if (msg === 'slug_exists') {
+        message.error('This slug is already used. Choose a different slug.');
+      } else {
+        message.error(msg || (err as Error)?.message || 'Failed to create magazine');
+      }
     } finally {
       setLoading(false);
     }

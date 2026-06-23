@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+/** Bare numbers (e.g. "2") mean minutes — jsonwebtoken treats raw numbers as seconds. */
+function normalizeJwtAccessExpires(raw: string | undefined): string {
+  const v = (raw || '15m').trim();
+  if (/^\d+$/.test(v)) return `${v}m`;
+  return v;
+}
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('2034'),
@@ -38,7 +45,7 @@ export function getEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     STORAGE_SECRET_KEY: raw.STORAGE_SECRET_KEY,
     JWT_ACCESS_SECRET: raw.JWT_ACCESS_SECRET,
     JWT_REFRESH_SECRET: raw.JWT_REFRESH_SECRET,
-    JWT_ACCESS_EXPIRES: raw.JWT_ACCESS_EXPIRES,
+    JWT_ACCESS_EXPIRES: normalizeJwtAccessExpires(raw.JWT_ACCESS_EXPIRES),
     JWT_REFRESH_EXPIRES: raw.JWT_REFRESH_EXPIRES,
     BCRYPT_SALT_ROUNDS: raw.BCRYPT_SALT_ROUNDS,
     RATE_LIMIT_WINDOW_MS: raw.RATE_LIMIT_WINDOW_MS,

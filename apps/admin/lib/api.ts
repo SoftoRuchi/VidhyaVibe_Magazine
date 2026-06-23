@@ -1,9 +1,10 @@
 import axios from 'axios';
+import { getApiBaseUrl } from './apiBase';
 import { clearAuthSession, getStoredRefreshToken } from './authStorage';
 import { refreshAccessToken } from './refreshAccessToken';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
   withCredentials: true,
 });
 
@@ -25,15 +26,39 @@ function redirectToLogin(reason: 'session_expired' | 'admin_required' = 'session
   window.location.href = `/admin/login?error=${reason}`;
 }
 
+function setHeader(config: { headers?: unknown }, name: string, value: string) {
+  const headers = config.headers as Record<string, unknown> & {
+    set?: (k: string, v: string) => void;
+  };
+  if (!headers) return;
+  if (typeof headers.set === 'function') {
+    headers.set(name, value);
+  } else {
+    headers[name] = value;
+  }
+}
+
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      setHeader(config, 'Authorization', `Bearer ${token}`);
+      setHeader(config, 'X-Access-Token', token);
     }
     const refresh = getStoredRefreshToken();
     if (refresh) {
-      config.headers['X-Refresh-Token'] = refresh;
+      setHeader(config, 'X-Refresh-Token', refresh);
+    }
+    // Let axios set multipart boundary — do not override Content-Type on FormData.
+    if (config.data instanceof FormData) {
+      const headers = config.headers as Record<string, unknown> & {
+        delete?: (k: string) => void;
+      };
+      if (headers?.delete) {
+        headers.delete('Content-Type');
+      } else if (headers) {
+        delete headers['Content-Type'];
+      }
     }
     return config;
   },
@@ -51,7 +76,8 @@ api.interceptors.response.use(
         return new Promise((resolve, reject) => {
           pendingQueue.push({
             resolve: (token: string) => {
-              originalRequest.headers.Authorization = `Bearer ${token}`;
+              setHeader(originalRequest, 'Authorization', `Bearer ${token}`);
+              setHeader(originalRequest, 'X-Access-Token', token);
               resolve(api(originalRequest));
             },
             reject,
@@ -64,7 +90,8 @@ api.interceptors.response.use(
 
       try {
         const newToken = await refreshAccessToken();
-        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        setHeader(originalRequest, 'Authorization', `Bearer ${newToken}`);
+        setHeader(originalRequest, 'X-Access-Token', newToken);
         processQueue(null, newToken);
         return api(originalRequest);
       } catch (refreshError) {

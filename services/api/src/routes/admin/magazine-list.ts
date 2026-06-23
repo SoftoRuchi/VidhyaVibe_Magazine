@@ -17,6 +17,26 @@ const router = Router();
 router.use(requireAuth);
 router.use(requireAdmin);
 
+function mapMagazineWriteError(e: unknown) {
+  const err = e as { code?: string; errno?: number; sqlMessage?: string };
+  if (err?.code === 'ER_DATA_TOO_LONG' || err?.errno === 1406) {
+    return {
+      status: 400,
+      body: {
+        error: 'description_too_long',
+        message: 'Description is too long. Run DB migration 0019 or shorten the text.',
+      },
+    };
+  }
+  if (err?.code === 'ER_DUP_ENTRY' || err?.errno === 1062) {
+    return {
+      status: 409,
+      body: { error: 'slug_exists', message: 'A magazine with this slug already exists.' },
+    };
+  }
+  return null;
+}
+
 router.get('/list', async (req, res) => {
   const pool = getPool();
   const conn = await pool.getConnection();
@@ -54,6 +74,8 @@ router.post('/', upload.single('cover'), async (req, res) => {
     res.status(201).json({ id: r.insertId, coverKey });
   } catch (e: any) {
     console.error(e);
+    const mapped = mapMagazineWriteError(e);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
     res.status(500).json({ error: 'create_failed' });
   } finally {
     conn.release();
@@ -241,6 +263,8 @@ router.put('/:id', upload.single('cover'), async (req, res) => {
     res.json({ id, coverKey });
   } catch (e: any) {
     console.error(e);
+    const mapped = mapMagazineWriteError(e);
+    if (mapped) return res.status(mapped.status).json(mapped.body);
     res.status(500).json({ error: 'update_failed' });
   } finally {
     conn.release();

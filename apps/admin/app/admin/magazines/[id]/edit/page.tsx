@@ -4,6 +4,7 @@ import { Card, Form, Input, Button, Upload, message, Skeleton, Row, Col } from '
 import { useRouter } from 'next/navigation';
 import React, { useState, useEffect } from 'react';
 import api from '../../../../../lib/api';
+import { apiUpload } from '../../../../../lib/upload';
 
 export default function EditMagazine({ params }: any) {
   const id = params.id;
@@ -58,11 +59,7 @@ export default function EditMagazine({ params }: any) {
         formData.append('cover', fileList[0].originFileObj);
       }
 
-      await api.put(`/admin/magazines/${id}`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      await apiUpload('PUT', `/admin/magazines/${id}`, formData);
       message.success('Magazine updated successfully');
       router.push('/admin/magazines');
     } catch (err: any) {

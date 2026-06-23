@@ -15,6 +15,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { auditMiddleware } from './middleware/audit';
+import { corsMiddleware } from './middleware/cors';
 import { errorHandler } from './middleware/errorHandler';
 import { registerAdapters } from './providers';
 import adminCouponsRoutes from './routes/admin/coupons';
@@ -58,8 +59,9 @@ app.get('/', (_req, res) => {
 
 // Trust proxy so express-rate-limit can correctly identify clients via X-Forwarded-For
 app.set('trust proxy', 1);
-// Security headers
-app.use(helmet());
+app.use(corsMiddleware);
+// Security headers (allow cross-origin fetches from readeradmin / reader)
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -113,8 +115,15 @@ app.use(errorHandler(logger));
 
 const port = Number(env.PORT || 2034);
 // Listen on all interfaces so both 127.0.0.1 and localhost (IPv4/IPv6) behave consistently on Windows.
-app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', () => {
   logger.info(`API listening on ${port} (0.0.0.0)`);
+});
+server.on('error', (err: NodeJS.ErrnoException) => {
+  logger.error(
+    { err, port },
+    'Failed to bind API port — stop the other process on this port, then restart',
+  );
+  process.exit(1);
 });
 
 // Optional dispatch scheduler worker

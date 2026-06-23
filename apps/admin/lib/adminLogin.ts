@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { apiUrl } from './apiBase';
 import { saveAuthSession } from './authStorage';
 
 export type LoginResult = {
@@ -9,7 +10,7 @@ export type LoginResult = {
 
 export async function adminLogin(email: string, password: string): Promise<LoginResult> {
   const res = await axios.post<LoginResult>(
-    '/api/auth/login',
+    apiUrl('/auth/login'),
     { email, password, deviceName: 'admin-web' },
     { withCredentials: true },
   );

@@ -31,6 +31,7 @@ import dayjs from 'dayjs';
 import React, { useState } from 'react';
 import api from '../../../../lib/api';
 import { getReaderEditionUrl } from '../../../../lib/readerBaseUrl';
+import { apiUpload } from '../../../../lib/upload';
 
 function fileNameFromStorageKey(key: string | null | undefined): string {
   if (!key || typeof key !== 'string') return '';
@@ -319,18 +320,19 @@ export default function MagazineDetail({ params }: any) {
         fd.append('publishedAt', (values.publishedAt as Dayjs).format('YYYY-MM-DD'));
       }
 
-      const uploadOpts = {
-        onUploadProgress: (evt: any) => {
-          const pct = Math.round((evt.loaded / (evt.total || 1)) * 100);
-          message.loading({ content: `Uploading... ${pct}%`, key: 'upload' });
-        },
+      const onProgress = (pct: number) => {
+        message.loading({ content: `Uploading... ${pct}%`, key: 'upload' });
       };
 
       if (editingEditionId) {
-        await api.put(`/admin/magazines/${id}/editions/${editingEditionId}`, fd, uploadOpts);
+        await apiUpload('PUT', `/admin/magazines/${id}/editions/${editingEditionId}`, fd, {
+          onUploadProgress: onProgress,
+        });
         message.success({ content: 'Edition updated', key: 'upload' });
       } else {
-        await api.post(`/admin/magazines/${id}/editions`, fd, uploadOpts);
+        await apiUpload('POST', `/admin/magazines/${id}/editions`, fd, {
+          onUploadProgress: onProgress,
+        });
         message.success({ content: 'Edition created successfully', key: 'upload' });
       }
       form.resetFields();

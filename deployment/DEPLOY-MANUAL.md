@@ -308,6 +308,43 @@ Upload **source code only**, then `pnpm install` + `pnpm build` on Linux.
 
 **Do not** run `pm2 restart` until `pnpm --filter apps-admin build` ends with **✓ Compiled successfully**.
 
+## Admin API 401 on upload ("Invalid or expired token")
+
+Login works but `POST /api/admin/magazines` returns 401.
+
+### Deploy all three (required)
+
+**1. API** — add to server `.env` (repo root, same file API loads):
+
+```env
+JWT_ACCESS_EXPIRES=15m
+JWT_REFRESH_EXPIRES=7d
+```
+
+Upload `services/api/src/middleware/auth.ts` and `packages/config/src/env.ts`, then:
+
+```bash
+pnpm --filter @magazine/config build
+pm2 restart readerapi --update-env
+```
+
+**2. Admin** — upload `apps/admin/lib/upload.ts`, `lib/api.ts`, magazine pages, `scripts/next-api-rewrite-base.cjs`:
+
+```bash
+cd ~/htdocs/reader.vidhyavibe.in/VidhyaVibe_Magazine
+INTERNAL_API_URL=http://127.0.0.1:2034 pnpm --filter apps-admin build
+pm2 restart readeradmin --update-env
+```
+
+`INTERNAL_API_URL` makes `/api` proxy to loopback (avoids HTTPS hop stripping `Authorization` on file uploads).
+
+**3. Log in again** after deploy, then retry upload.
+
+### Verify token in browser
+
+DevTools → Network → failing POST → Request Headers must include:
+`Authorization: Bearer ...` and `X-Access-Token: ...`
+
 ## Deploy admin only (after uploading source files)
 
 **Important:** run every command from the **repo root** (folder that contains `package.json`).
