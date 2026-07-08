@@ -1,8 +1,16 @@
+import Link from 'next/link';
 import React from 'react';
 
 const Footer = () => {
+  const linkStyle: React.CSSProperties = {
+    color: '#fff',
+    opacity: 0.92,
+    transition: 'opacity 0.15s ease',
+  };
+
   return (
     <footer
+      className="vv-app-footer"
       style={{
         backgroundColor: '#2C3E50',
         color: '#fff',
@@ -11,7 +19,6 @@ const Footer = () => {
         display: 'flex',
         alignItems: 'center',
         lineHeight: 1,
-        marginTop: 'auto',
       }}
     >
       <div
@@ -20,25 +27,26 @@ const Footer = () => {
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
+          gap: 8,
           fontSize: 12,
           width: '100%',
           padding: '0 16px',
         }}
       >
         <div style={{ whiteSpace: 'nowrap' }}>
-          &copy; {new Date().getFullYear()} Magazine Kids. All rights reserved.
+          &copy; {new Date().getFullYear()} VidhyaVibe Magazine. All rights reserved.
         </div>
 
         <div style={{ display: 'flex', gap: 16, whiteSpace: 'nowrap' }}>
-          <a href="#" style={{ color: '#fff' }}>
+          <Link href="/terms" style={linkStyle}>
             Terms
-          </a>
-          <a href="#" style={{ color: '#fff' }}>
+          </Link>
+          <Link href="/privacy" style={linkStyle}>
             Privacy
-          </a>
-          <a href="#" style={{ color: '#fff' }}>
+          </Link>
+          <Link href="/contact" style={linkStyle}>
             Contact
-          </a>
+          </Link>
         </div>
       </div>
     </footer>

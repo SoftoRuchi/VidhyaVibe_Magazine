@@ -23,7 +23,7 @@ const Hero = () => {
           }}
         >
           Discover the World with{' '}
-          <span style={{ color: 'var(--primary-color)' }}>Magazine Kids</span>
+          <span style={{ color: 'var(--primary-color)' }}>VidhyaVibe Magazine</span>
         </h1>
         <p
           style={{
@@ -35,8 +35,8 @@ const Hero = () => {
             lineHeight: '1.6',
           }}
         >
-          Explore amazing stories, fun facts, and learning adventures tailored just for you! Choose
-          your age group and start reading today.
+          Explore inspiring stories, thoughtful articles, and fresh perspectives tailored to your
+          interests. Browse by age group or topic and start reading today.
         </p>
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
           <Link href="#age-groups">

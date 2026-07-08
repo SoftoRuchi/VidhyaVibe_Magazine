@@ -45,7 +45,10 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
   try {
     const pool = getPool();
     conn = await pool.getConnection();
-    const [rows]: any = await conn.query('SELECT * FROM users WHERE id = ? LIMIT 1', [userId]);
+    const [rows]: any = await conn.query(
+      'SELECT id, email, isAdmin FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
     const u = rows[0];
     if (!u) return res.status(401).json({ error: 'user_not_found' });
     req.user = { id: u.id, email: u.email, isAdmin: rowIsAdmin(u) };

@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import React from 'react';
 import HTMLFlipBook from 'react-pageflip';
 import { Document, Page, pdfjs } from 'react-pdf';
+import { apiUrl } from '../../../lib/apiBase';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -239,18 +240,16 @@ export default function ReaderView() {
     imageLoadFailed,
   ]);
   const pageUrl = (p: number) =>
-    `/api/editions/${editionId}/pages/${p}?lowBandwidth=${low ? '1' : '0'}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+    apiUrl(
+      `/api/editions/${editionId}/pages/${p}?lowBandwidth=${low ? '1' : '0'}${token ? `&token=${encodeURIComponent(token)}` : ''}`,
+    );
 
-  // preload adjacent pages for smoother transitions
+  // Preload only immediate neighbors (avoids loading many large page images in RAM)
   React.useEffect(() => {
     if (!pages.length) return;
-    const toPreload: number[] = [];
-    const next = Math.min(pages.length, current + 1);
-    const prev = Math.max(1, current - 1);
-    toPreload.push(prev);
-    toPreload.push(next);
-    const next2 = Math.min(pages.length, current + 2);
-    if (next2 !== next) toPreload.push(next2);
+    const toPreload = [Math.max(1, current - 1), Math.min(pages.length, current + 1)].filter(
+      (p, i, arr) => arr.indexOf(p) === i,
+    );
 
     const imgs: HTMLImageElement[] = [];
     toPreload.forEach((p) => {

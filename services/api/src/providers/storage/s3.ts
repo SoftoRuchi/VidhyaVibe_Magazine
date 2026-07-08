@@ -14,15 +14,6 @@ export function createS3Adapter(env: Env, ctx: { logger: Logger }) {
     forcePathStyle: true,
   } as any);
 
-  async function streamToBuffer(stream: any) {
-    return new Promise<Buffer>((resolve, reject) => {
-      const chunks: Uint8Array[] = [];
-      stream.on('data', (chunk: Uint8Array) => chunks.push(chunk));
-      stream.on('end', () => resolve(Buffer.concat(chunks)));
-      stream.on('error', reject);
-    });
-  }
-
   return {
     async upload(key: string, buffer: Buffer, contentType?: string) {
       const bucket = env.STORAGE_BUCKET || 'magazine';
@@ -40,9 +31,7 @@ export function createS3Adapter(env: Env, ctx: { logger: Logger }) {
       const bucket = env.STORAGE_BUCKET || 'magazine';
       const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
       const res: any = await client.send(cmd);
-      const body = res.Body as Readable;
-      const buf = await streamToBuffer(body);
-      return buf;
+      return res.Body as Readable;
     },
     async presignUpload(key: string, contentType = 'application/octet-stream', expiresSec = 900) {
       const bucket = env.STORAGE_BUCKET || 'magazine';

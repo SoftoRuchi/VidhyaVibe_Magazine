@@ -6,6 +6,8 @@
     "generate": "prisma generate",
     "migrate:dev": "dotenv -e ../../.env -- prisma migrate dev",
     "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "migrate:fix-failed": "dotenv -e ../../.env -- node scripts/migrate-fix-failed.js",
+    "migrate:resolve-sale-offers": "dotenv -e ../../.env -- npx prisma migrate resolve --applied 202606270001_sale_offers --schema schema.prisma",
     "migrate:0015": "dotenv -e ../../.env -- node run-migration-0015.js",
     "seed": "dotenv -e ../../.env -- ts-node --transpile-only prisma/seed.ts",
     "build": "prisma generate && tsc -p tsconfig.json"

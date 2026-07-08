@@ -1,6 +1,6 @@
 'use client';
 import { PlusOutlined } from '@ant-design/icons';
-import { Card, Form, Input, Button, Upload, message, Row, Col } from 'antd';
+import { Card, Form, Input, Button, Upload, message, Row, Col, Select } from 'antd';
 import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 import api from '../../../../lib/api';
@@ -10,6 +10,13 @@ export default function NewMagazine() {
   const router = useRouter();
   const [fileList, setFileList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [ageGroups, setAgeGroups] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    api
+      .get('/admin/age-groups')
+      .then((r) => setAgeGroups((r.data || []).filter((g: any) => g.active !== false)));
+  }, []);
 
   React.useEffect(() => {
     return () => {
@@ -27,7 +34,7 @@ export default function NewMagazine() {
       formData.append('slug', values.slug);
       if (values.publisher) formData.append('publisher', values.publisher);
       if (values.description) formData.append('description', values.description);
-      if (values.category) formData.append('category', values.category);
+      if (values.ageGroupId) formData.append('ageGroupId', String(values.ageGroupId));
 
       if (fileList.length > 0) {
         formData.append('cover', fileList[0].originFileObj);
@@ -106,8 +113,21 @@ export default function NewMagazine() {
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item name="category" label="Category">
-                <Input placeholder="e.g. Education / Technology" />
+              <Form.Item
+                name="ageGroupId"
+                label="Age Group"
+                rules={[{ required: true, message: 'Select an age group' }]}
+              >
+                <Select
+                  placeholder="Select age group"
+                  options={ageGroups.map((g: any) => ({
+                    value: g.id,
+                    label:
+                      g.minAge != null && g.maxAge != null
+                        ? `${g.name} (${g.minAge}–${g.maxAge})`
+                        : g.name,
+                  }))}
+                />
               </Form.Item>
             </Col>
           </Row>

@@ -1,11 +1,14 @@
 'use client';
 
 import { Spin, Empty } from 'antd';
-import axios from 'axios';
 import Image from 'next/image';
 import React from 'react';
 import childImg from '../../components/images/child.png';
 import MagazineCard from '../../components/MagazineCard';
+import type { AgeGroup } from '../../lib/ageGroups';
+import api from '../../lib/api';
+import { assetUrl } from '../../lib/apiBase';
+import { cachedGet } from '../../lib/requestCache';
 
 interface Magazine {
   id: number;
@@ -13,31 +16,33 @@ interface Magazine {
   description?: string;
   coverKey?: string;
   category?: string;
+  ageGroupSlug?: string;
   createdAt: string;
   sampleEditionId?: number | null;
 }
 
-const AGE_PILLS: { value: string; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: '8-11', label: '8-11' },
-  { value: '12-14', label: '12-14' },
-  { value: '15-16', label: '15-16' },
-  { value: '17-18', label: '17-18' },
-];
-
 export default function BrowseMagazinesPage() {
+  const [ageGroups, setAgeGroups] = React.useState<AgeGroup[]>([]);
   const [ageGroup, setAgeGroup] = React.useState<string>('all');
   const [magazines, setMagazines] = React.useState<Magazine[]>([]);
   const [loading, setLoading] = React.useState(true);
 
-  const headingTitle = ageGroup === 'all' ? 'Magazines' : `Magazines for Ages ${ageGroup}`;
+  React.useEffect(() => {
+    cachedGet<AgeGroup[]>(api, '/api/age-groups', undefined, 120_000)
+      .then((r) => setAgeGroups(r.data || []))
+      .catch(() => setAgeGroups([]));
+  }, []);
+
+  const selectedGroup = ageGroups.find((g) => g.slug === ageGroup);
+  const headingTitle =
+    ageGroup === 'all' ? 'Magazines' : `Magazines for Ages ${selectedGroup?.name ?? ageGroup}`;
 
   React.useEffect(() => {
     const run = async () => {
       setLoading(true);
       try {
         const url = ageGroup === 'all' ? '/api/magazines' : `/api/magazines?category=${ageGroup}`;
-        const res = await axios.get(url);
+        const res = await cachedGet<Magazine[]>(api, url, undefined, 120_000);
         setMagazines(res.data || []);
       } catch (e) {
         setMagazines([]);
@@ -48,10 +53,14 @@ export default function BrowseMagazinesPage() {
     run();
   }, [ageGroup]);
 
+  const pills = [
+    { value: 'all', label: 'All' },
+    ...ageGroups.map((g) => ({ value: g.slug, label: g.name })),
+  ];
+
   return (
     <main style={{ minHeight: '80vh' }}>
       <div className="container">
-        {/* Themed heading */}
         <div
           style={{
             display: 'grid',
@@ -68,7 +77,7 @@ export default function BrowseMagazinesPage() {
               width={84}
               height={84}
               style={{ width: 84, height: 84, objectFit: 'contain' }}
-              priority
+              loading="lazy"
             />
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <h1
@@ -109,38 +118,40 @@ export default function BrowseMagazinesPage() {
             boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 6,
-              marginBottom: 14,
-              justifyContent: 'center',
-            }}
-          >
-            {AGE_PILLS.map(({ value, label }) => {
-              const active = ageGroup === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setAgeGroup(value)}
-                  style={{
-                    padding: '0.35rem 0.75rem',
-                    fontSize: 13,
-                    fontWeight: active ? 600 : 500,
-                    borderRadius: 999,
-                    border: `1px solid ${active ? '#3d2914' : 'rgba(61,41,20,0.35)'}`,
-                    background: active ? '#3d2914' : 'rgba(255,255,255,0.9)',
-                    color: active ? '#fff' : '#3d2914',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+          {pills.length > 1 && (
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 6,
+                marginBottom: 14,
+                justifyContent: 'center',
+              }}
+            >
+              {pills.map(({ value, label }) => {
+                const active = ageGroup === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setAgeGroup(value)}
+                    style={{
+                      padding: '0.35rem 0.75rem',
+                      fontSize: 13,
+                      fontWeight: active ? 600 : 500,
+                      borderRadius: 999,
+                      border: `1px solid ${active ? '#3d2914' : 'rgba(61,41,20,0.35)'}`,
+                      background: active ? '#3d2914' : 'rgba(255,255,255,0.9)',
+                      color: active ? '#fff' : '#3d2914',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {loading ? (
             <div style={{ textAlign: 'center', padding: '3rem' }}>
@@ -161,7 +172,7 @@ export default function BrowseMagazinesPage() {
                   title={m.title}
                   description={m.description || ''}
                   date={new Date(m.createdAt).getFullYear().toString()}
-                  image={m.coverKey ? `/api/assets/serve?key=${m.coverKey}` : ''}
+                  image={m.coverKey ? assetUrl(m.coverKey) : ''}
                   sampleEditionId={m.sampleEditionId ?? undefined}
                   variant="vintage"
                   fullCover={index % 2 === 1}

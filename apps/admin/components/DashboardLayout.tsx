@@ -12,6 +12,9 @@ import {
   FileTextOutlined,
   ShoppingCartOutlined,
   DollarOutlined,
+  TagOutlined,
+  PictureOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { Layout, Menu, theme, Button } from 'antd';
 import axios from 'axios';
@@ -42,10 +45,13 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
     if (!pathname) return 'dashboard';
     if (pathname.includes('/users')) return 'users';
     if (pathname.includes('/magazines')) return 'magazines';
+    if (pathname.includes('/age-groups')) return 'age-groups';
     if (pathname.includes('/plans')) return 'plans';
     if (pathname.includes('/subscriptions')) return 'subscriptions';
     if (pathname.includes('/readers')) return 'readers';
     if (pathname.includes('/orders')) return 'orders';
+    if (pathname.includes('/sales')) return 'sales';
+    if (pathname.includes('/posts')) return 'posts';
     return 'dashboard';
   };
 
@@ -61,6 +67,11 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       label: <Link href="/admin/magazines">Magazines</Link>,
     },
     {
+      key: 'age-groups',
+      icon: <AppstoreOutlined />,
+      label: <Link href="/admin/age-groups">Age Groups</Link>,
+    },
+    {
       key: 'users',
       icon: <UserOutlined />,
       label: <Link href="/admin/users">Users</Link>,
@@ -69,6 +80,16 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       key: 'plans',
       icon: <DollarOutlined />,
       label: <Link href="/admin/plans">Plans & Pricing</Link>,
+    },
+    {
+      key: 'sales',
+      icon: <TagOutlined />,
+      label: <Link href="/admin/sales">Sales & Offers</Link>,
+    },
+    {
+      key: 'posts',
+      icon: <PictureOutlined />,
+      label: <Link href="/admin/posts">Posts & Carousel</Link>,
     },
     {
       key: 'subscriptions',

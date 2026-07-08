@@ -49,7 +49,7 @@ async function main() {
       data: {
         title: 'Space Explorers',
         slug: 'space-explorers',
-        publisher: 'Magazine Kids Publishing',
+        publisher: 'VidhyaVibe Magazine Publishing',
         description:
           'Journey to the stars and discover the wonders of space, planets, and galaxies.',
         category: '8-11',
@@ -60,7 +60,7 @@ async function main() {
       data: {
         title: 'Deep Ocean Mysteries',
         slug: 'deep-ocean-mysteries',
-        publisher: 'Magazine Kids Publishing',
+        publisher: 'VidhyaVibe Magazine Publishing',
         description:
           'Dive deep into the ocean and explore amazing sea creatures and underwater worlds.',
         category: '8-11',
@@ -71,7 +71,7 @@ async function main() {
       data: {
         title: 'Ancient Civilizations',
         slug: 'ancient-civilizations',
-        publisher: 'Magazine Kids Publishing',
+        publisher: 'VidhyaVibe Magazine Publishing',
         description: 'Travel back in time to discover pyramids, pharaohs, and ancient cultures.',
         category: '12-14',
         active: true,
@@ -81,7 +81,7 @@ async function main() {
       data: {
         title: 'Tech Innovators',
         slug: 'tech-innovators',
-        publisher: 'Magazine Kids Publishing',
+        publisher: 'VidhyaVibe Magazine Publishing',
         description:
           'Explore cutting-edge technology, coding, robotics, and the future of innovation.',
         category: '15-16',
@@ -92,7 +92,7 @@ async function main() {
       data: {
         title: 'World Leaders & History',
         slug: 'world-leaders-history',
-        publisher: 'Magazine Kids Publishing',
+        publisher: 'VidhyaVibe Magazine Publishing',
         description: 'Learn about influential leaders, historical events, and global politics.',
         category: '17-18',
         active: true,
@@ -102,7 +102,7 @@ async function main() {
       data: {
         title: 'Wild Safari',
         slug: 'wild-safari',
-        publisher: 'Magazine Kids Publishing',
+        publisher: 'VidhyaVibe Magazine Publishing',
         description:
           'Meet the kings of the jungle and discover amazing wildlife from around the world.',
         category: '8-11',
@@ -113,7 +113,7 @@ async function main() {
       data: {
         title: 'Science Lab',
         slug: 'science-lab',
-        publisher: 'Magazine Kids Publishing',
+        publisher: 'VidhyaVibe Magazine Publishing',
         description:
           'Conduct experiments, learn about chemistry, physics, and the scientific method.',
         category: '12-14',

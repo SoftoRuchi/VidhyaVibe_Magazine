@@ -2,10 +2,11 @@
 
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Button, Card, Empty } from 'antd';
-import axios from 'axios';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import api from '../../../lib/api';
+import { assetUrl } from '../../../lib/apiBase';
 import { isChildAudience } from '../../../lib/viewingContext';
 
 interface Magazine {
@@ -46,8 +47,8 @@ export default function MagazineDetailPage() {
     const fetchData = async () => {
       try {
         const [magRes, editionsRes] = await Promise.all([
-          axios.get(`/api/magazines/${id}`),
-          axios.get(`/api/magazines/${id}/editions`),
+          api.get(`/api/magazines/${id}`),
+          api.get(`/api/magazines/${id}/editions`),
         ]);
         setMagazine(magRes.data);
         setEditions(editionsRes.data || []);
@@ -63,7 +64,7 @@ export default function MagazineDetailPage() {
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
     if (!token || !magazine) return;
-    axios
+    api
       .get(`/api/subscriptions/check/${magazine.id}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -183,7 +184,7 @@ export default function MagazineDetailPage() {
 
                   {magazine.coverKey ? (
                     <img
-                      src={`/api/assets/serve?key=${magazine.coverKey}`}
+                      src={assetUrl(magazine.coverKey)}
                       alt={magazine.title}
                       style={{ width: '100%', height: 430, objectFit: 'cover', display: 'block' }}
                     />

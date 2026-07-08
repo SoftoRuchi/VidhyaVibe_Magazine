@@ -1,6 +1,21 @@
 import type { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../auth/jwt';
-import { getPool } from '../db';
+import { rowIsAdmin } from '../auth/userFlags';
+import { query } from '../db';
+import { BoundedTTLCache } from '../utils/boundedCache';
+
+const ACCESS_TTL_MS = 5 * 60 * 1000;
+const accessCache = new BoundedTTLCache<boolean>(
+  Number(process.env.EDITION_ACCESS_CACHE_SIZE || 5000),
+);
+
+function cacheGet(userId: number, editionId: number): boolean | null {
+  return accessCache.get(`${userId}:${editionId}`);
+}
+
+function cacheSet(userId: number, editionId: number, ok: boolean) {
+  accessCache.set(`${userId}:${editionId}`, ok, ACCESS_TTL_MS);
+}
 
 export async function requireEditionAccess(req: Request, res: Response, next: NextFunction) {
   const editionId = Number(req.params.editionId);
@@ -14,49 +29,53 @@ export async function requireEditionAccess(req: Request, res: Response, next: Ne
 
   let userId: number;
   try {
-    const payload = verifyAccessToken(parts[1]) as any;
+    const payload = verifyAccessToken(parts[1]) as { sub?: number | string };
     userId = Number(payload?.sub);
-  } catch (e) {
+  } catch {
     return res.status(401).json({ error: 'invalid_or_expired_token' });
   }
   if (!userId) return res.status(401).json({ error: 'invalid_token' });
 
-  const pool = getPool();
-  const conn = await pool.getConnection();
+  const cached = cacheGet(userId, editionId);
+  if (cached === true) return next();
+  if (cached === false) {
+    return res
+      .status(403)
+      .json({ error: 'access_denied', message: 'Subscribe or purchase to read this edition' });
+  }
+
   try {
-    const [edRows]: any = await conn.query(
-      'SELECT magazineId FROM magazine_editions WHERE id = ? LIMIT 1',
-      [editionId],
+    const [rows]: any = await query(
+      `SELECT e.magazineId, u.isAdmin,
+        EXISTS(
+          SELECT 1 FROM edition_purchases ep
+          WHERE ep.userId = ? AND ep.editionId = ?
+        ) AS hasPurchase,
+        EXISTS(
+          SELECT 1 FROM user_subscriptions us
+          WHERE us.userId = ? AND us.magazineId = e.magazineId
+            AND us.status = 'ACTIVE' AND (us.endsAt IS NULL OR us.endsAt > NOW())
+        ) AS hasSubscription
+       FROM magazine_editions e
+       LEFT JOIN users u ON u.id = ?
+       WHERE e.id = ?
+       LIMIT 1`,
+      [userId, editionId, userId, userId, editionId],
     );
-    const ed = edRows[0];
-    if (!ed) return res.status(404).json({ error: 'edition_not_found' });
+    const row = rows[0];
+    if (!row) return res.status(404).json({ error: 'edition_not_found' });
 
-    // Admin bypass: admins can read any edition for review
-    const [userRows]: any = await conn.query('SELECT isAdmin FROM users WHERE id = ? LIMIT 1', [
-      userId,
-    ]);
-    if (userRows[0]?.isAdmin) return next();
+    const allowed =
+      rowIsAdmin(row) || Number(row.hasPurchase) === 1 || Number(row.hasSubscription) === 1;
 
-    const magazineId = ed.magazineId;
-
-    // Check purchase
-    const [purchaseRows]: any = await conn.query(
-      'SELECT id FROM edition_purchases WHERE userId = ? AND editionId = ? LIMIT 1',
-      [userId, editionId],
-    );
-    if (purchaseRows.length > 0) return next();
-
-    // Check subscription
-    const [subRows]: any = await conn.query(
-      'SELECT id FROM user_subscriptions WHERE userId = ? AND magazineId = ? AND status = ? AND (endsAt IS NULL OR endsAt > NOW()) LIMIT 1',
-      [userId, magazineId, 'ACTIVE'],
-    );
-    if (subRows.length > 0) return next();
+    cacheSet(userId, editionId, allowed);
+    if (allowed) return next();
 
     return res
       .status(403)
       .json({ error: 'access_denied', message: 'Subscribe or purchase to read this edition' });
-  } finally {
-    conn.release();
+  } catch (e) {
+    console.error('[requireEditionAccess]', e);
+    return res.status(500).json({ error: 'access_check_failed' });
   }
 }

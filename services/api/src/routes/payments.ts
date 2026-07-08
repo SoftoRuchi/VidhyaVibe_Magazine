@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import multer from 'multer';
 import { getPool } from '../db';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
+import { memoryUpload } from '../middleware/upload';
 import { getStorageAdapter } from '../providers/storage';
 import {
   createOrder,
@@ -13,7 +13,7 @@ import {
 } from '../services/payments';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = memoryUpload;
 
 router.use(requireAuth);
 

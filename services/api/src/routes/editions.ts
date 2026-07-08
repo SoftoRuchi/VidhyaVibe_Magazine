@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { getPool } from '../db';
 import { requireEditionAccess } from '../middleware/editionAccess';
 import { getStorageAdapter } from '../providers/storage';
+import { sendStorageBody } from '../utils/sendStorage';
 
 const router = Router();
 
@@ -78,17 +79,11 @@ router.get('/:editionId/sample', async (req: Request, res: Response) => {
     const storage = getStorageAdapter();
     if (!storage.get) return res.status(400).json({ error: 'get_not_supported' });
     const data: any = await storage.get(ed.sampleKey);
-    if (!data) return res.status(404).json({ error: 'sample_not_found' });
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="sample.pdf"');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    if (Buffer.isBuffer(data)) return res.send(data);
-    data.on('error', (err: any) => {
-      console.error(err);
-      res.status(500).end();
+    sendStorageBody(res, data, {
+      contentType: 'application/pdf',
+      disposition: 'inline; filename="sample.pdf"',
+      cacheControl: 'public, max-age=86400',
     });
-    data.pipe(res);
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'fetch_failed', message: e.message });
@@ -141,18 +136,10 @@ router.get('/:editionId/pdf', requireEditionAccess, async (req: Request, res: Re
     const storage = getStorageAdapter();
     if (!storage.get) return res.status(400).json({ error: 'get_not_supported' });
     const data: any = await storage.get(ed.fileKey);
-    if (!data) return res.status(404).json({ error: 'pdf_not_found' });
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="edition.pdf"');
-    if (Buffer.isBuffer(data)) {
-      return res.send(data);
-    }
-    data.on('error', (err: any) => {
-      console.error(err);
-      res.status(500).end();
+    sendStorageBody(res, data, {
+      contentType: 'application/pdf',
+      disposition: 'inline; filename="edition.pdf"',
     });
-    data.pipe(res);
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'fetch_failed', message: e.message });
@@ -177,19 +164,10 @@ router.get(
       // storage.get may return Buffer or stream
       if (!storage.get) return res.status(400).json({ error: 'get_not_supported' });
       const data: any = await storage.get(key);
-      if (!data) return res.status(404).json({ error: 'page_not_found' });
-      // handle Buffer
-      if (Buffer.isBuffer(data)) {
-        res.setHeader('Content-Type', 'image/jpeg');
-        return res.send(data);
-      }
-      // assume stream
-      data.on('error', (err: any) => {
-        console.error(err);
-        res.status(500).end();
+      sendStorageBody(res, data, {
+        contentType: 'image/jpeg',
+        cacheControl: 'public, max-age=86400',
       });
-      res.setHeader('Content-Type', 'image/jpeg');
-      data.pipe(res);
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: 'fetch_failed', message: e.message });

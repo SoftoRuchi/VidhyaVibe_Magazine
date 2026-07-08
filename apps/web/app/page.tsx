@@ -1,11 +1,21 @@
 'use client';
 
-import axios from 'axios';
+import dynamic from 'next/dynamic';
 import Image from 'next/image';
+import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
 import AgeGroupSection from '../components/AgeGroupSection';
 import childImg from '../components/images/child.png';
 import MagazineCard from '../components/MagazineCard';
+import PostCard, { type SitePostItem } from '../components/PostCard';
+import type { AgeGroup } from '../lib/ageGroups';
+import api from '../lib/api';
+import { assetUrl } from '../lib/apiBase';
+import { cachedGet } from '../lib/requestCache';
+
+const PostMediaCarousel = dynamic(() => import('../components/PostMediaCarousel'), {
+  loading: () => <div style={{ textAlign: 'center', padding: '3rem 0' }}>Loading…</div>,
+});
 
 interface Magazine {
   id: number;
@@ -18,31 +28,85 @@ interface Magazine {
   sampleEditionId?: number | null;
 }
 
+interface SitePost {
+  id: number;
+  type: 'POST' | 'CAROUSEL';
+  title: string;
+  subtitle?: string | null;
+  body?: string | null;
+  imageKey?: string | null;
+  ctaLabel?: string | null;
+  ctaHref?: string | null;
+  sortOrder?: number;
+  createdAt?: string | null;
+}
+
 export default function Page() {
   const [recentMagazines, setRecentMagazines] = useState<Magazine[]>([]);
+  const [carouselSlides, setCarouselSlides] = useState<
+    Array<{
+      slideKey: string;
+      title: string;
+      subtitle?: string | null;
+      ctaLabel?: string | null;
+      ctaHref?: string | null;
+      mediaType: string;
+      mediaKey: string;
+      mediaId: number | null;
+    }>
+  >([]);
+  const [latestPosts, setLatestPosts] = useState<SitePost[]>([]);
+  const [ageGroups, setAgeGroups] = useState<AgeGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingPosts, setLoadingPosts] = useState(true);
 
   useEffect(() => {
-    const fetchMagazines = async () => {
+    let cancelled = false;
+
+    async function loadHomeData() {
       try {
-        const response = await axios.get('/api/magazines');
-        const magazines = response.data || [];
+        const [postsRes, magazinesRes, ageGroupsRes] = await Promise.all([
+          cachedGet<{ carouselSlides?: unknown[]; posts?: SitePost[] }>(
+            api,
+            '/api/posts',
+            undefined,
+            60_000,
+          ),
+          cachedGet<any[]>(api, '/api/magazines', undefined, 120_000),
+          cachedGet<AgeGroup[]>(api, '/api/age-groups', undefined, 120_000),
+        ]);
 
-        // Map coverKey to full URL
-        const mapped = magazines.map((m: any) => ({
+        if (cancelled) return;
+
+        setCarouselSlides((postsRes.data?.carouselSlides ?? []) as typeof carouselSlides);
+        setLatestPosts(postsRes.data?.posts ?? []);
+        setAgeGroups(ageGroupsRes.data || []);
+
+        const mapped = (magazinesRes.data || []).map((m: any) => ({
           ...m,
-          image: m.coverKey ? `/api/assets/serve?key=${m.coverKey}` : '',
+          image: m.coverKey ? assetUrl(m.coverKey) : '',
         }));
-
         setRecentMagazines(mapped.slice(0, 6));
       } catch (error) {
-        console.error('Failed to fetch magazines:', error);
+        if (!cancelled) {
+          console.error('Failed to load home page data:', error);
+          setCarouselSlides([]);
+          setLatestPosts([]);
+          setAgeGroups([]);
+          setRecentMagazines([]);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoadingPosts(false);
+          setLoading(false);
+        }
       }
-    };
+    }
 
-    fetchMagazines();
+    loadHomeData();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const featuredMagazines = recentMagazines.slice(0, 3);
@@ -89,7 +153,7 @@ export default function Page() {
                   }}
                 >
                   <span style={{ fontSize: 14 }}>✨</span>
-                  Safe, ad‑free reading for kids
+                  Safe, ad‑free reading for everyone
                 </div>
 
                 <div
@@ -117,7 +181,7 @@ export default function Page() {
                       height={84}
                       className="vv-home-titleImg"
                       style={{ width: 84, height: 84, objectFit: 'contain' }}
-                      priority
+                      loading="lazy"
                     />
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <h1
@@ -132,7 +196,7 @@ export default function Page() {
                           textAlign: 'center',
                         }}
                       >
-                        Magazine Kids
+                        VidhyaVibe Magazine
                       </h1>
                       <div
                         className="vv-home-titleUnderline"
@@ -159,8 +223,8 @@ export default function Page() {
                     lineHeight: 1.6,
                   }}
                 >
-                  Explore space, oceans, animals, and adventures in every issue. Read anywhere,
-                  anytime—safe and ad‑free.
+                  Explore space, oceans, culture, science, and ideas in every issue. Read anywhere,
+                  anytime — thoughtfully curated and ad‑free.
                 </p>
 
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -179,11 +243,25 @@ export default function Page() {
                     Browse Magazines
                   </a>
                   <a
-                    href="/subscribe"
+                    href="/sales"
                     style={{
                       padding: '0.7rem 1.2rem',
                       borderRadius: 999,
                       background: 'var(--btn-read-red, #c0392b)',
+                      color: 'white',
+                      fontWeight: 700,
+                      fontSize: 14,
+                      boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
+                    }}
+                  >
+                    View Deals
+                  </a>
+                  <a
+                    href="/subscribe"
+                    style={{
+                      padding: '0.7rem 1.2rem',
+                      borderRadius: 999,
+                      background: 'rgba(61,41,20,0.85)',
                       color: 'white',
                       fontWeight: 700,
                       fontSize: 14,
@@ -197,7 +275,7 @@ export default function Page() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
                   {[
                     { label: 'New every month', bg: 'rgba(45,122,62,0.12)' },
-                    { label: 'Kid‑friendly', bg: 'rgba(61,41,20,0.08)' },
+                    { label: 'For all ages', bg: 'rgba(61,41,20,0.08)' },
                     { label: 'Read anywhere', bg: 'rgba(192,57,43,0.10)' },
                   ].map((chip) => (
                     <span
@@ -226,73 +304,162 @@ export default function Page() {
                   border: '1px solid rgba(61,41,20,0.16)',
                 }}
               >
-                <div
-                  className="vv-home-sideHero"
-                  style={{
-                    borderRadius: 14,
-                    overflow: 'hidden',
-                    background:
-                      'linear-gradient(180deg, rgba(139,79,42,0.22) 0%, rgba(119,64,31,0.10) 60%, rgba(255,255,255,0.12) 100%)',
-                    height: 220,
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    justifyContent: 'center',
-                    color: '#3d2914',
-                    fontWeight: 800,
-                    fontFamily: 'Georgia, serif',
-                    fontSize: 20,
-                    paddingBottom: 10,
-                    position: 'relative',
-                  }}
-                >
-                  <div
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      background:
-                        'radial-gradient(520px 220px at 20% 10%, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 42%, rgba(0,0,0,0.12) 100%)',
-                    }}
-                  />
-                  <div
-                    style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10 }}
-                  >
-                    <span style={{ fontSize: 18 }}>🌟</span>
-                    Latest Adventures
+                {loadingPosts ? (
+                  <div style={{ textAlign: 'center', padding: '3rem 0' }}>Loading…</div>
+                ) : carouselSlides.length > 0 ? (
+                  <div style={{ borderRadius: 14, overflow: 'hidden' }}>
+                    <PostMediaCarousel
+                      items={carouselSlides.map((slide, i) => ({
+                        id: slide.mediaId ?? i,
+                        mediaType: slide.mediaType,
+                        mediaKey: slide.mediaKey,
+                      }))}
+                      title={carouselSlides[0]?.title ?? 'Carousel'}
+                      mediaFit="cover"
+                      slideHeight={220}
+                      showArrows
+                      clickToNavigate
+                      imageIntervalMs={5000}
+                      renderOverlay={(_item, index) => {
+                        const slide = carouselSlides[index];
+                        if (!slide) return null;
+                        return (
+                          <>
+                            <div
+                              style={{
+                                position: 'absolute',
+                                inset: 0,
+                                background:
+                                  'linear-gradient(to top, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.05) 55%)',
+                                pointerEvents: 'none',
+                              }}
+                            />
+                            <div
+                              style={{
+                                position: 'absolute',
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                padding: '14px 16px',
+                                color: '#fff',
+                                pointerEvents: 'none',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 800,
+                                  fontFamily: 'Georgia, serif',
+                                  fontSize: 18,
+                                }}
+                              >
+                                {slide.title}
+                              </div>
+                              {slide.subtitle && (
+                                <div style={{ fontSize: 13, opacity: 0.92, marginTop: 4 }}>
+                                  {slide.subtitle}
+                                </div>
+                              )}
+                              {(slide.ctaHref || slide.ctaLabel) && (
+                                <Link
+                                  href={slide.ctaHref || '/magazines'}
+                                  style={{
+                                    display: 'inline-block',
+                                    marginTop: 8,
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: '#fff',
+                                    padding: '5px 12px',
+                                    borderRadius: 999,
+                                    background: 'rgba(255,255,255,0.22)',
+                                    border: '1px solid rgba(255,255,255,0.35)',
+                                    pointerEvents: 'auto',
+                                  }}
+                                >
+                                  {slide.ctaLabel || 'Learn more'} →
+                                </Link>
+                              )}
+                            </div>
+                          </>
+                        );
+                      }}
+                    />
                   </div>
-                </div>
-                <p style={{ fontSize: 13, color: '#5c4a3a', margin: '10px 0 0' }}>
-                  Pick an age group to start reading right away.
-                </p>
-                <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <a
-                    href="/quiz"
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: '#3d2914',
-                      padding: '6px 10px',
-                      borderRadius: 999,
-                      background: 'rgba(255,255,255,0.8)',
-                      border: '1px solid rgba(61,41,20,0.18)',
-                    }}
-                  >
-                    Play Quiz →
-                  </a>
-                  <a
-                    href="/facts"
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: '#3d2914',
-                      padding: '6px 10px',
-                      borderRadius: 999,
-                      background: 'rgba(255,255,255,0.8)',
-                      border: '1px solid rgba(61,41,20,0.18)',
-                    }}
-                  >
-                    Fun Facts →
-                  </a>
-                </div>
+                ) : (
+                  <>
+                    <div
+                      className="vv-home-sideHero"
+                      style={{
+                        borderRadius: 14,
+                        overflow: 'hidden',
+                        background:
+                          'linear-gradient(180deg, rgba(139,79,42,0.22) 0%, rgba(119,64,31,0.10) 60%, rgba(255,255,255,0.12) 100%)',
+                        height: 220,
+                        display: 'flex',
+                        alignItems: 'flex-end',
+                        justifyContent: 'center',
+                        color: '#3d2914',
+                        fontWeight: 800,
+                        fontFamily: 'Georgia, serif',
+                        fontSize: 20,
+                        paddingBottom: 10,
+                        position: 'relative',
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          background:
+                            'radial-gradient(520px 220px at 20% 10%, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0) 42%, rgba(0,0,0,0.12) 100%)',
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: 'relative',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                        }}
+                      >
+                        <span style={{ fontSize: 18 }}>🌟</span>
+                        Latest Adventures
+                      </div>
+                    </div>
+                    <p style={{ fontSize: 13, color: '#5c4a3a', margin: '10px 0 0' }}>
+                      Browse by topic or age group and start reading today.
+                    </p>
+                    <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <a
+                        href="/quiz"
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: '#3d2914',
+                          padding: '6px 10px',
+                          borderRadius: 999,
+                          background: 'rgba(255,255,255,0.8)',
+                          border: '1px solid rgba(61,41,20,0.18)',
+                        }}
+                      >
+                        Play Quiz →
+                      </a>
+                      <a
+                        href="/facts"
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: '#3d2914',
+                          padding: '6px 10px',
+                          borderRadius: 999,
+                          background: 'rgba(255,255,255,0.8)',
+                          border: '1px solid rgba(61,41,20,0.18)',
+                        }}
+                      >
+                        Fun Facts →
+                      </a>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -352,7 +519,7 @@ export default function Page() {
       </section>
 
       {/* AGE GROUPS */}
-      <AgeGroupSection />
+      <AgeGroupSection groups={ageGroups} />
 
       {/* NEW RELEASES */}
       <section style={{ padding: '1.5rem 0 1.25rem' }}>
@@ -399,6 +566,69 @@ export default function Page() {
                     image={magazine.image}
                     sampleEditionId={magazine.sampleEditionId ?? undefined}
                   />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* LATEST POSTS */}
+      <section style={{ padding: '1.5rem 0 1.25rem' }}>
+        <div className="container">
+          <div
+            style={{
+              padding: '1.4rem 1.6rem',
+              borderRadius: 22,
+              backgroundColor: 'rgba(255, 255, 255, 0.78)',
+              border: '1px solid rgba(61,41,20,0.18)',
+              boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: '1rem',
+              }}
+            >
+              <h2
+                style={{
+                  fontSize: '1.4rem',
+                  margin: 0,
+                  color: '#3d2914',
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Latest Posts
+              </h2>
+              <Link
+                href="/posts"
+                style={{ fontSize: 13, fontWeight: 700, color: 'var(--btn-view-green, #2d7a3e)' }}
+              >
+                View all →
+              </Link>
+            </div>
+            {loadingPosts ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>Loading…</div>
+            ) : latestPosts.length === 0 ? (
+              <p style={{ margin: 0, color: '#5c4a3a', textAlign: 'center', padding: '1rem 0' }}>
+                News and updates will appear here soon.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                  gap: '1.25rem',
+                }}
+              >
+                {latestPosts.slice(0, 3).map((post) => (
+                  <PostCard key={post.id} post={post as SitePostItem} />
                 ))}
               </div>
             )}

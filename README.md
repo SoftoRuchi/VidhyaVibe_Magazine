@@ -70,3 +70,29 @@ PORT=2034
 pnpm --filter apps-admin dev
 
 Production manual deploy (fix ChunkLoadError / blank page): see `deployment/DEPLOY-MANUAL.md`.
+
+---server upload
+
+su - vidhyavibe-readerapi
+cd ~/htdocs/readerapi.vidhyavibe.in/VidhyaVibe_Magazine
+pnpm --filter services-api build
+/home/vidhyavibe-readerapi/.nvm/versions/node/v22.22.3/bin/pnpm --filter services-api build
+cd packages/db
+./node_modules/.bin/prisma generate
+pm2 restart readerapi
+/home/vidhyavibe-readerapi/.nvm/versions/node/v22.22.3/bin/pm2 restart readerapi
+
+If you're going to deploy as root, use the full paths:
+
+cd /home/vidhyavibe-readerapi/htdocs/readerapi.vidhyavibe.in/VidhyaVibe_Magazine
+
+/home/vidhyavibe-readerapi/.nvm/versions/node/v22.22.3/bin/pnpm --filter services-api build
+
+Login as frontend user
+su - vidhyavibe-reader
+
+cd ~/htdocs/reader.vidhyavibe.in/VidhyaVibe_Magazine
+pnpm --filter apps-web build
+pnpm --filter apps-admin build
+pm2 restart readerweb
+pm2 restart readeradmin

@@ -127,6 +127,22 @@ model Address {
   @@map("addresses")
 }
 
+model AgeGroup {
+  id        BigInt   @id @default(autoincrement())
+  name      String
+  slug      String   @unique
+  minAge    Int?
+  maxAge    Int?
+  color     String?  @default("#4ECDC4")
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  magazines Magazine[]
+
+  @@map("age_groups")
+}
+
 model Magazine {
   id          BigInt            @id @default(autoincrement())
   title       String
@@ -134,12 +150,15 @@ model Magazine {
   publisher   String?
   description String?          @db.Text
   category    String?
+  ageGroupId  BigInt?           @map("age_group_id")
   active      Boolean           @default(true)
   createdAt   DateTime          @default(now())
   coverKey    String?           @db.VarChar(1024)
   editions    MagazineEdition[]
   magazinePlans MagazinePlan[]
+  ageGroup    AgeGroup?         @relation(fields: [ageGroupId], references: [id], onDelete: SetNull)
 
+  @@index([ageGroupId])
   @@map("magazines")
 }
 
@@ -446,6 +465,22 @@ enum EditionOrderStatus {
   CANCELLED
 }
 
+enum SaleOfferType {
+  BANNER
+  DEAL
+  BENEFIT
+}
+
+enum SitePostType {
+  POST
+  CAROUSEL
+}
+
+enum SitePostMediaType {
+  IMAGE
+  VIDEO
+}
+
 model EditionOrder {
   id         BigInt            @id @default(autoincrement())
   userId     BigInt            @map("user_id")
@@ -482,5 +517,70 @@ model EditionOrderProof {
   @@index([orderId])
   @@index([userId])
   @@map("edition_order_proofs")
+}
+
+model SaleOffer {
+  id          BigInt        @id @default(autoincrement())
+  type        SaleOfferType @default(DEAL)
+  badge       String?       @db.VarChar(120)
+  title       String        @db.VarChar(255)
+  subtitle    String?       @db.VarChar(255)
+  highlight   String?       @db.VarChar(120)
+  detail      String?       @db.Text
+  color       String?       @db.VarChar(64)
+  borderColor String?       @map("border_color") @db.VarChar(64)
+  ctaLabel    String?       @map("cta_label") @db.VarChar(120)
+  ctaHref     String?       @map("cta_href") @db.VarChar(512)
+  planId      BigInt?       @map("plan_id")
+  magazineId  BigInt?       @map("magazine_id")
+  sortOrder   Int           @default(0) @map("sort_order")
+  active      Boolean       @default(true)
+  startsAt    DateTime?     @map("starts_at")
+  expiresAt   DateTime?     @map("expires_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@index([type])
+  @@index([active])
+  @@index([sortOrder])
+  @@map("sale_offers")
+}
+
+model SitePost {
+  id        BigInt       @id @default(autoincrement())
+  type      SitePostType @default(POST)
+  title     String       @db.VarChar(255)
+  subtitle  String?      @db.VarChar(255)
+  body      String?      @db.Text
+  imageKey  String?      @map("image_key") @db.VarChar(512)
+  ctaLabel  String?      @map("cta_label") @db.VarChar(120)
+  ctaHref   String?      @map("cta_href") @db.VarChar(512)
+  sortOrder Int          @default(0) @map("sort_order")
+  active    Boolean      @default(true)
+  startsAt  DateTime?    @map("starts_at")
+  expiresAt DateTime?    @map("expires_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  media     SitePostMedia[]
+
+  @@index([type])
+  @@index([active])
+  @@index([sortOrder])
+  @@map("site_posts")
+}
+
+model SitePostMedia {
+  id        BigInt            @id @default(autoincrement())
+  postId    BigInt            @map("post_id")
+  mediaType SitePostMediaType @default(IMAGE) @map("media_type")
+  mediaKey  String            @map("media_key") @db.VarChar(512)
+  sortOrder Int               @default(0) @map("sort_order")
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  post SitePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([sortOrder])
+  @@map("site_post_media")
 }
 

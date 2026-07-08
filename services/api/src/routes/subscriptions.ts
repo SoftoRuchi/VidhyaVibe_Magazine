@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { getPool } from '../db';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
+import { computeSubscriptionAmount } from '../utils/subscriptionPricing';
 
 const env = getEnv();
 const router = Router();
@@ -142,7 +143,7 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
     }
 
     // compute price (plan.price is whole currency units; payments table stores cents)
-    const price = Number(plan.price ?? 0) * Number(months);
+    const price = computeSubscriptionAmount(Number(plan.price ?? 0), Number(months), plan);
     const amountCents = Math.round(price * 100);
 
     // handle coupon validation via coupon service

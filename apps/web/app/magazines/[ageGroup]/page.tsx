@@ -5,6 +5,8 @@ import Image from 'next/image';
 import React, { useEffect, useState } from 'react';
 import childImg from '../../../components/images/child.png';
 import MagazineCard from '../../../components/MagazineCard';
+import type { AgeGroup } from '../../../lib/ageGroups';
+import { assetUrl } from '../../../lib/apiBase';
 
 interface Magazine {
   id: number;
@@ -19,13 +21,19 @@ interface Magazine {
 export default function AgeGroupPage({ params }: { params: { ageGroup: string } }) {
   const { ageGroup } = params;
   const [magazines, setMagazines] = useState<Magazine[]>([]);
+  const [groupName, setGroupName] = useState(ageGroup);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await axios.get(`/api/magazines?category=${ageGroup}`);
-        setMagazines(response.data || []);
+        const [magRes, groupsRes] = await Promise.all([
+          axios.get(`/api/magazines?category=${ageGroup}`),
+          axios.get('/api/age-groups'),
+        ]);
+        setMagazines(magRes.data || []);
+        const match = (groupsRes.data as AgeGroup[] | undefined)?.find((g) => g.slug === ageGroup);
+        if (match) setGroupName(match.name);
       } catch (err) {
         console.error('Failed to fetch age group magazines:', err);
       } finally {
@@ -67,7 +75,7 @@ export default function AgeGroupPage({ params }: { params: { ageGroup: string } 
                 letterSpacing: '0.2px',
               }}
             >
-              Magazines for Ages {ageGroup}
+              Magazines for Ages {groupName}
             </h1>
             <div
               style={{
@@ -111,7 +119,7 @@ export default function AgeGroupPage({ params }: { params: { ageGroup: string } 
                 title={mag.title}
                 description={mag.description}
                 date={new Date(mag.createdAt).getFullYear().toString()}
-                image={mag.coverKey ? `/api/assets/serve?key=${mag.coverKey}` : ''}
+                image={mag.coverKey ? assetUrl(mag.coverKey) : ''}
                 sampleEditionId={mag.sampleEditionId ?? undefined}
                 variant="vintage"
                 fullCover={index % 2 === 1}

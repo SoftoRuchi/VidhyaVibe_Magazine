@@ -1,14 +1,14 @@
 import { Router } from 'express';
-import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { getPool } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
 import type { AuthRequest } from '../../middleware/auth';
 import { requireAuth } from '../../middleware/auth';
+import { memoryUpload } from '../../middleware/upload';
 import { getStorageAdapter } from '../../providers/storage';
 import { createAdminEdition, updateAdminEdition } from '../../services/adminEditions';
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = memoryUpload;
 const router = Router();
 
 // simple admin guard - require auth + admin role

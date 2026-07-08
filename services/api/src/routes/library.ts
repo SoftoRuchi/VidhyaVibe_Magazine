@@ -30,12 +30,15 @@ router.get('/', async (req: AuthRequest, res) => {
     const [subRows]: any = await conn.query(
       `SELECT us.id as subscriptionId, us.magazineId, us.status, us.endsAt,
               m.title as magazineTitle, m.slug as magazineSlug, m.coverKey as magazineCoverKey,
-              (SELECT id FROM magazine_editions WHERE magazineId = us.magazineId AND publishedAt <= NOW() ORDER BY publishedAt DESC LIMIT 1) as editionId,
-              (SELECT volume FROM magazine_editions WHERE magazineId = us.magazineId AND publishedAt <= NOW() ORDER BY publishedAt DESC LIMIT 1) as volume,
-              (SELECT issueNumber FROM magazine_editions WHERE magazineId = us.magazineId AND publishedAt <= NOW() ORDER BY publishedAt DESC LIMIT 1) as issueNumber,
-              (SELECT publishedAt FROM magazine_editions WHERE magazineId = us.magazineId AND publishedAt <= NOW() ORDER BY publishedAt DESC LIMIT 1) as publishedAt
+              latest.id as editionId, latest.volume, latest.issueNumber, latest.publishedAt
        FROM user_subscriptions us
        JOIN magazines m ON m.id = us.magazineId
+       LEFT JOIN (
+         SELECT magazineId, id, volume, issueNumber, publishedAt,
+           ROW_NUMBER() OVER (PARTITION BY magazineId ORDER BY publishedAt DESC) AS rn
+         FROM magazine_editions
+         WHERE publishedAt IS NOT NULL AND publishedAt <= NOW()
+       ) latest ON latest.magazineId = us.magazineId AND latest.rn = 1
        WHERE us.userId = ? AND us.status = 'ACTIVE' AND (us.endsAt IS NULL OR us.endsAt > NOW()) AND us.magazineId IS NOT NULL
        ${readerId ? 'AND us.readerId = ?' : ''}
        ORDER BY us.endsAt DESC`,

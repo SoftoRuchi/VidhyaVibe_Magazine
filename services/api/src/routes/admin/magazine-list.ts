@@ -1,13 +1,13 @@
 import { Router } from 'express';
-import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { getPool } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
 import { requireAuth } from '../../middleware/auth';
+import { memoryUpload } from '../../middleware/upload';
 import { getStorageAdapter } from '../../providers/storage';
 import { createAdminEdition, updateAdminEdition } from '../../services/adminEditions';
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = memoryUpload;
 const editionUpload = upload.fields([
   { name: 'editionPdf', maxCount: 1 },
   { name: 'samplePdf', maxCount: 1 },
@@ -53,8 +53,34 @@ router.get('/list', async (req, res) => {
   }
 });
 
+async function resolveAgeGroupCategory(
+  conn: any,
+  ageGroupId?: number | string | null,
+  category?: string | null,
+): Promise<{ ageGroupId: number | null; category: string | null }> {
+  const id = ageGroupId != null && ageGroupId !== '' ? Number(ageGroupId) : null;
+  if (id) {
+    const [rows]: any = await conn.query('SELECT id, slug FROM age_groups WHERE id = ? LIMIT 1', [
+      id,
+    ]);
+    if (rows[0]) {
+      return { ageGroupId: Number(rows[0].id), category: rows[0].slug };
+    }
+  }
+  if (category) {
+    const [rows]: any = await conn.query('SELECT id, slug FROM age_groups WHERE slug = ? LIMIT 1', [
+      category,
+    ]);
+    if (rows[0]) {
+      return { ageGroupId: Number(rows[0].id), category: rows[0].slug };
+    }
+    return { ageGroupId: null, category: String(category) };
+  }
+  return { ageGroupId: null, category: null };
+}
+
 router.post('/', upload.single('cover'), async (req, res) => {
-  const { title, slug, publisher, description, category } = req.body;
+  const { title, slug, publisher, description, category, ageGroupId } = req.body;
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
@@ -67,9 +93,19 @@ router.post('/', upload.single('cover'), async (req, res) => {
       coverKey = uploaded.key;
     }
 
+    const resolved = await resolveAgeGroupCategory(conn, ageGroupId, category);
+
     const [r]: any = await conn.query(
-      'INSERT INTO magazines (title, slug, publisher, description, category, coverKey, createdAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-      [title, slug, publisher || null, description || null, category || null, coverKey],
+      'INSERT INTO magazines (title, slug, publisher, description, category, age_group_id, coverKey, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
+      [
+        title,
+        slug,
+        publisher || null,
+        description || null,
+        resolved.category,
+        resolved.ageGroupId,
+        coverKey,
+      ],
     );
     res.status(201).json({ id: r.insertId, coverKey });
   } catch (e: any) {
@@ -223,7 +259,7 @@ router.get('/:id', async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const [rows]: any = await conn.query(
-      'SELECT id, title, slug, publisher, description, category, coverKey FROM magazines WHERE id = ? LIMIT 1',
+      'SELECT id, title, slug, publisher, description, category, age_group_id AS ageGroupId, coverKey FROM magazines WHERE id = ? LIMIT 1',
       [id],
     );
     const mag = rows[0];
@@ -239,7 +275,7 @@ router.get('/:id', async (req, res) => {
 
 router.put('/:id', upload.single('cover'), async (req, res) => {
   const id = Number(req.params.id);
-  const { title, slug, publisher, description, category } = req.body;
+  const { title, slug, publisher, description, category, ageGroupId } = req.body;
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
@@ -256,9 +292,20 @@ router.put('/:id', upload.single('cover'), async (req, res) => {
       coverKey = uploaded.key;
     }
 
+    const resolved = await resolveAgeGroupCategory(conn, ageGroupId, category);
+
     await conn.query(
-      'UPDATE magazines SET title = ?, slug = ?, publisher = ?, description = ?, category = ?, coverKey = ? WHERE id = ?',
-      [title, slug, publisher || null, description || null, category || null, coverKey, id],
+      'UPDATE magazines SET title = ?, slug = ?, publisher = ?, description = ?, category = ?, age_group_id = ?, coverKey = ? WHERE id = ?',
+      [
+        title,
+        slug,
+        publisher || null,
+        description || null,
+        resolved.category,
+        resolved.ageGroupId,
+        coverKey,
+        id,
+      ],
     );
     res.json({ id, coverKey });
   } catch (e: any) {

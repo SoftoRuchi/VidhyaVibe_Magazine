@@ -12,6 +12,19 @@ declare global {
   }
 }
 
+interface UserPrefill {
+  name?: string;
+  email?: string;
+  phone?: string;
+}
+
+function formatContactForRazorpay(phone?: string): string | undefined {
+  if (!phone) return undefined;
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits || undefined;
+}
+
 export default function RazorpayPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -20,14 +33,10 @@ export default function RazorpayPage() {
   const orderId = searchParams?.get('orderId') ?? '';
   const amount = searchParams?.get('amount') ?? '';
   const currency = searchParams?.get('currency') ?? 'INR';
+  const autoOpen = searchParams?.get('auto') === '1';
 
   const [scriptReady, setScriptReady] = React.useState(false);
   const key = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
-  const [successResponse, setSuccessResponse] = React.useState<{
-    razorpay_payment_id?: string;
-    razorpay_order_id?: string;
-    razorpay_signature?: string;
-  } | null>(null);
   const [failureResponse, setFailureResponse] = React.useState<any>(null);
   const [confirmStatus, setConfirmStatus] = React.useState<'idle' | 'saving' | 'saved' | 'failed'>(
     'idle',
@@ -37,7 +46,30 @@ export default function RazorpayPage() {
     paymentId?: number;
   } | null>(null);
   const [confirmError, setConfirmError] = React.useState<string | null>(null);
+  const [userPrefill, setUserPrefill] = React.useState<UserPrefill | null>(null);
+  const [userPrefillLoaded, setUserPrefillLoaded] = React.useState(false);
+  const autoOpenedRef = React.useRef(false);
   const canPay = Boolean(key && rpOrderId && amount && scriptReady);
+
+  React.useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      setUserPrefillLoaded(true);
+      return;
+    }
+
+    axios
+      .get('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(({ data }) => {
+        setUserPrefill({
+          name: data?.name,
+          email: data?.email,
+          phone: data?.phone || data?.guardians?.[0]?.phone,
+        });
+      })
+      .catch(() => {})
+      .finally(() => setUserPrefillLoaded(true));
+  }, []);
 
   async function savePaymentToOrder(response: any) {
     const token = localStorage.getItem('access_token');
@@ -76,7 +108,6 @@ export default function RazorpayPage() {
     if (!rpOrderId) return;
     if (!amount) return;
     if (!window.Razorpay) return;
-    setSuccessResponse(null);
     setFailureResponse(null);
     setConfirmStatus('idle');
     setConfirmError(null);
@@ -90,16 +121,15 @@ export default function RazorpayPage() {
       description: 'Subscription Payment',
       order_id: String(rpOrderId),
       handler: async function (response: any) {
-        setSuccessResponse({
-          razorpay_payment_id: response?.razorpay_payment_id,
-          razorpay_order_id: response?.razorpay_order_id,
-          razorpay_signature: response?.razorpay_signature,
-        });
         await savePaymentToOrder(response);
       },
-      prefill: {},
+      prefill: {
+        name: userPrefill?.name || undefined,
+        email: userPrefill?.email || undefined,
+        contact: formatContactForRazorpay(userPrefill?.phone),
+      },
       notes: {
-        address: 'Razorpay Corporate Office',
+        orderId: String(orderId),
       },
       theme: {
         color: '#3399cc',
@@ -112,6 +142,12 @@ export default function RazorpayPage() {
     });
     rzp1.open();
   }
+
+  React.useEffect(() => {
+    if (!autoOpen || !canPay || !userPrefillLoaded || autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    openCheckout();
+  }, [autoOpen, canPay, userPrefillLoaded]);
 
   return (
     <main style={{ minHeight: '80vh' }}>
@@ -153,37 +189,32 @@ export default function RazorpayPage() {
             )}
 
             <div style={{ display: 'grid', gap: 10 }}>
-              <div>
-                <strong>Razorpay Order ID:</strong> {rpOrderId || '-'}
-              </div>
-              <div>
-                <strong>Local Order ID:</strong> {orderId || '-'}
-              </div>
-              <div>
-                <strong>Amount:</strong> {amount || '-'} {currency}
-              </div>
+              {confirmStatus !== 'saved' && (
+                <div>
+                  <strong>Amount:</strong> {amount ? `₹${amount} ${currency}` : '-'}
+                </div>
+              )}
 
               {confirmStatus === 'saved' && (
                 <div style={{ marginTop: 8 }}>
                   <Alert
                     type="success"
                     showIcon
-                    message="Subscription saved and activated"
+                    message="Payment successful"
                     description={
-                      confirmResult?.subscriptionId ? (
-                        <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        <div>Your subscription has been saved and activated.</div>
+                        {confirmResult?.subscriptionId != null && (
                           <div>
                             <strong>Subscription ID:</strong> {confirmResult.subscriptionId}
                           </div>
-                          {confirmResult.paymentId && (
-                            <div>
-                              <strong>Payment ID:</strong> {confirmResult.paymentId}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        'Payment saved to order and marked as PAID'
-                      )
+                        )}
+                        {confirmResult?.paymentId != null && (
+                          <div>
+                            <strong>Payment ID:</strong> {confirmResult.paymentId}
+                          </div>
+                        )}
+                      </div>
                     }
                   />
                 </div>
@@ -204,29 +235,6 @@ export default function RazorpayPage() {
                 </div>
               )}
 
-              {successResponse && (
-                <div style={{ marginTop: 8 }}>
-                  <Alert
-                    type="success"
-                    showIcon
-                    message="Payment successful"
-                    description={
-                      <div style={{ display: 'grid', gap: 6 }}>
-                        <div>
-                          <strong>Payment ID:</strong> {successResponse.razorpay_payment_id || '-'}
-                        </div>
-                        <div>
-                          <strong>Order ID:</strong> {successResponse.razorpay_order_id || '-'}
-                        </div>
-                        <div style={{ wordBreak: 'break-all' }}>
-                          <strong>Signature:</strong> {successResponse.razorpay_signature || '-'}
-                        </div>
-                      </div>
-                    }
-                  />
-                </div>
-              )}
-
               {failureResponse?.error && (
                 <div style={{ marginTop: 8 }}>
                   <Alert
@@ -234,53 +242,39 @@ export default function RazorpayPage() {
                     showIcon
                     message="Payment failed"
                     description={
-                      <div style={{ display: 'grid', gap: 6 }}>
-                        <div>
-                          <strong>Code:</strong> {failureResponse.error.code ?? '-'}
-                        </div>
-                        <div>
-                          <strong>Description:</strong> {failureResponse.error.description ?? '-'}
-                        </div>
-                        <div>
-                          <strong>Source:</strong> {failureResponse.error.source ?? '-'}
-                        </div>
-                        <div>
-                          <strong>Step:</strong> {failureResponse.error.step ?? '-'}
-                        </div>
-                        <div>
-                          <strong>Reason:</strong> {failureResponse.error.reason ?? '-'}
-                        </div>
-                        <div>
-                          <strong>Order ID:</strong>{' '}
-                          {failureResponse.error?.metadata?.order_id ?? '-'}
-                        </div>
-                        <div>
-                          <strong>Payment ID:</strong>{' '}
-                          {failureResponse.error?.metadata?.payment_id ?? '-'}
-                        </div>
-                      </div>
+                      failureResponse.error.description ||
+                      failureResponse.error.reason ||
+                      'Something went wrong. Please try again.'
                     }
                   />
                 </div>
               )}
 
               <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-                <Button onClick={() => router.back()}>Back</Button>
                 <Button
-                  id="rzp-button1"
-                  type="primary"
-                  disabled={!canPay}
-                  onClick={openCheckout}
-                  style={{
-                    background: 'var(--btn-view-green, #2d7a3e)',
-                    borderColor: 'var(--btn-view-green, #2d7a3e)',
-                    fontWeight: 700,
-                    borderRadius: 10,
-                    paddingInline: 18,
-                  }}
+                  onClick={() =>
+                    confirmStatus === 'saved' ? router.push('/dashboard') : router.back()
+                  }
                 >
-                  Pay
+                  {confirmStatus === 'saved' ? 'Go to Dashboard' : 'Back'}
                 </Button>
+                {confirmStatus !== 'saved' && (
+                  <Button
+                    id="rzp-button1"
+                    type="primary"
+                    disabled={!canPay || confirmStatus === 'saving'}
+                    onClick={openCheckout}
+                    style={{
+                      background: 'var(--btn-view-green, #2d7a3e)',
+                      borderColor: 'var(--btn-view-green, #2d7a3e)',
+                      fontWeight: 700,
+                      borderRadius: 10,
+                      paddingInline: 18,
+                    }}
+                  >
+                    Pay
+                  </Button>
+                )}
               </div>
             </div>
           </Card>

@@ -9,6 +9,7 @@ import {
   ShoppingCartOutlined,
   DollarOutlined,
   FilePdfOutlined,
+  TagOutlined,
 } from '@ant-design/icons';
 import { Card, Col, List, Row, Spin, Tag, Button, Alert } from 'antd';
 import React, { useEffect, useState } from 'react';
@@ -223,6 +224,7 @@ export default function DashboardPage() {
       bg: '#22c55e',
     },
     { href: '/admin/readers', label: 'Manage Readers', icon: <FileTextOutlined />, bg: '#f97316' },
+    { href: '/admin/sales', label: 'Manage Sales & Offers', icon: <TagOutlined />, bg: '#ec4899' },
     {
       href: '/admin/orders',
       label: 'View Orders & Payments',

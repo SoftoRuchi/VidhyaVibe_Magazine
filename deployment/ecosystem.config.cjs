@@ -8,6 +8,9 @@
  *
  * Split deploy (API on readerapi.vidhyavibe.in, admin on readeradmin.*):
  *   NEXT_PUBLIC_API_BASE_URL=https://readerapi.vidhyavibe.in pnpm --filter apps-admin build
+ *
+ * Reader web (reader.vidhyavibe.in) — same API URL at build time:
+ *   NEXT_PUBLIC_API_BASE_URL=https://readerapi.vidhyavibe.in pnpm --filter apps-web build
  *   pm2 start deployment/ecosystem.config.cjs
  *   pm2 save
  *   bash deployment/scripts/verify-services.sh

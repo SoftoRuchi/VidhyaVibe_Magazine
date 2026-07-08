@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getPool } from '../db';
+import { computeSubscriptionAmount } from '../utils/subscriptionPricing';
 import { validateCoupon, recordCouponUsage } from './coupons';
 
 /** Create subscription, payment, coupon usage, and dispatch schedules after an order is paid. */
@@ -306,7 +307,7 @@ export async function createOrder(params: {
     }
 
     // compute amounts in whole currency units (no cents conversion)
-    const baseAmount = effectivePrice * Number(params.months);
+    const baseAmount = computeSubscriptionAmount(effectivePrice, params.months, plan);
     let final = baseAmount;
     let couponId = null;
     if (params.couponCode) {

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React from 'react';
 import subscribeImg from '../../components/images/subscribe.png';
+import { startRazorpayCheckout } from '../../lib/razorpayCheckout';
 import { isChildAudience } from '../../lib/viewingContext';
 
 const DELIVERY_OPTIONS = [
@@ -69,6 +70,9 @@ export default function SubscribePage() {
   const needsAddress = deliveryMode === 'PHYSICAL' || deliveryMode === 'BOTH';
   const minMonths = selectedPlan?.minMonths ?? 1;
   const maxMonths = selectedPlan?.maxMonths;
+  const isFixedDuration = maxMonths != null && minMonths === maxMonths;
+  const monthsValue = Form.useWatch('months', form) ?? minMonths;
+  const totalPrice = isFixedDuration ? Number(price) : Number(price) * Number(monthsValue);
 
   async function onFinish(values: any) {
     const token = localStorage.getItem('access_token');
@@ -87,25 +91,17 @@ export default function SubscribePage() {
     }
     try {
       const payload = { ...values, magazineId, deliveryMode: values.deliveryMode ?? deliveryMode };
-      const res = await axios.post('/api/payments/create-order', payload, {
-        withCredentials: true,
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setOrder(res.data);
-      message.success('Order created');
-
-      // Redirect to Razorpay checkout page
-      const rpOrderId = res.data?.rpOrderId;
-      const orderId = res.data?.orderId;
-      const amount = res.data?.finalAmount ?? res.data?.amount;
-      const currency = res.data?.currency ?? 'INR';
-      if (rpOrderId && orderId && amount != null) {
-        router.push(
-          `/razorpay?rpOrderId=${encodeURIComponent(String(rpOrderId))}&orderId=${encodeURIComponent(
-            String(orderId),
-          )}&amount=${encodeURIComponent(String(amount))}&currency=${encodeURIComponent(String(currency))}`,
-        );
-      }
+      await startRazorpayCheckout(
+        {
+          planId: Number(payload.planId),
+          magazineId,
+          months: Number(payload.months),
+          deliveryMode: payload.deliveryMode,
+          couponCode: payload.couponCode,
+        },
+        router,
+      );
+      message.success('Order created — opening payment…');
     } catch (e: any) {
       message.error(e.response?.data?.error || e.response?.data?.message || 'failed');
     }
@@ -277,8 +273,12 @@ export default function SubscribePage() {
                         : p.maxMonths
                           ? `${p.minMonths}-${p.maxMonths} mo`
                           : `${p.minMonths}+ mo`;
+                    const fixed = p.maxMonths != null && p.minMonths === p.maxMonths;
+                    const priceLabel = fixed
+                      ? `${curr === 'INR' ? '₹' : ''}${Number(price).toFixed(2)} ${curr} total`
+                      : `${curr === 'INR' ? '₹' : ''}${Number(price).toFixed(2)} ${curr}/mo`;
                     return {
-                      label: `${p.name} (${monthsLabel}) - ${curr === 'INR' ? '₹' : ''}${Number(price).toFixed(2)} ${curr}/mo`,
+                      label: `${p.name} (${monthsLabel}) - ${priceLabel}`,
                       value: p.id,
                     };
                   })}
@@ -301,8 +301,25 @@ export default function SubscribePage() {
                 <div
                   style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 8 }}
                 >
-                  <strong>Price:</strong> {currency === 'INR' ? '₹' : ''}
-                  {Number(price).toFixed(2)} {currency} per month
+                  <strong>Price:</strong>{' '}
+                  {isFixedDuration ? (
+                    <>
+                      {currency === 'INR' ? '₹' : ''}
+                      {Number(price).toFixed(2)} {currency} total for {maxMonths} months
+                    </>
+                  ) : (
+                    <>
+                      {currency === 'INR' ? '₹' : ''}
+                      {Number(price).toFixed(2)} {currency} per month
+                      {monthsValue > 1 && (
+                        <>
+                          {' '}
+                          ({currency === 'INR' ? '₹' : ''}
+                          {totalPrice.toFixed(2)} total)
+                        </>
+                      )}
+                    </>
+                  )}
                   {needsAddress && (
                     <Alert
                       type="info"

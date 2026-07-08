@@ -1,24 +1,19 @@
-import { App, ConfigProvider } from 'antd';
 import Image from 'next/image';
 import React from 'react';
 import './globals.css';
-import AuthProvider from '../components/AuthProvider';
-import Footer from '../components/Footer';
+import AppProviders from '../components/AppProviders';
 import backgroundImg from '../components/images/background.png';
-import Navbar from '../components/Navbar';
-import PostLoginChildSetupModal from '../components/PostLoginChildSetupModal';
-import StyledComponentsRegistry from '../lib/AntdRegistry';
 
 export const metadata = {
-  title: 'Magazine for Kids',
-  description: 'Interactive and colorful magazine for students.',
+  title: 'VidhyaVibe Magazine',
+  description:
+    'Digital and print magazines for readers of all ages — stories, learning, and discovery.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        {/* Full-app background image */}
         <div
           style={{
             position: 'fixed',
@@ -31,38 +26,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             src={backgroundImg}
             alt=""
             fill
-            priority
+            fetchPriority="low"
+            sizes="100vw"
             style={{ objectFit: 'cover', objectPosition: 'center top' }}
           />
         </div>
 
-        <div
-          style={{
-            position: 'relative',
-            zIndex: 1,
-            minHeight: '100vh',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <StyledComponentsRegistry>
-            <ConfigProvider
-              theme={{
-                token: {
-                  colorPrimary: '#FF6B6B',
-                },
-              }}
-            >
-              <App>
-                <AuthProvider>
-                  <Navbar />
-                  <div style={{ flex: 1, minHeight: 0 }}>{children}</div>
-                  <PostLoginChildSetupModal />
-                </AuthProvider>
-              </App>
-              <Footer />
-            </ConfigProvider>
-          </StyledComponentsRegistry>
+        <div className="vv-app-shell">
+          <AppProviders>{children}</AppProviders>
         </div>
       </body>
     </html>

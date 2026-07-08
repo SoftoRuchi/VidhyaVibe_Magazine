@@ -1,8 +1,9 @@
 import './dotenv-loader';
 
 // Prevent process exit on unhandled errors so we can log and keep running
-process.on('uncaughtException', (err) => {
+process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   console.error('[api] uncaughtException:', err);
+  if (err.code === 'EADDRINUSE' || err.code === 'EACCES') process.exit(1);
 });
 process.on('unhandledRejection', (reason, _promise) => {
   console.error('[api] unhandledRejection:', reason);
@@ -18,6 +19,7 @@ import { auditMiddleware } from './middleware/audit';
 import { corsMiddleware } from './middleware/cors';
 import { errorHandler } from './middleware/errorHandler';
 import { registerAdapters } from './providers';
+import adminAgeGroupsRoutes from './routes/admin/age-groups';
 import adminCouponsRoutes from './routes/admin/coupons';
 import adminDashboardRoutes from './routes/admin/dashboard';
 import adminDispatchesRoutes from './routes/admin/dispatches';
@@ -25,10 +27,13 @@ import adminMagazineRoutes from './routes/admin/magazine';
 import adminMagazineListRoutes from './routes/admin/magazine-list';
 import adminPaymentsRoutes from './routes/admin/payments';
 import adminPlansRoutes from './routes/admin/plans';
+import adminPostsRoutes from './routes/admin/posts';
 import adminPresignRoutes from './routes/admin/presign';
 import adminReadersRoutes from './routes/admin/readers';
+import adminSalesRoutes from './routes/admin/sales';
 import adminSubscriptionsRoutes from './routes/admin/subscriptions';
 import adminUsersRoutes from './routes/admin/users';
+import ageGroupsRoutes from './routes/age-groups';
 import assetsRoutes from './routes/assets';
 import authRoutes from './routes/auth';
 import editionsRoutes from './routes/editions';
@@ -36,8 +41,10 @@ import interactionsRoutes from './routes/interactions';
 import libraryRoutes from './routes/library';
 import magazinesRoutes from './routes/magazines';
 import paymentsRoutes from './routes/payments';
+import postsRoutes from './routes/posts';
 import readerProgressRoutes from './routes/readerProgress';
 import readersRoutes from './routes/readers';
+import salesRoutes from './routes/sales';
 import subscriptionsRoutes from './routes/subscriptions';
 
 const logger = createLogger('api');
@@ -62,7 +69,8 @@ app.set('trust proxy', 1);
 app.use(corsMiddleware);
 // Security headers (allow cross-origin fetches from readeradmin / reader)
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(express.json());
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '1mb' }));
 app.use(cookieParser());
 
 // Global rate limiter (reader loads PDF + pages can exceed 100 req/15min)
@@ -80,7 +88,10 @@ app.use(auditMiddleware);
 
 // Public routes (no auth required)
 app.use('/api/magazines', magazinesRoutes);
+app.use('/api/age-groups', ageGroupsRoutes);
 app.use('/api/library', libraryRoutes);
+app.use('/api/sales', salesRoutes);
+app.use('/api/posts', postsRoutes);
 
 // auth routes
 app.use('/api/auth', authRoutes);
@@ -101,6 +112,9 @@ app.use('/api/admin/users', adminUsersRoutes);
 app.use('/api/admin/subscriptions', adminSubscriptionsRoutes);
 app.use('/api/admin/readers', adminReadersRoutes);
 app.use('/api/admin/plans', adminPlansRoutes);
+app.use('/api/admin/age-groups', adminAgeGroupsRoutes);
+app.use('/api/admin/sales', adminSalesRoutes);
+app.use('/api/admin/posts', adminPostsRoutes);
 app.use('/api/assets', assetsRoutes);
 
 // Register provider adapters (storage, cache, db) based on env

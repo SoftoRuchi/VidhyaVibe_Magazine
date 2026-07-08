@@ -1,3 +1,4 @@
+import { createReadStream } from 'fs';
 import path from 'path';
 import type { Env, Logger } from '@magazine/config';
 import fs from 'fs-extra';
@@ -17,7 +18,7 @@ export function createLocalStorageAdapter(env: Env, ctx: { logger: Logger }) {
     async get(key: string) {
       const filePath = path.join(base, key);
       if (!(await fs.pathExists(filePath))) return null;
-      return fs.readFile(filePath);
+      return createReadStream(filePath);
     },
     async presignGet(key: string) {
       return { url: `/api/assets/serve?key=${key}`, key };

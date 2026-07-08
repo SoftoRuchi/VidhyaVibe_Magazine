@@ -30,12 +30,9 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
     headers,
   };
 
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    const body = await req.arrayBuffer();
-    if (body.byteLength > 0) {
-      init.body = body;
-      init.duplex = 'half';
-    }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+    init.body = req.body;
+    init.duplex = 'half';
   }
 
   let upstream: Response;
