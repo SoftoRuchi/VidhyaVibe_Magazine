@@ -32,6 +32,11 @@ function initAxiosClients() {
   axiosInitialized = true;
 }
 
+// Ensure interceptors are ready before any checkout / API call from child pages.
+if (typeof window !== 'undefined') {
+  initAxiosClients();
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loggedIn, setLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);

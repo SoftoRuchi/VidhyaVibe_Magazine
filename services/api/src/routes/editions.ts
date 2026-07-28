@@ -102,15 +102,19 @@ router.get('/:editionId/pages', requireEditionAccess, async (req: Request, res: 
     );
     const ed = rows[0];
     if (!ed) return res.status(404).json({ error: 'edition_not_found' });
-    const pages = Number(ed.pages) || 1;
-    // build page list
-    const list = [];
-    for (let i = 1; i <= pages; i++) {
-      list.push({ pageNumber: i, url: `/api/editions/${editionId}/pages/${i}` });
-    }
-    // Include pdfUrl when fileKey exists - page images may not exist (PDF stored but not extracted to JPGs)
+    const pageCount = Number(ed.pages) || 1;
+    // Include pdfUrl when fileKey exists — uploaded editions usually have PDF only (no JPG page extract).
     const pdfUrl = ed.fileKey ? `/api/editions/${editionId}/pdf` : null;
-    res.json({ pages, list, pdfUrl });
+
+    // Only invent an image page list when there is no PDF (legacy image-based editions).
+    // Returning fake page URLs for PDF-only editions causes mass 404s in the reader.
+    const list: { pageNumber: number; url: string }[] = [];
+    if (!pdfUrl) {
+      for (let i = 1; i <= pageCount; i++) {
+        list.push({ pageNumber: i, url: `/api/editions/${editionId}/pages/${i}` });
+      }
+    }
+    res.json({ pages: list.length || pageCount, list, pdfUrl });
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'list_failed' });
@@ -164,6 +168,7 @@ router.get(
       // storage.get may return Buffer or stream
       if (!storage.get) return res.status(400).json({ error: 'get_not_supported' });
       const data: any = await storage.get(key);
+      if (!data) return res.status(404).json({ error: 'page_not_found' });
       sendStorageBody(res, data, {
         contentType: 'image/jpeg',
         cacheControl: 'public, max-age=86400',

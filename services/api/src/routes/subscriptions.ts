@@ -1,11 +1,9 @@
-import { getEnv } from '@magazine/config';
 import { Router } from 'express';
 import { getPool } from '../db';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { computeSubscriptionAmount } from '../utils/subscriptionPricing';
 
-const env = getEnv();
 const router = Router();
 
 // List available plans. With ?magazineId=X returns plans with magazine-specific pricing when set.
@@ -144,18 +142,28 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
 
     // compute price (plan.price is whole currency units; payments table stores cents)
     const price = computeSubscriptionAmount(Number(plan.price ?? 0), Number(months), plan);
-    const amountCents = Math.round(price * 100);
 
     // handle coupon validation via coupon service
     let couponId: number | null = null;
+    let amountAfterCoupon = price;
     if (couponCode) {
-      const { validateCoupon } = require('../services/coupons');
-      const vres = await validateCoupon(couponCode, userId, planId, undefined);
+      const {
+        validateCoupon,
+        applyCouponDiscount,
+        normalizeCouponCode,
+      } = require('../services/coupons');
+      const vres = await validateCoupon(
+        normalizeCouponCode(couponCode),
+        userId,
+        planId,
+        magazineId,
+      );
       if (!vres.valid) {
         await conn.rollback();
         return res.status(400).json({ error: 'invalid_coupon', reason: vres.reason });
       }
       couponId = vres.coupon.id;
+      amountAfterCoupon = applyCouponDiscount(price, vres.coupon);
     }
 
     const startsAt = new Date();
@@ -173,7 +181,7 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
         startsAt,
         endsAt,
         1,
-        price,
+        amountAfterCoupon,
         plan.currency || 'USD',
         couponId,
       ],
@@ -181,6 +189,7 @@ router.post('/subscribe', async (req: AuthRequest, res) => {
     const subscriptionId = ins.insertId;
 
     // create payment placeholder
+    const amountCents = Math.round(amountAfterCoupon * 100);
     const [pay]: any = await conn.query(
       'INSERT INTO payments (userId, subscriptionId, amountCents, currency, provider, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
       [userId, subscriptionId, amountCents, plan.currency || 'USD', 'manual', 'PENDING'],

@@ -6,8 +6,12 @@ import StyledComponentsRegistry from '../lib/AntdRegistry';
 import './globals.css';
 
 export const metadata = {
-  title: 'Magazine Admin',
-  description: 'Admin panel for Magazine Subscription Service',
+  title: 'VidhyaVibe Admin',
+  description: 'Admin panel for VidhyaVibe Magazine',
+  icons: {
+    icon: '/images/brand/logonew.png',
+    apple: '/images/brand/logonew.png',
+  },
 };
 
 export default function RootLayout({ children }: React.PropsWithChildren) {

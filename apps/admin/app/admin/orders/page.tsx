@@ -3,6 +3,36 @@ import { Card, Table, Tag, Button, Spin, message, Collapse } from 'antd';
 import React from 'react';
 import api from '../../../lib/api';
 
+function buyerName(r: any) {
+  return r.guestName || r.userName || '—';
+}
+
+function buyerEmail(r: any) {
+  return r.guestEmail || r.userEmail || '—';
+}
+
+function buyerPhone(r: any) {
+  return r.guestPhone || r.userPhone || '—';
+}
+
+function formatAmount(amount: number | null | undefined, currency?: string) {
+  if (amount == null || Number.isNaN(Number(amount))) return '—';
+  const cur = currency || 'INR';
+  const prefix = cur === 'INR' ? '₹' : `${cur} `;
+  return `${prefix}${Number(amount).toFixed(2)}`;
+}
+
+function formatDateTime(d: any) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function OrdersPage() {
   const [data, setData] = React.useState<{ subscriptionOrders: any[]; editionOrders: any[] }>({
     subscriptionOrders: [],
@@ -61,7 +91,7 @@ export default function OrdersPage() {
 
   return (
     <main>
-      <Card title="Payment Proofs Pending Verification">
+      <Card title="Payment Proofs Pending Verification" style={{ marginBottom: 16 }}>
         <Collapse
           defaultActiveKey={['subscription']}
           items={[
@@ -91,7 +121,7 @@ export default function OrdersPage() {
                       {
                         title: 'Created',
                         dataIndex: 'created_at',
-                        render: (d: any) => (d ? new Date(d).toLocaleString() : '-'),
+                        render: (d: any) => formatDateTime(d),
                       },
                       {
                         title: 'Action',
@@ -138,7 +168,7 @@ export default function OrdersPage() {
                       {
                         title: 'Created',
                         dataIndex: 'created_at',
-                        render: (d: any) => (d ? new Date(d).toLocaleString() : '-'),
+                        render: (d: any) => formatDateTime(d),
                       },
                       {
                         title: 'Action',
@@ -162,18 +192,26 @@ export default function OrdersPage() {
         />
       </Card>
 
-      <Card title="All Orders">
+      <Card
+        title="Purchase History"
+        extra={
+          <span style={{ color: '#666', fontSize: 13 }}>
+            Buyer name, mobile, email · magazine · date &amp; time
+          </span>
+        }
+      >
         <Collapse
           defaultActiveKey={['subscriptionOrders']}
           items={[
             {
               key: 'subscriptionOrders',
-              label: 'Subscription Orders',
+              label: 'Magazine Subscription Purchases',
               children: (
                 <Table
                   rowKey="id"
                   dataSource={data.subscriptionOrders}
                   size="small"
+                  scroll={{ x: 1100 }}
                   pagination={{
                     pageSize: PAGE_SIZE,
                     current: subscriptionOrdersPage,
@@ -183,22 +221,53 @@ export default function OrdersPage() {
                     {
                       title: 'S/N',
                       key: 'serial',
-                      width: 70,
+                      width: 60,
+                      fixed: 'left',
                       render: (_: any, __: any, index: number) =>
                         (subscriptionOrdersPage - 1) * PAGE_SIZE + index + 1,
                     },
-                    { title: 'User', dataIndex: 'userEmail' },
-                    { title: 'Magazine', dataIndex: 'magazineTitle' },
-                    { title: 'Plan', dataIndex: 'planName' },
+                    {
+                      title: 'Buyer Name',
+                      key: 'buyerName',
+                      width: 160,
+                      render: (_: any, r: any) => buyerName(r),
+                    },
+                    {
+                      title: 'Mobile',
+                      key: 'buyerPhone',
+                      width: 120,
+                      render: (_: any, r: any) => buyerPhone(r),
+                    },
+                    {
+                      title: 'Email',
+                      key: 'buyerEmail',
+                      width: 200,
+                      render: (_: any, r: any) => buyerEmail(r),
+                    },
+                    {
+                      title: 'Magazine',
+                      dataIndex: 'magazineTitle',
+                      width: 220,
+                      render: (t: string) => t || '—',
+                    },
+                    {
+                      title: 'Plan',
+                      dataIndex: 'planName',
+                      width: 140,
+                      render: (t: string, r: any) =>
+                        t ? `${t}${r.months ? ` (${r.months} mo)` : ''}` : '—',
+                    },
                     {
                       title: 'Amount',
                       key: 'amt',
+                      width: 110,
                       render: (_: any, r: any) =>
-                        r.finalCents ? `${(r.finalCents / 100).toFixed(2)} ${r.currency}` : '-',
+                        formatAmount(r.finalAmount ?? r.amount, r.currency),
                     },
                     {
                       title: 'Status',
                       dataIndex: 'status',
+                      width: 100,
                       render: (s: any) => (
                         <Tag
                           color={s === 'PAID' ? 'green' : s === 'PENDING' ? 'orange' : 'default'}
@@ -208,9 +277,10 @@ export default function OrdersPage() {
                       ),
                     },
                     {
-                      title: 'Created',
+                      title: 'Purchase Date & Time',
                       dataIndex: 'createdAt',
-                      render: (d: any) => (d ? new Date(d).toLocaleString() : '-'),
+                      width: 170,
+                      render: (d: any) => formatDateTime(d),
                     },
                   ]}
                 />
@@ -218,12 +288,13 @@ export default function OrdersPage() {
             },
             {
               key: 'editionOrders',
-              label: 'Edition Orders',
+              label: 'Edition Purchases',
               children: (
                 <Table
                   rowKey="id"
                   dataSource={data.editionOrders}
                   size="small"
+                  scroll={{ x: 1000 }}
                   pagination={{
                     pageSize: PAGE_SIZE,
                     current: editionOrdersPage,
@@ -233,26 +304,53 @@ export default function OrdersPage() {
                     {
                       title: 'S/N',
                       key: 'serial',
-                      width: 70,
+                      width: 60,
                       render: (_: any, __: any, index: number) =>
                         (editionOrdersPage - 1) * PAGE_SIZE + index + 1,
                     },
-                    { title: 'User', dataIndex: 'userEmail' },
-                    { title: 'Magazine', dataIndex: 'magazineTitle' },
+                    {
+                      title: 'Buyer Name',
+                      key: 'buyerName',
+                      width: 160,
+                      render: (_: any, r: any) => buyerName(r),
+                    },
+                    {
+                      title: 'Mobile',
+                      key: 'buyerPhone',
+                      width: 120,
+                      render: (_: any, r: any) => buyerPhone(r),
+                    },
+                    {
+                      title: 'Email',
+                      key: 'buyerEmail',
+                      width: 200,
+                      render: (_: any, r: any) => buyerEmail(r),
+                    },
+                    {
+                      title: 'Magazine',
+                      dataIndex: 'magazineTitle',
+                      width: 200,
+                      render: (t: string) => t || '—',
+                    },
                     {
                       title: 'Edition',
                       key: 'ed',
+                      width: 100,
                       render: (_: any, r: any) => (r.volume ? `Vol ${r.volume}` : r.editionId),
                     },
                     {
                       title: 'Amount',
                       key: 'amt',
+                      width: 110,
                       render: (_: any, r: any) =>
-                        r.amountCents ? `${(r.amountCents / 100).toFixed(2)} ${r.currency}` : '-',
+                        r.amountCents != null
+                          ? formatAmount(Number(r.amountCents) / 100, r.currency)
+                          : '—',
                     },
                     {
                       title: 'Status',
                       dataIndex: 'status',
+                      width: 100,
                       render: (s: any) => (
                         <Tag
                           color={s === 'PAID' ? 'green' : s === 'PENDING' ? 'orange' : 'default'}
@@ -262,9 +360,10 @@ export default function OrdersPage() {
                       ),
                     },
                     {
-                      title: 'Created',
+                      title: 'Purchase Date & Time',
                       dataIndex: 'createdAt',
-                      render: (d: any) => (d ? new Date(d).toLocaleString() : '-'),
+                      width: 170,
+                      render: (d: any) => formatDateTime(d),
                     },
                   ]}
                 />

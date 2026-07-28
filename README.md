@@ -61,7 +61,8 @@ Optional JWT vars in `.env` (or dev defaults are used):
 ```env
 JWT_ACCESS_SECRET=dev-access-secret-min-10-chars
 JWT_REFRESH_SECRET=dev-refresh-secret-min-10-chars
-JWT_ACCESS_EXPIRES=15m
+JWT_ACCESS_EXPIRES=30d
+JWT_REFRESH_EXPIRES=30d
 PORT=2034
 ```
 
@@ -92,7 +93,12 @@ Login as frontend user
 su - vidhyavibe-reader
 
 cd ~/htdocs/reader.vidhyavibe.in/VidhyaVibe_Magazine
+
+# If build fails with EACCES, fix ownership as root first (see deployment/DEPLOY-MANUAL.md),
+
+# then as vidhyavibe-reader:
+
+rm -rf apps/web/.next apps/admin/.next
 pnpm --filter apps-web build
 pnpm --filter apps-admin build
-pm2 restart readerweb
-pm2 restart readeradmin
+pm2 restart reader readeradmin --update-env

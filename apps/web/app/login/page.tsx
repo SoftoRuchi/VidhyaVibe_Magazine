@@ -151,6 +151,15 @@ export default function LoginPage() {
                   <Input.Password prefix={<LockOutlined />} placeholder="Password" />
                 </Form.Item>
 
+                <div style={{ textAlign: 'right', marginTop: -8, marginBottom: 16 }}>
+                  <Link
+                    href="/forgot-password"
+                    style={{ color: 'var(--secondary-color)', fontWeight: 600, fontSize: 13 }}
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+
                 <Form.Item>
                   <Button
                     type="default"

@@ -6,11 +6,24 @@ import {
   signRefreshToken,
   verifyRefreshToken,
   verifyAccessToken,
+  getAccessExpiresSeconds,
+  getRefreshCookieMaxAgeMs,
 } from '../auth/jwt';
 import { hashPassword, comparePassword } from '../auth/password';
 import { rowIsAdmin } from '../auth/userFlags';
 import { getPool, query } from '../db';
-import { loginRateLimiter } from '../middleware/rateLimiter';
+import {
+  forgotPasswordRateLimiter,
+  guestCheckoutRateLimiter,
+  loginRateLimiter,
+} from '../middleware/rateLimiter';
+import { upsertGuestBuyer } from '../services/guestBuyer';
+import { sendCheckoutAcknowledgement, sendPasswordResetOtp } from '../services/notifications';
+import {
+  changePassword,
+  createPasswordResetOtp,
+  resetPasswordWithOtp,
+} from '../services/passwordReset';
 
 const env = getEnv();
 const router = Router();
@@ -177,6 +190,110 @@ router.post('/register', async (req, res) => {
   }
 });
 
+/**
+ * Guest checkout: collect name / phone / email, upsert user, mint session token,
+ * and send acknowledgement (with login OTP if account was created).
+ */
+router.post('/guest-checkout', guestCheckoutRateLimiter, async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const phoneRaw = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+  const phoneDigits = phoneRaw.replace(/\D/g, '');
+
+  if (!name || name.length < 2) {
+    return res
+      .status(400)
+      .json({ error: 'name_required', message: 'Please enter your full name.' });
+  }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res
+      .status(400)
+      .json({ error: 'email_required', message: 'Please enter a valid email address.' });
+  }
+  if (phoneDigits.length < 10) {
+    return res
+      .status(400)
+      .json({ error: 'phone_required', message: 'Please enter a valid mobile number.' });
+  }
+  const phone = phoneDigits.length === 10 ? phoneDigits : phoneDigits.slice(-10);
+
+  let conn: any;
+  try {
+    const { userId, created, temporaryPassword } = await upsertGuestBuyer({ name, email, phone });
+
+    const pool = getPool();
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [userRows]: any = await conn.query('SELECT * FROM users WHERE id = ? LIMIT 1', [userId]);
+    const user = userRows[0];
+    const isAdmin = rowIsAdmin(user);
+    const role = isAdmin ? 'admin' : 'user';
+    const access = signAccessToken({ sub: userId, role });
+    const { token: refreshToken, jti } = signRefreshToken({ sub: userId });
+
+    const ua = req.headers['user-agent'];
+    const userAgent = ua ? String(ua).substring(0, 1000) : null;
+    const snake = await isSessionsSnakeCase();
+    const deviceName = 'guest-checkout';
+    if (snake) {
+      await conn.query(
+        'INSERT INTO sessions (user_id, device_name, ip_address, user_agent, refresh_jti, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
+        [userId, deviceName, req.ip || null, userAgent, jti],
+      );
+    } else {
+      await conn.query(
+        'INSERT INTO sessions (userId, deviceName, ipAddress, userAgent, refreshJti, createdAt) VALUES (?, ?, ?, ?, ?, NOW(3))',
+        [userId, deviceName, req.ip || null, userAgent, jti],
+      );
+    }
+
+    await conn.commit();
+
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: getRefreshCookieMaxAgeMs(),
+    });
+
+    void sendCheckoutAcknowledgement({
+      name,
+      email,
+      phone,
+      temporaryPassword,
+      accountCreated: created,
+    }).catch((err) => {
+      console.error('[guest-checkout] acknowledgement failed', err);
+    });
+
+    res.json({
+      access_token: access,
+      refresh_token: refreshToken,
+      token_type: 'bearer',
+      expires_in: getAccessExpiresSeconds(),
+      created,
+      acknowledgementSent: true,
+      user: { id: userId, email, name, phone, isAdmin },
+    });
+  } catch (e: any) {
+    try {
+      await conn?.rollback?.();
+    } catch {
+      // ignore
+    }
+    console.error('[guest-checkout]', e);
+    res.status(500).json({ error: 'guest_checkout_failed', details: e?.message || String(e) });
+  } finally {
+    try {
+      conn?.release?.();
+    } catch {
+      // ignore
+    }
+  }
+});
+
 // Login
 router.post('/login', loginRateLimiter, async (req, res) => {
   const { email, password, deviceName } = req.body;
@@ -223,14 +340,14 @@ router.post('/login', loginRateLimiter, async (req, res) => {
       secure: env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      maxAge: getRefreshCookieMaxAgeMs(),
     });
 
     res.json({
       access_token: access,
       refresh_token: refreshToken,
       token_type: 'bearer',
-      expires_in: 15 * 60,
+      expires_in: getAccessExpiresSeconds(),
       user: { id: user.id, email: user.email, isAdmin },
     });
   } catch (e: any) {
@@ -279,7 +396,7 @@ router.post('/refresh', async (req, res) => {
       access_token: access,
       refresh_token: refreshToken,
       token_type: 'bearer',
-      expires_in: 15 * 60,
+      expires_in: getAccessExpiresSeconds(),
     });
   } catch (e: any) {
     console.error(e);
@@ -434,6 +551,95 @@ router.put('/me', async (req, res) => {
     } catch {
       // ignore release errors
     }
+  }
+});
+
+/** Change password (logged-in user) */
+router.post('/change-password', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth) return res.status(401).json({ error: 'missing_auth' });
+  const parts = auth.split(' ');
+  if (parts.length !== 2) return res.status(401).json({ error: 'invalid_auth' });
+
+  const currentPassword =
+    typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({
+      error: 'missing_fields',
+      message: 'currentPassword and newPassword are required',
+    });
+  }
+
+  try {
+    const payload: any = verifyAccessToken(parts[1]);
+    const userId = Number(payload?.sub);
+    if (!userId) return res.status(401).json({ error: 'invalid_token' });
+    await changePassword({ userId, currentPassword, newPassword });
+    res.json({ ok: true, message: 'Password updated successfully' });
+  } catch (e: any) {
+    const code = e?.code || 'change_password_failed';
+    if (code === 'invalid_current_password') {
+      return res.status(400).json({ error: code, message: e.message });
+    }
+    if (code === 'password_too_short' || code === 'no_auth') {
+      return res.status(400).json({ error: code, message: e.message });
+    }
+    if (e?.name === 'JsonWebTokenError' || e?.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'invalid_token' });
+    }
+    console.error('[change-password]', e);
+    res.status(500).json({ error: 'change_password_failed', message: e?.message });
+  }
+});
+
+/** Request forgot-password OTP (always returns ok to avoid email enumeration) */
+router.post('/forgot-password', forgotPasswordRateLimiter, async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'invalid_email', message: 'Please enter a valid email.' });
+  }
+
+  try {
+    const { otp, userExists } = await createPasswordResetOtp(email);
+    if (userExists && otp) {
+      const [rows]: any = await query('SELECT name FROM users WHERE email = ? LIMIT 1', [email]);
+      void sendPasswordResetOtp({ email, otp, name: rows?.[0]?.name }).catch((err) => {
+        console.error('[forgot-password] email failed', err);
+      });
+    }
+    res.json({
+      ok: true,
+      message: 'If an account exists for this email, a 6-digit OTP has been sent.',
+    });
+  } catch (e: any) {
+    console.error('[forgot-password]', e);
+    res.status(500).json({ error: 'forgot_password_failed', message: e?.message });
+  }
+});
+
+/** Reset password using emailed OTP */
+router.post('/reset-password', forgotPasswordRateLimiter, async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const otp = typeof req.body?.otp === 'string' ? req.body.otp.trim() : String(req.body?.otp || '');
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+
+  try {
+    await resetPasswordWithOtp({ email, otp, newPassword });
+    res.json({ ok: true, message: 'Password reset successfully. You can log in now.' });
+  } catch (e: any) {
+    const code = e?.code || 'reset_password_failed';
+    if (
+      code === 'invalid_email' ||
+      code === 'invalid_otp' ||
+      code === 'password_too_short' ||
+      code === 'invalid_or_expired_otp' ||
+      code === 'user_not_found'
+    ) {
+      return res.status(400).json({ error: code, message: e.message });
+    }
+    console.error('[reset-password]', e);
+    res.status(500).json({ error: 'reset_password_failed', message: e?.message });
   }
 });
 

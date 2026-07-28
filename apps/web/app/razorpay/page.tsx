@@ -5,6 +5,7 @@ import axios from 'axios';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
 import React from 'react';
+import { readGuestPrefill } from '../../lib/razorpayCheckout';
 
 declare global {
   interface Window {
@@ -52,6 +53,17 @@ export default function RazorpayPage() {
   const canPay = Boolean(key && rpOrderId && amount && scriptReady);
 
   React.useEffect(() => {
+    const guest = readGuestPrefill();
+    if (guest) {
+      setUserPrefill({
+        name: guest.name,
+        email: guest.email,
+        phone: guest.phone,
+      });
+      setUserPrefillLoaded(true);
+      return;
+    }
+
     const token = localStorage.getItem('access_token');
     if (!token) {
       setUserPrefillLoaded(true);
@@ -72,23 +84,29 @@ export default function RazorpayPage() {
   }, []);
 
   async function savePaymentToOrder(response: any) {
-    const token = localStorage.getItem('access_token');
-    if (!token) throw new Error('unauthenticated');
     if (!orderId) throw new Error('missing_orderId');
 
     setConfirmStatus('saving');
     setConfirmError(null);
     setConfirmResult(null);
     try {
+      const token = localStorage.getItem('access_token');
+      const endpoint = token
+        ? '/api/payments/razorpay/confirm'
+        : '/api/payments/razorpay/guest-confirm';
+      const headers = token
+        ? { withCredentials: true, headers: { Authorization: `Bearer ${token}` } }
+        : { withCredentials: true };
+
       const { data } = await axios.post(
-        '/api/payments/razorpay/confirm',
+        endpoint,
         {
           orderId: Number(orderId),
           razorpay_payment_id: response?.razorpay_payment_id,
           razorpay_order_id: response?.razorpay_order_id,
           razorpay_signature: response?.razorpay_signature,
         },
-        { withCredentials: true, headers: { Authorization: `Bearer ${token}` } },
+        headers,
       );
       setConfirmResult({
         subscriptionId: data?.subscriptionId,

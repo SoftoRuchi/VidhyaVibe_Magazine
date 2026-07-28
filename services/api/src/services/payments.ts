@@ -1,7 +1,14 @@
 import crypto from 'crypto';
 import { getPool } from '../db';
 import { computeSubscriptionAmount } from '../utils/subscriptionPricing';
-import { validateCoupon, recordCouponUsage } from './coupons';
+import {
+  applyCouponDiscount,
+  normalizeCouponCode,
+  recordCouponUsage,
+  validateCoupon,
+} from './coupons';
+import { assertMagazineNotAlreadyPurchased } from './magazinePurchaseGuard';
+import { sendPurchaseConfirmation } from './notifications';
 
 /** Create subscription, payment, coupon usage, and dispatch schedules after an order is paid. */
 async function fulfillOrderAfterPayment(
@@ -46,18 +53,18 @@ async function fulfillOrderAfterPayment(
   const [insSub]: any = await conn.query(
     'INSERT INTO user_subscriptions (userId, readerId, magazineId, planId, delivery_mode, status, startsAt, endsAt, autoRenew, price, currency, couponId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))',
     [
-      order.user_id,
-      order.reader_id || null,
-      order.magazine_id || null,
-      order.plan_id,
-      order.delivery_mode || 'BOTH',
+      order.user_id ?? order.userId,
+      order.reader_id ?? order.readerId ?? null,
+      order.magazine_id ?? order.magazineId ?? null,
+      order.plan_id ?? order.planId,
+      order.delivery_mode ?? order.deliveryMode ?? 'BOTH',
       'ACTIVE',
       startsAt,
       endsAt,
       1,
       finalAmount,
       order.currency,
-      order.coupon_id || null,
+      order.coupon_id ?? order.couponId ?? null,
     ],
   );
   const subscriptionId = insSub.insertId;
@@ -65,7 +72,7 @@ async function fulfillOrderAfterPayment(
   const [pay]: any = await conn.query(
     'INSERT INTO payments (userId, subscriptionId, amountCents, currency, provider, providerPaymentId, status, metadata, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(3))',
     [
-      order.user_id,
+      order.user_id ?? order.userId,
       subscriptionId,
       Math.round(finalAmount * 100),
       order.currency,
@@ -77,26 +84,30 @@ async function fulfillOrderAfterPayment(
   );
   const paymentId = pay.insertId;
 
-  if (order.coupon_id) {
-    await recordCouponUsage(order.coupon_id, order.user_id, subscriptionId);
+  const couponId = order.coupon_id ?? order.couponId;
+  const userId = order.user_id ?? order.userId;
+  if (couponId) {
+    await recordCouponUsage(Number(couponId), userId ? Number(userId) : undefined, subscriptionId);
   }
 
   await conn.query('UPDATE orders SET status = ? WHERE id = ?', ['PAID', order.id]);
 
   const [planRows]: any = await conn.query(
     'SELECT dispatchFrequencyDays, autoDispatch, deliveryMode FROM subscription_plans WHERE id = ? LIMIT 1',
-    [order.plan_id],
+    [order.plan_id ?? order.planId],
   );
   const plan = planRows[0];
-  if (plan?.autoDispatch && ['PHYSICAL', 'BOTH'].includes(order.delivery_mode)) {
+  const deliveryMode = order.delivery_mode ?? order.deliveryMode;
+  if (plan?.autoDispatch && ['PHYSICAL', 'BOTH'].includes(deliveryMode)) {
     const freqDays = plan.dispatchFrequencyDays || 30;
     let next = new Date(startsAt);
     while (next < endsAt) {
       let editionIdForSchedule = null;
-      if (order.magazine_id) {
+      const magazineId = order.magazine_id ?? order.magazineId;
+      if (magazineId) {
         const [edRows]: any = await conn.query(
           'SELECT id FROM magazine_editions WHERE magazineId = ? AND publishedAt <= ? ORDER BY publishedAt DESC LIMIT 1',
-          [order.magazine_id, next],
+          [magazineId, next],
         );
         if (edRows?.[0]) editionIdForSchedule = edRows[0].id;
       }
@@ -144,11 +155,13 @@ async function createRazorpayOrder(params: { amount: number; currency: string; r
 }
 
 export async function confirmRazorpayPayment(params: {
-  userId: number;
+  userId?: number;
   orderId: number;
   razorpay_payment_id: string;
   razorpay_order_id: string;
   razorpay_signature: string;
+  /** When true, order.user_id is trusted (guest checkout — no JWT). Signature still verified. */
+  allowGuest?: boolean;
 }) {
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
   if (!keySecret) throw new Error('razorpay_credentials_missing');
@@ -163,7 +176,11 @@ export async function confirmRazorpayPayment(params: {
     ]);
     const order = rows?.[0];
     if (!order) throw new Error('order_not_found');
-    if (Number(order.user_id) !== Number(params.userId)) throw new Error('forbidden');
+
+    if (!params.allowGuest) {
+      if (params.userId == null) throw new Error('unauthenticated');
+      if (Number(order.user_id) !== Number(params.userId)) throw new Error('forbidden');
+    }
 
     // Ensure the Razorpay order id matches what we stored at creation time
     if (!order.rp_order_id) throw new Error('rp_order_id_missing');
@@ -190,6 +207,9 @@ export async function confirmRazorpayPayment(params: {
         },
       });
       await conn.commit();
+      void notifyPurchaseConfirmation(order, result).catch((err) => {
+        console.error('[payments] purchase confirmation notify failed', err);
+      });
       return { ok: true, ...result };
     }
 
@@ -210,6 +230,9 @@ export async function confirmRazorpayPayment(params: {
     });
 
     await conn.commit();
+    void notifyPurchaseConfirmation(order, result).catch((err) => {
+      console.error('[payments] purchase confirmation notify failed', err);
+    });
     return { ok: true, ...result };
   } catch (e) {
     await conn.rollback();
@@ -217,6 +240,40 @@ export async function confirmRazorpayPayment(params: {
   } finally {
     conn.release();
   }
+}
+
+async function notifyPurchaseConfirmation(
+  order: any,
+  result: { subscriptionId: number; paymentId: number },
+) {
+  const pool = getPool();
+  const [userRows]: any = await pool.query(
+    'SELECT name, email, phone FROM users WHERE id = ? LIMIT 1',
+    [order.user_id],
+  );
+  const user = userRows?.[0];
+  if (!user?.email && !user?.phone) return;
+
+  let magazineTitle: string | null = null;
+  if (order.magazine_id) {
+    const [magRows]: any = await pool.query('SELECT title FROM magazines WHERE id = ? LIMIT 1', [
+      order.magazine_id,
+    ]);
+    magazineTitle = magRows?.[0]?.title || null;
+  }
+
+  await sendPurchaseConfirmation({
+    name: user.name || 'Customer',
+    email: user.email,
+    phone: user.phone || '',
+    orderId: Number(order.id),
+    amount: Number(order.final_amount ?? order.final_cents ?? 0),
+    currency: order.currency || 'INR',
+    months: Number(order.months || 1),
+    magazineTitle,
+    subscriptionId: result.subscriptionId,
+    paymentId: result.paymentId,
+  });
 }
 
 export async function createOrder(params: {
@@ -228,7 +285,17 @@ export async function createOrder(params: {
   addressId?: number;
   couponCode?: string;
   magazineId?: number;
+  guest?: { name: string; email: string; phone: string };
 }) {
+  if (params.magazineId) {
+    await assertMagazineNotAlreadyPurchased({
+      magazineId: Number(params.magazineId),
+      userId: params.userId,
+      email: params.guest?.email,
+      phone: params.guest?.phone,
+    });
+  }
+
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
@@ -311,16 +378,11 @@ export async function createOrder(params: {
     let final = baseAmount;
     let couponId = null;
     if (params.couponCode) {
-      const v = await validateCoupon(params.couponCode, params.userId, params.planId, undefined);
+      const code = normalizeCouponCode(params.couponCode);
+      const v = await validateCoupon(code, params.userId, params.planId, params.magazineId);
       if (!v.valid) throw new Error(`invalid_coupon:${v.reason}`);
       couponId = v.coupon.id;
-      // compute discount
-      if (v.coupon.discount_pct) {
-        final = Math.max(0, final - Math.round((final * Number(v.coupon.discount_pct)) / 100));
-      } else if (v.coupon.discount_cents) {
-        // NOTE: despite the column name, treat this as whole units in this project
-        final = Math.max(0, final - Number(v.coupon.discount_cents));
-      }
+      final = applyCouponDiscount(final, v.coupon);
     }
 
     // Create Razorpay order and store its id in orders.rp_order_id (RPOrderId)
@@ -330,24 +392,69 @@ export async function createOrder(params: {
       receipt: 'test payment',
     });
 
-    const [ins]: any = await conn.query(
-      'INSERT INTO orders (user_id, plan_id, months, reader_id, delivery_mode, address_id, coupon_id, amount, final_amount, currency, magazine_id, rp_order_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-      [
-        params.userId,
-        params.planId,
-        params.months,
-        params.readerId || null,
-        deliveryMode,
-        params.addressId || null,
-        couponId,
-        baseAmount,
-        final,
-        effectiveCurrency,
-        params.magazineId || null,
-        rpOrder.id,
-      ],
-    );
-    const orderId = ins.insertId;
+    // Ensure guest contact snapshot columns exist (MySQL 8+ / MariaDB variants)
+    try {
+      await conn.query('ALTER TABLE orders ADD COLUMN guest_name VARCHAR(255) NULL');
+    } catch {
+      /* column may already exist */
+    }
+    try {
+      await conn.query('ALTER TABLE orders ADD COLUMN guest_email VARCHAR(255) NULL');
+    } catch {
+      /* column may already exist */
+    }
+    try {
+      await conn.query('ALTER TABLE orders ADD COLUMN guest_phone VARCHAR(50) NULL');
+    } catch {
+      /* column may already exist */
+    }
+
+    let orderId: number;
+    try {
+      const [ins]: any = await conn.query(
+        `INSERT INTO orders
+          (user_id, plan_id, months, reader_id, delivery_mode, address_id, coupon_id, amount, final_amount, currency, magazine_id, guest_name, guest_email, guest_phone, rp_order_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          params.userId,
+          params.planId,
+          params.months,
+          params.readerId || null,
+          deliveryMode,
+          params.addressId || null,
+          couponId,
+          baseAmount,
+          final,
+          effectiveCurrency,
+          params.magazineId || null,
+          params.guest?.name || null,
+          params.guest?.email || null,
+          params.guest?.phone || null,
+          rpOrder.id,
+        ],
+      );
+      orderId = ins.insertId;
+    } catch {
+      // Fallback for DBs without guest_* columns yet
+      const [ins]: any = await conn.query(
+        'INSERT INTO orders (user_id, plan_id, months, reader_id, delivery_mode, address_id, coupon_id, amount, final_amount, currency, magazine_id, rp_order_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+        [
+          params.userId,
+          params.planId,
+          params.months,
+          params.readerId || null,
+          deliveryMode,
+          params.addressId || null,
+          couponId,
+          baseAmount,
+          final,
+          effectiveCurrency,
+          params.magazineId || null,
+          rpOrder.id,
+        ],
+      );
+      orderId = ins.insertId;
+    }
     await conn.commit();
     // return order info including a UPI uri (simple)
     const upi = `upi://pay?pa=merchant@upi&pn=Magazine&tn=Order%20${orderId}&am=${Number(final).toFixed(2)}&cu=${effectiveCurrency}`;

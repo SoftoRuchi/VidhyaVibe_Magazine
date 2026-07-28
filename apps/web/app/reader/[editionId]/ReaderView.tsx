@@ -4,16 +4,13 @@ import axios from 'axios';
 import { useParams, useSearchParams } from 'next/navigation';
 import React from 'react';
 import HTMLFlipBook from 'react-pageflip';
-import { Document, Page, pdfjs } from 'react-pdf';
+import { Document, Page } from 'react-pdf';
 import { apiUrl } from '../../../lib/apiBase';
+import { configurePdfWorker } from '../../../lib/pdfWorker';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-// Same-origin worker (public/pdf.worker.min.mjs via postinstall) avoids null worker / sendWithPromise failures
-// from cross-origin CDN workers, Strict Mode double-mount, or blocked third-party scripts.
-if (typeof window !== 'undefined') {
-  pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-}
+configurePdfWorker();
 
 function getAuthHeaders() {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -283,8 +280,9 @@ export default function ReaderView() {
     setCurrent(1);
   }, [startFromBeginning, editionId]);
 
-  const useImageReader = pages.length > 0 && !imageLoadFailed;
-  const usePdfReader = !!pdfUrl && !useImageReader && (!!token || sampleMode);
+  // Prefer PDF when available (uploaded editions have fileKey/PDF, not extracted page JPGs).
+  const usePdfReader = !!pdfUrl && (!!token || sampleMode);
+  const useImageReader = !usePdfReader && pages.length > 0 && !imageLoadFailed;
   const useImageFlip = viewMode === 'book' && useImageReader;
   const usePdfFlip = viewMode === 'book' && usePdfReader;
   const useFlatPdf = viewMode === 'pdf' && !!pdfUrl;
@@ -303,8 +301,13 @@ export default function ReaderView() {
   }, [current, flipDimensionsReady, totalPages, viewMode]);
   const pdfFile = React.useMemo(() => {
     if (!pdfUrl || typeof window === 'undefined') return null;
-    return { url: `${window.location.origin}${pdfUrl}` };
-  }, [pdfUrl]);
+    // Append token so pdf.js worker fetch works even when Authorization headers are stripped.
+    const authQs =
+      token && !sampleMode
+        ? `${pdfUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+        : '';
+    return { url: `${window.location.origin}${pdfUrl}${authQs}` };
+  }, [pdfUrl, token, sampleMode]);
   const pdfOptions = React.useMemo(
     () =>
       token && !sampleMode ? { httpHeaders: { Authorization: `Bearer ${token}` } } : undefined,

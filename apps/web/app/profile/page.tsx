@@ -1,9 +1,16 @@
 'use client';
 
-import { UserOutlined, EditOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import {
+  UserOutlined,
+  EditOutlined,
+  SaveOutlined,
+  CloseOutlined,
+  LockOutlined,
+} from '@ant-design/icons';
 import { Card, Form, Input, Button, message, Spin, Select, InputNumber, Divider } from 'antd';
 import axios from 'axios';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import profileImg from '../../components/images/profile.png';
@@ -52,6 +59,9 @@ export default function ProfilePage() {
   const [_guardianForm] = Form.useForm();
   const [readerForm] = Form.useForm();
   const [newReaderForm] = Form.useForm();
+  const [passwordForm] = Form.useForm();
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
 
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -103,6 +113,34 @@ export default function ProfilePage() {
       message.success('Profile updated!');
     } catch (e: any) {
       message.error(e.response?.data?.error || 'Update failed');
+    }
+  };
+
+  const savePassword = async () => {
+    const vals = await passwordForm.validateFields();
+    if (vals.newPassword !== vals.confirmPassword) {
+      message.error('New passwords do not match');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await axios.post(
+        '/api/auth/change-password',
+        {
+          currentPassword: vals.currentPassword,
+          newPassword: vals.newPassword,
+        },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      message.success('Password updated. Your old 6-digit password will no longer work.');
+      passwordForm.resetFields();
+      setChangingPassword(false);
+    } catch (e: any) {
+      message.error(
+        e.response?.data?.message || e.response?.data?.error || 'Password update failed',
+      );
+    } finally {
+      setSavingPassword(false);
     }
   };
 
@@ -331,6 +369,73 @@ export default function ProfilePage() {
                 >
                   Edit Profile Details
                 </Button>
+
+                <Divider style={{ margin: '16px 0' }} />
+
+                {changingPassword ? (
+                  <Form form={passwordForm} layout="vertical" size="middle">
+                    <Form.Item
+                      name="currentPassword"
+                      label="Current password"
+                      rules={[{ required: true, message: 'Enter current password' }]}
+                    >
+                      <Input.Password prefix={<LockOutlined />} placeholder="Current password" />
+                    </Form.Item>
+                    <Form.Item
+                      name="newPassword"
+                      label="New password"
+                      rules={[
+                        { required: true, message: 'Enter new password' },
+                        { min: 6, message: 'At least 6 characters' },
+                      ]}
+                    >
+                      <Input.Password prefix={<LockOutlined />} placeholder="New password" />
+                    </Form.Item>
+                    <Form.Item
+                      name="confirmPassword"
+                      label="Confirm new password"
+                      rules={[{ required: true, message: 'Confirm new password' }]}
+                    >
+                      <Input.Password prefix={<LockOutlined />} placeholder="Confirm password" />
+                    </Form.Item>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Button
+                        type="primary"
+                        icon={<SaveOutlined />}
+                        loading={savingPassword}
+                        onClick={savePassword}
+                      >
+                        Save password
+                      </Button>
+                      <Button
+                        icon={<CloseOutlined />}
+                        onClick={() => {
+                          setChangingPassword(false);
+                          passwordForm.resetFields();
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </Form>
+                ) : (
+                  <>
+                    <Button
+                      block
+                      type="default"
+                      icon={<LockOutlined />}
+                      onClick={() => setChangingPassword(true)}
+                      style={{ borderRadius: 999, marginBottom: 8 }}
+                    >
+                      Change password
+                    </Button>
+                    <div style={{ textAlign: 'center', fontSize: 12 }}>
+                      <Link href="/forgot-password" style={{ color: '#6b7280' }}>
+                        Forgot password?
+                      </Link>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </Card>

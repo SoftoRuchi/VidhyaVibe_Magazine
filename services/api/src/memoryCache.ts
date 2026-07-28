@@ -10,3 +10,7 @@ export function memCacheGet<T>(key: string): T | null {
 export function memCacheSet(key: string, value: unknown, ttlSec: number): void {
   cache.set(key, value, ttlSec * 1000);
 }
+
+export function memCacheDelete(key: string): void {
+  cache.delete(key);
+}

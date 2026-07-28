@@ -214,7 +214,7 @@ export default function MagazineDetailPage() {
                   />
                 </div>
               </div>
-              {!childMode && (
+              {!childMode && subscribed === false && (
                 <Link href={`/subscribe?magazineId=${magazine.id}`}>
                   <Button
                     type="default"
@@ -403,7 +403,13 @@ export default function MagazineDetailPage() {
                   ))}
                 </div>
               ) : (
-                <Empty description="No published editions yet." />
+                <Empty
+                  description={
+                    subscribed
+                      ? 'No editions are published yet. Your subscription is active — new issues will appear here once published.'
+                      : 'No published editions yet.'
+                  }
+                />
               )}
             </div>
           </div>

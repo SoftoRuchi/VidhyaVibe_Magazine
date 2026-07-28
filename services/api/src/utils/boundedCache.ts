@@ -27,4 +27,8 @@ export class BoundedTTLCache<T> {
     }
     this.map.set(key, { value, expiresAt: Date.now() + ttlMs });
   }
+
+  delete(key: string): void {
+    this.map.delete(key);
+  }
 }

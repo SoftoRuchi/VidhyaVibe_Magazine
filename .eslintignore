@@ -5,6 +5,11 @@ dist
 build
 *.min.js
 
+# Vendored / generated browser assets (not app source)
+**/public/pdf-worker.js
+**/public/pdf.worker.min.mjs
+apps/web/public/pdf-worker.js
+
 # Config and non-JS files
 *.css
 *.scss

@@ -5,6 +5,8 @@ import {
   FilePdfOutlined,
   PlusOutlined,
   MoreOutlined,
+  CloudUploadOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import {
   Card,
@@ -226,6 +228,16 @@ export default function MagazineDetail({ params }: any) {
     window.open(getReaderEditionUrl(ed.id, qs), '_blank', 'noopener,noreferrer');
   };
 
+  const handlePublishEdition = async (ed: any, publish: boolean) => {
+    try {
+      await api.post(`/admin/magazines/editions/${ed.id}/publish`, { publish });
+      message.success(publish ? 'Edition published' : 'Edition unpublished');
+      loadData();
+    } catch (e: any) {
+      message.error(e.response?.data?.error || 'Publish action failed');
+    }
+  };
+
   const openEditEdition = (ed: any) => {
     setEditingEditionId(ed.id);
     form.resetFields();
@@ -280,6 +292,7 @@ export default function MagazineDetail({ params }: any) {
   const openAddEditionModal = () => {
     setEditingEditionId(null);
     form.resetFields();
+    form.setFieldsValue({ publishNow: true });
     setEditionModalOpen(true);
   };
 
@@ -580,8 +593,23 @@ export default function MagazineDetail({ params }: any) {
                       {
                         title: 'Published',
                         dataIndex: 'publishedAt',
-                        width: 100,
-                        render: (d: any) => (d ? <Tag color="green">Yes</Tag> : <Tag>No</Tag>),
+                        width: 180,
+                        render: (d: any, ed: any) =>
+                          d ? (
+                            <Tag color="green">Yes</Tag>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <Tag color="orange">No — hidden on site</Tag>
+                              <Button
+                                type="primary"
+                                size="small"
+                                icon={<CloudUploadOutlined />}
+                                onClick={() => handlePublishEdition(ed, true)}
+                              >
+                                Publish
+                              </Button>
+                            </div>
+                          ),
                       },
                       {
                         title: 'Files',
@@ -616,6 +644,19 @@ export default function MagazineDetail({ params }: any) {
                               disabled: !ed.sampleKey,
                               onClick: () => openReadSample(ed),
                             },
+                            ed.publishedAt
+                              ? {
+                                  key: 'unpublish',
+                                  label: 'Unpublish',
+                                  icon: <StopOutlined />,
+                                  onClick: () => handlePublishEdition(ed, false),
+                                }
+                              : {
+                                  key: 'publish',
+                                  label: 'Publish now',
+                                  icon: <CloudUploadOutlined />,
+                                  onClick: () => handlePublishEdition(ed, true),
+                                },
                             {
                               key: 'edit',
                               label: 'Edit',

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { invalidateMagazineCatalog } from '../../catalogCache';
 import { getPool } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
 import type { AuthRequest } from '../../middleware/auth';
@@ -108,10 +109,25 @@ router.post('/editions/:id/publish', async (req: AuthRequest, res) => {
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    const [rows]: any = await conn.query(
+      'SELECT magazineId FROM magazine_editions WHERE id = ? LIMIT 1',
+      [id],
+    );
+    const edition = rows[0];
+    if (!edition) return res.status(404).json({ error: 'edition_not_found' });
+
+    const [magRows]: any = await conn.query('SELECT slug FROM magazines WHERE id = ? LIMIT 1', [
+      edition.magazineId,
+    ]);
+    const mag = magRows[0];
+
     if (publish) {
       await conn.query('UPDATE magazine_editions SET publishedAt = NOW() WHERE id = ?', [id]);
     } else {
       await conn.query('UPDATE magazine_editions SET publishedAt = NULL WHERE id = ?', [id]);
+    }
+    if (mag) {
+      await invalidateMagazineCatalog(edition.magazineId, mag.slug);
     }
     res.json({ ok: true });
   } catch (e: any) {

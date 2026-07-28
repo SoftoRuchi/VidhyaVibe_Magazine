@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { invalidateMagazineCatalog } from '../catalogCache';
 import { getPool } from '../db';
 import { getStorageAdapter } from '../providers/storage';
 
@@ -92,6 +93,7 @@ export async function createAdminEdition(req: Request, res: Response) {
       sampleKey,
       coverKey: editionCoverKey,
     });
+    await invalidateMagazineCatalog(magazineId, mag.slug);
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'upload_failed', details: e.message });
@@ -193,6 +195,7 @@ export async function updateAdminEdition(req: Request, res: Response) {
     );
 
     res.json({ ok: true, id: editionId, fileKey, sampleKey, coverKey: editionCoverKey });
+    await invalidateMagazineCatalog(magazineId, mag.slug);
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'update_failed', details: e.message });

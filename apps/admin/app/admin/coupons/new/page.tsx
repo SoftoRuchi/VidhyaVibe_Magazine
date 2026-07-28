@@ -1,57 +1,232 @@
 'use client';
-import { Card, Form, Input, InputNumber, Button, DatePicker, Switch, Select } from 'antd';
-import axios from 'axios';
+import {
+  Card,
+  Form,
+  Input,
+  InputNumber,
+  Button,
+  DatePicker,
+  Switch,
+  Select,
+  Row,
+  Col,
+  Radio,
+  message,
+} from 'antd';
 import { useRouter } from 'next/navigation';
 import React from 'react';
+import api from '../../../../lib/api';
+import { wallClockFromPicker } from '../../../../lib/wallClock';
 
 export default function NewCouponPage() {
   const router = useRouter();
-
   const [form] = Form.useForm();
+  const [plans, setPlans] = React.useState<{ label: string; value: number }[]>([]);
+  const [magazines, setMagazines] = React.useState<{ label: string; value: number }[]>([]);
+  const [loadingOptions, setLoadingOptions] = React.useState(true);
+  const [submitting, setSubmitting] = React.useState(false);
+  const discountType = Form.useWatch('discountType', form) || 'percent';
+
+  React.useEffect(() => {
+    setLoadingOptions(true);
+    Promise.all([
+      api.get('/admin/plans').then((r) =>
+        (r.data || []).map((p: any) => ({
+          label: p.name,
+          value: Number(p.id),
+        })),
+      ),
+      api.get('/admin/magazines/list').then((r) =>
+        (r.data || []).map((m: any) => ({
+          label: m.title,
+          value: Number(m.id),
+        })),
+      ),
+    ])
+      .then(([planOpts, magazineOpts]) => {
+        setPlans(planOpts);
+        setMagazines(magazineOpts);
+      })
+      .catch(() => {
+        message.error('Failed to load plans/magazines');
+        setPlans([]);
+        setMagazines([]);
+      })
+      .finally(() => setLoadingOptions(false));
+  }, []);
 
   async function onFinish(values: any) {
-    // transform date
-    if (values.expiresAt) values.expiresAt = values.expiresAt.toISOString();
-    await axios.post('/api/admin/coupons', values, { withCredentials: true });
-    router.push('/admin/coupons');
+    setSubmitting(true);
+    try {
+      // Keep the picker wall-clock time as-is (no UTC conversion)
+      const expiresAt = wallClockFromPicker(values.expiresAt);
+      if (values.code) values.code = String(values.code).trim().toUpperCase();
+
+      const payload: any = {
+        code: values.code,
+        description: values.description || null,
+        expiresAt,
+        maxUses: values.maxUses || null,
+        perUserLimit: values.perUserLimit || null,
+        active: values.active !== false,
+        planId: values.planId || null,
+        magazineId: values.magazineId || null,
+        discountPct: null,
+        discountCents: null,
+      };
+
+      if (values.discountType === 'fixed') {
+        payload.discountCents = Number(values.discountValue);
+      } else {
+        payload.discountPct = Number(values.discountValue);
+      }
+
+      await api.post('/admin/coupons', payload);
+      message.success('Coupon created');
+      router.push('/admin/coupons');
+    } catch (e: any) {
+      message.error(e?.response?.data?.details || e?.response?.data?.error || 'Create failed');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
     <main style={{ padding: 24 }}>
       <Card title="New Coupon">
-        <Form form={form} layout="vertical" onFinish={onFinish}>
-          <Form.Item name="code" label="Code" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="Description">
-            <Input />
-          </Form.Item>
-          <Form.Item name="discountPct" label="Discount %">
-            <InputNumber min={0} max={100} />
-          </Form.Item>
-          <Form.Item name="discountCents" label="Discount (cents)">
-            <InputNumber min={0} />
-          </Form.Item>
-          <Form.Item name="expiresAt" label="Expires At">
-            <DatePicker showTime />
-          </Form.Item>
-          <Form.Item name="maxUses" label="Max Uses">
-            <InputNumber min={1} />
-          </Form.Item>
-          <Form.Item name="perUserLimit" label="Per-user Limit">
-            <InputNumber min={1} />
-          </Form.Item>
-          <Form.Item name="active" label="Active" valuePropName="checked" initialValue={true}>
-            <Switch />
-          </Form.Item>
-          <Form.Item name="planId" label="Plan (optional)">
-            <Select allowClear>{/* fetched client-side could be implemented */}</Select>
-          </Form.Item>
-          <Form.Item name="magazineId" label="Magazine (optional)">
-            <Select allowClear />
-          </Form.Item>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={onFinish}
+          initialValues={{ active: true, discountType: 'percent' }}
+        >
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="code"
+                label="Code"
+                rules={[{ required: true, message: 'Enter code' }]}
+              >
+                <Input placeholder="e.g. WELCOME20" style={{ textTransform: 'uppercase' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="description" label="Description">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="discountType"
+                label="Discount type"
+                rules={[{ required: true, message: 'Select discount type' }]}
+              >
+                <Radio.Group
+                  optionType="button"
+                  buttonStyle="solid"
+                  options={[
+                    { value: 'percent', label: 'Percentage (%)' },
+                    { value: 'fixed', label: 'Fixed amount (₹)' },
+                  ]}
+                  onChange={() => form.setFieldValue('discountValue', undefined)}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="discountValue"
+                label={discountType === 'fixed' ? 'Discount amount (₹)' : 'Discount (%)'}
+                rules={[
+                  { required: true, message: 'Enter discount value' },
+                  {
+                    validator: async (_, value) => {
+                      if (value == null) return;
+                      if (discountType === 'percent' && (value < 1 || value > 100)) {
+                        throw new Error('Enter a percentage between 1 and 100');
+                      }
+                      if (discountType === 'fixed' && value < 1) {
+                        throw new Error('Enter amount in rupees (₹)');
+                      }
+                    },
+                  },
+                ]}
+                extra={
+                  discountType === 'fixed'
+                    ? 'Example: 50 = ₹50 off the subscription total'
+                    : 'Example: 20 = 20% off the subscription total'
+                }
+              >
+                <InputNumber
+                  min={1}
+                  max={discountType === 'percent' ? 100 : undefined}
+                  style={{ width: '100%' }}
+                  prefix={discountType === 'fixed' ? '₹' : undefined}
+                  addonAfter={discountType === 'percent' ? '%' : undefined}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Form.Item name="maxUses" label="Max Uses">
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="perUserLimit" label="Per-user Limit">
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Form.Item name="planId" label="Plan (optional)">
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  loading={loadingOptions}
+                  options={plans}
+                  placeholder={plans.length ? 'Select plan' : 'No plans found'}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="magazineId" label="Magazine (optional)">
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  loading={loadingOptions}
+                  options={magazines}
+                  placeholder={magazines.length ? 'Select magazine' : 'No magazines found'}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16} align="middle">
+            <Col xs={24} sm={12}>
+              <Form.Item name="expiresAt" label="Expires At">
+                <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="active" label="Active" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item>
-            <Button type="primary" htmlType="submit">
+            <Button type="primary" htmlType="submit" loading={submitting}>
               Create
             </Button>
           </Form.Item>

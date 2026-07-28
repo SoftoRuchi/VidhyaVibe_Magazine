@@ -1,0 +1,20 @@
+{
+  "short_name": "VidhyaVibe",
+  "name": "VidhyaVibe — Future Skills Learning",
+  "icons": [
+    {
+      "src": "images/sales/logonew.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "images/sales/logonew.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#F5EEDD",
+  "background_color": "#F5EEDD"
+}

@@ -1,27 +1,39 @@
 'use client';
-import { Card, Form, Select, InputNumber, Button, Input, message, Radio, Alert } from 'antd';
+import { Card, Form, Select, InputNumber, Button, Input, message, Radio, Alert, Tag } from 'antd';
 import axios from 'axios';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React from 'react';
+import { CouponCelebration } from '../../components/CouponCelebration';
 import subscribeImg from '../../components/images/subscribe.png';
+import { useAuth } from '../../lib/authContext';
 import { startRazorpayCheckout } from '../../lib/razorpayCheckout';
 import { isChildAudience } from '../../lib/viewingContext';
 
 const DELIVERY_OPTIONS = [
   { value: 'ELECTRONIC', label: 'E-Magazine only (digital access)' },
-  { value: 'PHYSICAL', label: 'Physical copy only' },
+  // { value: 'PHYSICAL', label: 'Physical copy only' },
   { value: 'BOTH', label: 'Both (E-Magazine + Physical)' },
 ];
+
+type AvailableCoupon = {
+  id: number;
+  code: string;
+  description?: string | null;
+  discountPct?: number | null;
+  discountFixed?: number | null;
+  label: string;
+};
 
 export default function SubscribePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { loggedIn, loading: authLoading } = useAuth();
   const magazineIdParam = searchParams?.get('magazineId');
+  const groupParam = searchParams?.get('group');
   const [form] = Form.useForm();
   const [plans, setPlans] = React.useState<any[]>([]);
   const [magazines, setMagazines] = React.useState<any[]>([]);
-  const [order, setOrder] = React.useState<any>(null);
   const [selectedMagazineId, setSelectedMagazineId] = React.useState<number | null>(
     magazineIdParam ? Number(magazineIdParam) : null,
   );
@@ -30,6 +42,27 @@ export default function SubscribePage() {
   );
   const [selectedPlanId, setSelectedPlanId] = React.useState<number | null>(null);
   const [childMode, setChildMode] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [couponApplying, setCouponApplying] = React.useState(false);
+  const [couponPreview, setCouponPreview] = React.useState<{
+    code: string;
+    amount: number;
+    finalAmount: number;
+    discountAmount: number;
+    currency: string;
+    message: string;
+  } | null>(null);
+  const [couponError, setCouponError] = React.useState<string | null>(null);
+  const [availableCoupons, setAvailableCoupons] = React.useState<AvailableCoupon[]>([]);
+  const [celebrateId, setCelebrateId] = React.useState(0);
+  const [celebrateCopy, setCelebrateCopy] = React.useState<{ title: string; subtitle: string }>({
+    title: 'Coupon unlocked!',
+    subtitle: '',
+  });
+
+  // Prefer token presence so checkout works even if auth context is still settling
+  const hasToken = typeof window !== 'undefined' ? !!localStorage.getItem('access_token') : false;
+  const needsGuestDetails = !authLoading && !loggedIn && !hasToken;
 
   React.useEffect(() => {
     setChildMode(isChildAudience());
@@ -47,6 +80,36 @@ export default function SubscribePage() {
   }, []);
 
   React.useEffect(() => {
+    if (!magazines.length) return;
+
+    if (magazineIdParam) {
+      const id = Number(magazineIdParam);
+      if (!Number.isFinite(id)) return;
+      const exists = magazines.some((m: { id: number }) => Number(m.id) === id);
+      if (!exists) return;
+      form.setFieldsValue({ magazineId: id });
+      setSelectedMagazineId(id);
+      return;
+    }
+
+    if (groupParam) {
+      const groupNum = Number(groupParam);
+      if (!Number.isFinite(groupNum)) return;
+      const byTitle = magazines.find((m: { title?: string }) =>
+        new RegExp(`\\bGroup\\s*${groupNum}\\b`, 'i').test(String(m.title || '')),
+      );
+      const sorted = [...magazines].sort(
+        (a: { id: number }, b: { id: number }) => Number(a.id) - Number(b.id),
+      );
+      const matched = byTitle ?? sorted[groupNum - 1];
+      if (!matched) return;
+      const id = Number(matched.id);
+      form.setFieldsValue({ magazineId: id });
+      setSelectedMagazineId(id);
+    }
+  }, [form, groupParam, magazineIdParam, magazines]);
+
+  React.useEffect(() => {
     const id = selectedMagazineId;
     if (!id) {
       setPlans([]);
@@ -54,6 +117,17 @@ export default function SubscribePage() {
     }
     axios.get(`/api/subscriptions/plans?magazineId=${id}`).then((r) => setPlans(r.data || []));
   }, [selectedMagazineId]);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedMagazineId) params.set('magazineId', String(selectedMagazineId));
+    if (selectedPlanId) params.set('planId', String(selectedPlanId));
+    const qs = params.toString();
+    axios
+      .get(`/api/coupons/available${qs ? `?${qs}` : ''}`)
+      .then((r) => setAvailableCoupons(r.data || []))
+      .catch(() => setAvailableCoupons([]));
+  }, [selectedMagazineId, selectedPlanId]);
 
   // Show plans that have a price for the selected delivery type (not only by plan.deliveryMode).
   // This way plans with prices.PHYSICAL show under "Physical", prices.BOTH under "Both", etc.
@@ -74,12 +148,71 @@ export default function SubscribePage() {
   const monthsValue = Form.useWatch('months', form) ?? minMonths;
   const totalPrice = isFixedDuration ? Number(price) : Number(price) * Number(monthsValue);
 
-  async function onFinish(values: any) {
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      message.error('Please login first');
+  function clearCouponPreview() {
+    setCouponPreview(null);
+    setCouponError(null);
+  }
+
+  async function applyCoupon(codeOverride?: string) {
+    const code = String(codeOverride ?? form.getFieldValue('couponCode') ?? '')
+      .trim()
+      .toUpperCase();
+    const planId = form.getFieldValue('planId') ?? selectedPlanId;
+    const months = form.getFieldValue('months') ?? monthsValue;
+    const magazineId = form.getFieldValue('magazineId') ?? selectedMagazineId;
+
+    if (!code) {
+      setCouponError('Enter a coupon code');
+      setCouponPreview(null);
       return;
     }
+    if (!planId || !months || !magazineId) {
+      setCouponError('Select magazine, plan and months first');
+      setCouponPreview(null);
+      return;
+    }
+
+    form.setFieldValue('couponCode', code);
+    setCouponApplying(true);
+    setCouponError(null);
+    try {
+      const { data } = await axios.post('/api/payments/validate-coupon', {
+        couponCode: code,
+        planId: Number(planId),
+        magazineId: Number(magazineId),
+        months: Number(months),
+        deliveryMode,
+      });
+      setCouponPreview({
+        code,
+        amount: Number(data.amount),
+        finalAmount: Number(data.finalAmount),
+        discountAmount: Number(data.discountAmount),
+        currency: data.currency || currency,
+        message: data.message || 'Coupon applied',
+      });
+      const saved = Number(data.discountAmount || 0);
+      const curr = data.currency || currency || 'INR';
+      const savedLabel =
+        curr === 'INR' ? `You saved ₹${saved.toFixed(2)}` : `You saved ${saved.toFixed(2)} ${curr}`;
+      setCelebrateCopy({
+        title: `${code} applied!`,
+        subtitle: `${savedLabel} · Now ${curr === 'INR' ? '₹' : ''}${Number(data.finalAmount).toFixed(2)}`,
+      });
+      setCelebrateId((n) => n + 1);
+      message.success(data.message || 'Coupon applied');
+    } catch (e: any) {
+      setCouponPreview(null);
+      const msg =
+        e.response?.data?.message || e.response?.data?.error || e.message || 'Invalid coupon';
+      setCouponError(msg);
+      message.error(msg);
+    } finally {
+      setCouponApplying(false);
+    }
+  }
+
+  async function onFinish(values: any) {
     const magazineId = values.magazineId
       ? Number(values.magazineId)
       : magazineIdParam
@@ -89,8 +222,22 @@ export default function SubscribePage() {
       message.error('Please select a magazine to subscribe');
       return;
     }
+
+    setSubmitting(true);
     try {
-      const payload = { ...values, magazineId, deliveryMode: values.deliveryMode ?? deliveryMode };
+      if (authLoading) {
+        message.info('Checking your login status…');
+        setSubmitting(false);
+        return;
+      }
+
+      const rawCoupon = String(values.couponCode || '').trim();
+      const payload = {
+        ...values,
+        magazineId,
+        deliveryMode: values.deliveryMode ?? deliveryMode,
+        couponCode: rawCoupon || undefined,
+      };
       await startRazorpayCheckout(
         {
           planId: Number(payload.planId),
@@ -98,25 +245,38 @@ export default function SubscribePage() {
           months: Number(payload.months),
           deliveryMode: payload.deliveryMode,
           couponCode: payload.couponCode,
+          guest: needsGuestDetails
+            ? {
+                name: values.fullName,
+                phone: values.mobile,
+                email: values.email,
+              }
+            : undefined,
         },
         router,
       );
-      message.success('Order created — opening payment…');
+      if (needsGuestDetails) {
+        message.success('Acknowledgement sent to your mobile and email. Opening payment…');
+      } else {
+        message.success('Order created — opening payment…');
+      }
     } catch (e: any) {
-      message.error(e.response?.data?.error || e.response?.data?.message || 'failed');
-    }
-  }
-
-  async function _uploadProof(file: File) {
-    if (!order) return;
-    const fd = new FormData();
-    fd.append('proof', file);
-    const res = await axios.post(`/api/payments/${order.orderId}/proof`, fd, {
-      withCredentials: true,
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    if (res.data?.proofId) {
-      message.success('Proof uploaded, awaiting admin verification');
+      const errCode = e.response?.data?.error;
+      const msg = e.response?.data?.message || e.response?.data?.error || e.message || 'failed';
+      if (errCode === 'already_purchased_magazine') {
+        message.warning(msg);
+      } else if (
+        e.message === 'login_required' ||
+        errCode === 'missing_authorization' ||
+        errCode === 'token_expired' ||
+        errCode === 'invalid_token'
+      ) {
+        message.error('Please sign in again to continue checkout.');
+      } else {
+        message.error(msg);
+      }
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -127,6 +287,12 @@ export default function SubscribePage() {
         minHeight: '80vh',
       }}
     >
+      <CouponCelebration
+        key={celebrateId}
+        active={celebrateId > 0}
+        title={celebrateCopy.title}
+        subtitle={celebrateCopy.subtitle}
+      />
       <div className="container" style={{ display: 'flex', justifyContent: 'center' }}>
         <div style={{ width: '100%', maxWidth: 780 }}>
           {/* Themed heading */}
@@ -210,15 +376,27 @@ export default function SubscribePage() {
                   setSelectedPlanId(null);
                   form.setFieldValue('planId', undefined);
                   form.setFieldValue('months', undefined);
+                  clearCouponPreview();
                 }
                 if (all.planId != null) {
                   setSelectedPlanId(Number(all.planId));
                   const plan = plans.find((p) => p.id === all.planId);
                   if (plan) form.setFieldValue('months', plan.minMonths ?? 1);
+                  clearCouponPreview();
                 }
                 if (all.deliveryMode != null) {
                   // only update mode; keep current plan selection if still valid
                   setDeliveryMode(all.deliveryMode);
+                  clearCouponPreview();
+                }
+                if (all.months != null) {
+                  clearCouponPreview();
+                }
+                if (all.couponCode != null && couponPreview) {
+                  const next = String(all.couponCode || '')
+                    .trim()
+                    .toUpperCase();
+                  if (next !== couponPreview.code) clearCouponPreview();
                 }
               }}
               style={{ padding: '0 0.25rem' }}
@@ -231,7 +409,7 @@ export default function SubscribePage() {
                 <Select
                   placeholder="Select magazine"
                   allowClear={false}
-                  options={magazines.map((m: any) => ({ label: m.title, value: m.id }))}
+                  options={magazines.map((m: any) => ({ label: m.title, value: Number(m.id) }))}
                   onChange={(v) => setSelectedMagazineId(v ? Number(v) : null)}
                 />
               </Form.Item>
@@ -320,6 +498,14 @@ export default function SubscribePage() {
                       )}
                     </>
                   )}
+                  {couponPreview && (
+                    <div style={{ marginTop: 8, color: '#2d7a3e', fontWeight: 600 }}>
+                      Coupon {couponPreview.code}: −{couponPreview.currency === 'INR' ? '₹' : ''}
+                      {couponPreview.discountAmount.toFixed(2)} →{' '}
+                      {couponPreview.currency === 'INR' ? '₹' : ''}
+                      {couponPreview.finalAmount.toFixed(2)} {couponPreview.currency}
+                    </div>
+                  )}
                   {needsAddress && (
                     <Alert
                       type="info"
@@ -354,20 +540,130 @@ export default function SubscribePage() {
                     disabled={!!selectedPlan && minMonths === maxMonths && !!maxMonths}
                   />
                 </Form.Item>
-                <Form.Item name="couponCode" label="Coupon code">
-                  <Input />
+                <Form.Item
+                  name="couponCode"
+                  label="Coupon code"
+                  validateStatus={couponError ? 'error' : couponPreview ? 'success' : undefined}
+                  help={couponError || (couponPreview ? couponPreview.message : undefined)}
+                >
+                  <Input.Search
+                    placeholder="Enter coupon"
+                    enterButton="Apply"
+                    loading={couponApplying}
+                    onSearch={() => applyCoupon()}
+                    onPressEnter={(e) => {
+                      e.preventDefault();
+                      applyCoupon();
+                    }}
+                  />
                 </Form.Item>
               </div>
+
+              {availableCoupons.length > 0 && (
+                <div style={{ marginTop: -8, marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, color: '#5c4a3a', marginBottom: 8 }}>
+                    Available coupons — click to apply
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {availableCoupons.map((c) => {
+                      const selected = couponPreview?.code === c.code;
+                      return (
+                        <Tag
+                          key={c.id}
+                          color={selected ? 'success' : undefined}
+                          style={{
+                            cursor: couponApplying ? 'wait' : 'pointer',
+                            padding: '4px 10px',
+                            fontSize: 13,
+                            borderRadius: 8,
+                            borderColor: selected ? '#2d7a3e' : 'rgba(61,41,20,0.25)',
+                            background: selected ? 'rgba(45,122,62,0.1)' : '#fff',
+                            color: '#3d2914',
+                            userSelect: 'none',
+                          }}
+                          onClick={() => {
+                            if (!couponApplying) applyCoupon(c.code);
+                          }}
+                          title={c.description || c.label}
+                        >
+                          {c.label}
+                        </Tag>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {!needsGuestDetails ? null : (
+                <div
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 8,
+                    padding: '14px 14px 4px',
+                    borderRadius: 12,
+                    background: 'rgba(61, 41, 20, 0.04)',
+                    border: '1px solid rgba(61, 41, 20, 0.12)',
+                  }}
+                >
+                  <p
+                    style={{
+                      margin: '0 0 12px',
+                      fontWeight: 700,
+                      color: '#3d2914',
+                      fontSize: 14,
+                    }}
+                  >
+                    Your contact details
+                  </p>
+                  <p style={{ margin: '0 0 12px', fontSize: 13, color: '#5c4a3a' }}>
+                    We&apos;ll send an acknowledgement now, and a purchase confirmation after
+                    successful payment.
+                  </p>
+                  <Form.Item
+                    name="fullName"
+                    label="Full Name"
+                    rules={[
+                      { required: true, message: 'Enter your full name' },
+                      { min: 2, message: 'Name is too short' },
+                    ]}
+                  >
+                    <Input placeholder="Parent / guardian full name" autoComplete="name" />
+                  </Form.Item>
+                  <Form.Item
+                    name="mobile"
+                    label="Mobile Number"
+                    rules={[
+                      { required: true, message: 'Enter your mobile number' },
+                      {
+                        pattern: /^(\+?91[-\s]?)?[6-9]\d{9}$/,
+                        message: 'Enter a valid 10-digit Indian mobile number',
+                      },
+                    ]}
+                  >
+                    <Input placeholder="10-digit mobile number" autoComplete="tel" />
+                  </Form.Item>
+                  <Form.Item
+                    name="email"
+                    label="Email Address"
+                    rules={[
+                      { required: true, message: 'Enter your email address' },
+                      { type: 'email', message: 'Enter a valid email' },
+                    ]}
+                  >
+                    <Input placeholder="you@example.com" autoComplete="email" />
+                  </Form.Item>
+                </div>
+              )}
+
               <Form.Item style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <Button
                   type="default"
                   htmlType="submit"
+                  loading={submitting}
                   style={{
                     background: 'var(--btn-view-green, #2d7a3e)',
                     borderColor: 'var(--btn-view-green, #2d7a3e)',
                     color: '#fff',
-                    // left: '500px',
-
                     fontWeight: 700,
                     borderRadius: 10,
                     paddingInline: 18,

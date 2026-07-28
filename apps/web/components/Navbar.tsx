@@ -3,6 +3,7 @@
 import { MenuOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
 import axios from 'axios';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import React from 'react';
@@ -10,6 +11,7 @@ import api from '../lib/api';
 import { useAuth } from '../lib/authContext';
 import { prefetchRouteData } from '../lib/routePrefetch';
 import { clearViewingContext, getSelectedReaderName, isChildAudience } from '../lib/viewingContext';
+import brandLogo from './images/logo_rmbg.png';
 
 const Navbar = () => {
   const { loggedIn, welcomeName: authWelcomeName, clearAuth } = useAuth();
@@ -39,7 +41,7 @@ const Navbar = () => {
     { href: '/', label: 'Home' },
     { href: '/magazines', label: 'Browse' },
     { href: '/posts', label: 'Posts' },
-    { href: '/sales', label: 'Sales' },
+    // { href: '/sales', label: 'Sales' },
     { href: '/dashboard', label: 'My Library' },
     { href: '/profile', label: 'Profile' },
   ];
@@ -51,13 +53,27 @@ const Navbar = () => {
   return (
     <header className="vv-app-header">
       <nav className="vv-navbar">
-        <Link href="/" className="vv-navbar-brand">
-          <span style={{ fontSize: 18, color: '#facc15' }} aria-hidden>
-            ★
-          </span>
-          <span className="vv-navbar-brandText">VidhyaVibe Magazine</span>
-          <span style={{ fontSize: 16, color: '#6b4423', opacity: 0.9 }} aria-hidden>
-            ✒
+        <Link href="/" className="vv-navbar-brand" aria-label="VidhyaVibe Magazine">
+          <Image
+            src={brandLogo}
+            alt=""
+            width={240}
+            height={64}
+            className="vv-navbar-logo"
+            priority
+          />
+          <span className="vv-navbar-titleBadge">
+            <span className="vv-navbar-titleIcon" style={{ color: '#facc15' }} aria-hidden>
+              ★
+            </span>
+            <span className="vv-navbar-brandText">VidhyaVibe Magazine</span>
+            <span
+              className="vv-navbar-titleIcon"
+              style={{ color: '#6b4423', opacity: 0.9 }}
+              aria-hidden
+            >
+              ✒
+            </span>
           </span>
         </Link>
 

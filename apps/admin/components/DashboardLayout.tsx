@@ -15,6 +15,8 @@ import {
   TagOutlined,
   PictureOutlined,
   AppstoreOutlined,
+  MailOutlined,
+  PercentageOutlined,
 } from '@ant-design/icons';
 import { Layout, Menu, theme, Button } from 'antd';
 import axios from 'axios';
@@ -23,7 +25,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 import { clearAuthSession, getStoredRefreshToken } from '../lib/authStorage';
-import magzineLogo from './images/magzineLogo.png';
+import magzineLogo from './images/logo_rmbg.png';
 
 const { Sider, Content, Header, Footer } = Layout;
 
@@ -52,6 +54,8 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
     if (pathname.includes('/orders')) return 'orders';
     if (pathname.includes('/sales')) return 'sales';
     if (pathname.includes('/posts')) return 'posts';
+    if (pathname.includes('/email-settings')) return 'email-settings';
+    if (pathname.includes('/coupons')) return 'coupons';
     return 'dashboard';
   };
 
@@ -82,6 +86,11 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       label: <Link href="/admin/plans">Plans & Pricing</Link>,
     },
     {
+      key: 'coupons',
+      icon: <PercentageOutlined />,
+      label: <Link href="/admin/coupons">Coupons</Link>,
+    },
+    {
       key: 'sales',
       icon: <TagOutlined />,
       label: <Link href="/admin/sales">Sales & Offers</Link>,
@@ -104,7 +113,12 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
     {
       key: 'orders',
       icon: <ShoppingCartOutlined />,
-      label: <Link href="/admin/orders">Orders</Link>,
+      label: <Link href="/admin/orders">Purchase History</Link>,
+    },
+    {
+      key: 'email-settings',
+      icon: <MailOutlined />,
+      label: <Link href="/admin/email-settings">Email Configuration</Link>,
     },
   ];
 
@@ -152,62 +166,30 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
         >
           <div
             style={{
-              margin: collapsed ? '0 10px 8px' : '0 14px 10px',
-              minHeight: 56,
-              borderRadius: 12,
+              margin: collapsed ? '0 8px 12px' : '0 12px 14px',
+              minHeight: collapsed ? 56 : 72,
+              padding: collapsed ? '8px 6px' : '10px 12px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: collapsed ? 'center' : 'flex-start',
+              justifyContent: 'center',
               overflow: 'hidden',
+              background: '#f5eedd',
+              borderRadius: 12,
+              border: '1px solid rgba(184, 149, 106, 0.45)',
             }}
           >
-            <div
+            <Image
+              src={magzineLogo}
+              alt="VidhyaVibe Magazine Admin"
               style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: collapsed ? 'center' : 'flex-start',
-                gap: 12,
-                paddingLeft: collapsed ? 0 : 4,
+                width: 'auto',
+                height: collapsed ? 52 : 70,
+                maxWidth: collapsed ? 68 : 210,
+                objectFit: 'contain',
+                background: 'transparent',
               }}
-            >
-              <Image
-                src={magzineLogo}
-                alt="Magazine Admin"
-                style={{
-                  width: collapsed ? 40 : 50,
-                  height: collapsed ? 40 : 50,
-                  objectFit: 'contain',
-                }}
-                priority
-              />
-
-              {!collapsed && (
-                <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.05 }}>
-                  <span
-                    style={{
-                      fontSize: 18,
-                      letterSpacing: 1,
-                      opacity: 0.95,
-                      color: '#d8b46a',
-                      textShadow: '0 1px 0 rgba(0,0,0,0.25)',
-                    }}
-                  >
-                    MAGAZINE
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 500,
-                      color: '#f1d28a',
-                      textShadow: '0 1px 0 rgba(0,0,0,0.25)',
-                    }}
-                  >
-                    ADMIN
-                  </span>
-                </div>
-              )}
-            </div>
+              priority
+            />
           </div>
 
           <Menu

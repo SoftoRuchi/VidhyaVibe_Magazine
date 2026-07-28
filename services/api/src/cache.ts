@@ -47,3 +47,13 @@ export async function cacheSet(key: string, value: any, ttlSec?: number) {
     redisUsable = false;
   }
 }
+
+export async function cacheDelete(key: string) {
+  const r = getRedis();
+  if (!r || !redisUsable) return;
+  try {
+    await r.del(key);
+  } catch {
+    redisUsable = false;
+  }
+}

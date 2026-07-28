@@ -1,0 +1,164 @@
+VidhyaVibe Sales Page — Change Specification
+Page: https://sales.vidhyavibe.in/  ·  Prepared: 13 July 2026  ·  For: Developer implementation
+How to read this document: Each item states WHAT to change, WHERE it is on the page, WHY (so no decision needs re-explaining), and HOW to implement it with exact values and copy text. Work top-down: Section A items are blockers and must ship before any paid traffic. Copy text shown in quotes should be used verbatim unless marked otherwise.
+A. Blockers — must fix before launch
+A1. Remove all placeholder text (critical)
+What: The live page currently renders raw placeholder tokens that were meant to be replaced before publishing.
+Where: Multiple sections. Full list of strings to search for in the codebase:
+•[TESTIMONIAL PLACEHOLDER — PARENT NAME, CITY] + "Quote pending" — Social Proof section
+•[INSERT SUBSCRIBER COUNT] — Social Proof section
+•[INSERT SCHOOL PARTNER LOGOS] + "Logos pending" — Social Proof section
+•[CONFIRM REFUND POLICY] — appears 3 times: below pricing CTA, in footer, near Razorpay line
+•[LINK TO PRIVACY POLICY] — below pricing CTA
+•[CONFIRM MULTI-CHILD DISCOUNT] — "Have more than one child?" card
+Why: This is a payment page asking parents for Rs.999–1,599. Visible placeholders destroy credibility instantly — worse than having no section at all.
+How: DELETE the entire Social Proof section (testimonial, subscriber count, logos) until real data exists — do not hide with CSS, remove from the DOM. Replace the refund/privacy placeholders with real links once A2 is done. For the multi-child card, either state the actual discount ("Add a second child's plan at 20% off at checkout") or remove the sentence and keep only the "View all age groups" button.
+A2. Finalize and link refund policy, privacy policy, terms
+What: Refund policy is undecided; privacy policy link is a placeholder.
+Where: Below the pricing CTA button, footer, and the FAQ answers "Can I cancel or get a refund?" / "How does payment work?"
+Why: Legally and practically required before collecting money; Razorpay disputes also require a stated policy. (Business owner to confirm the policy — suggested: 7-day full money-back, no questions asked.)
+How: Create /privacy, /terms, /refund-policy pages (static routes are fine). Link them in the footer and under every buy button. Update the FAQ answer to state the confirmed policy in one sentence. Verify the existing "Contact" footer link resolves to a working page or mailto.
+A3. Fix page title, meta description, favicon, and social-share (OG) tags
+What: Browser tab shows "React App"; meta description is the create-react-app default ("Web site created using create-react-app"); favicon is the default React atom.
+Where: public/index.html (title, meta, favicon) — or Helmet/head config if used.
+Why: Parents will share this page on WhatsApp. Right now the link preview says "React App" with no image — this alone loses shares and looks amateur. Also hurts SEO.
+How: Set the following:
+<title>VidhyaVibe — Future Skills Your Child Won't Learn in School | Ages 8–21</title>
+<meta name="description" content="A monthly interactive learning magazine that builds financial literacy, communication, AI awareness and 9 more future skills. One annual payment, no auto-renewal.">
+<meta property="og:title" content="Give your child skills schools don't teach">
+<meta property="og:description" content="Monthly interactive editions. Rs.999/year. No auto-charge.">
+<meta property="og:image" content="https://sales.vidhyavibe.in/og-image.jpg">  <!-- 1200x630px, to be provided -->
+Replace favicon.ico and the apple-touch icons with the VidhyaVibe logo.
+A4. Add pre-rendering or SSR
+What: The page is 100% client-rendered; crawlers and link-preview bots receive an empty HTML shell ("You need to enable JavaScript to run this app").
+Why: Google indexing and WhatsApp/Facebook link previews depend on server-delivered HTML.
+How: Quickest fix for CRA: react-snap (npm i react-snap, add postbuild script) — it pre-renders the single route to static HTML. Longer-term: migrate to Next.js. react-snap is sufficient for now since this is one page.
+A5. Remove the debug IP address from the page
+What: The text "187.127.149.31" renders in the bottom-right corner of the viewport on every screen.
+Why: It is a debug/analytics artifact visible to every visitor and looks like a security problem.
+How: Search the codebase for the element rendering it (likely a fixed-position div from a visitor-tracking snippet) and remove it entirely.
+B. Trust & credibility
+B1. Replace internal funnel labels with customer-facing labels
+What: The small uppercase eyebrow labels above each section currently expose our internal persuasion framework to visitors.
+Why: A parent who literally reads "SOCIAL PROOF" above testimonials feels manipulated. These labels were internal planning names, never meant to render.
+How: Rename exactly as follows (left = current, right = replacement):
+•SOCIAL PROOF  →  What parents say  (section is being removed for now per A1; keep label for when it returns)
+•THE REALIZATION  →  The problem
+•HOPE  →  What your child learns
+•TRUST  →  Why VidhyaVibe  (keep the existing H2, just delete the eyebrow "TRUST")
+•EXCITEMENT  →  The journey
+•WHAT'S INSIDE  →  keep as is
+•FOR PARENTS / FOR CHILDREN  →  keep as is
+•CONFIDENCE  →  Pricing
+•COMPARE / QUESTIONS  →  keep as is
+B2. Soften the "India's First" claim
+What: Hero eyebrow says "INDIA'S FIRST FUTURE SKILLS LEARNING SYSTEM".
+Why: "First" is an unverifiable superlative — risky under ASCI advertising norms and easy for a skeptical parent to disbelieve, which taints everything after it.
+How: Replace with: "A FUTURE SKILLS LEARNING SYSTEM FOR INDIAN FAMILIES"
+B3. Add a slim brand header
+What: The page opens directly with the badge — no logo or brand name appears until "Why VidhyaVibe" halfway down.
+How: Add a fixed or static header bar, ~64px: VidhyaVibe logo left, one anchor link "Pricing" (scrolls to pricing section) plus the primary CTA button (small variant) right. Background: same cream as page, subtle bottom border.
+B4. Remove the "Illustration only — no real child photos" caption
+Where: Under the hero illustration card.
+Why: Reads as a legal disclaimer and plants doubt where none existed. The privacy stance is good — but it belongs in the FAQ ("Is my child's data safe?"), phrased as a value: "We never use real children's photos in our marketing."
+B5. Risk-reversal line under every buy button
+What: Stack the trust microcopy directly beneath each CTA button (hero, pricing, final).
+How: One line, small text, centered, in this order:
+7-day full refund · One-time payment — no auto-charge · Secure Razorpay checkout
+(Refund wording pending A2 confirmation. "No auto-charge" already exists — merge into this single line rather than showing separately.)
+C. CTA buttons & color system
+C1. Change CTA color: red + black text → emerald + white text
+What: All primary CTA buttons are currently background #C0392B with pure black text.
+Why: Measured contrast of black-on-#C0392B is 3.86:1 — fails WCAG AA (4.5:1 required for 16px text). Black-on-red is also a hazard/warning color pairing. Deep green signals growth and "go", fits an education product, and white text passes AAA.
+How: Exact values:
+•Button background: #1B5E20 (deep emerald)
+•Button text: #FFFFFF, font-weight 700 (unchanged size)
+•Hover state: #2E7D32
+•Contrast achieved: 7.9:1 text-on-button (AAA), ~6.5:1 button-on-page — button will finally pop against the cream background.
+•Never pair green buttons with black or yellow text.
+C2. Make emerald exclusive to CTAs
+What: Green is currently also used on the "Founding Batch" badge, all checkmark icons, and the 12 skill chips.
+Why: If everything is green, the button no longer stands out. The CTA color must be the only "go" signal on the page.
+How: Recolor checkmarks and skill-chip icons to the olive/brown family (suggest #6B7A3F or #3D2914). Badge: olive outline + brown text. Only buttons keep #1B5E20.
+C3. One CTA label everywhere
+What: Three different button labels exist: "Start My Child's Future Skills Journey", "Secure My Child's Annual Learning", "Help My Child Stay Ahead".
+Why: One consistent label reduces cognitive load and reads as one clear action.
+How: Use "Help My Child Stay Ahead" on all three primary buttons. Keep "See age-group pricing" as the secondary hero button.
+C4. Sticky CTA bar on mobile
+What: On viewports under 768px, show a fixed bottom bar after the user scrolls past the hero.
+How: Bar contains: "Rs.999/yr · Help My Child Stay Ahead" button (emerald), full width minus 16px margins. Hide when the pricing section is in view to avoid duplication. z-index above content, safe-area-inset-bottom padding for iOS.
+D. Pricing section
+D1. Unify price colors and highlight one plan
+What: The four price figures currently render in four different colors (green, blue, gold, purple), and Group 1 has a green border that looks accidental.
+How: All price figures: one color, #3D2914 (ink brown). Choose ONE plan as recommended — suggest Group 2 (Ages 11–13, largest market) — give it: a "Most popular" pill badge top-center, a 2px #1B5E20 border, and slight scale (1.03). Remove the border from Group 1.
+D2. Add per-month framing to every card
+How: Under each annual price add one small line:
+•Group 1: "That's under Rs.85/month"
+•Group 2: "That's under Rs.100/month"
+•Group 3: "That's under Rs.117/month"
+•Group 4: "That's under Rs.134/month"
+D3. Anchor against tuition, not only the strikethrough
+What: Add one line above the pricing grid, below the section heading.
+How: Copy: "One month of tuition costs Rs.1,500–2,000. A full year of VidhyaVibe starts at Rs.999."
+Why: The Rs.2,388→Rs.999 strikethrough is self-declared and parents discount it. Tuition is an anchor they already believe.
+D4. Rework or remove Group 4 (Ages 17–21)
+Why: The entire page speaks to parents of children; 17–21-year-olds are adults. The mismatch dilutes the message.
+How: Business decision pending. Option A: remove the card. Option B: keep it but retitle "Ages 17–21 — for young adults (gift it, or they join themselves)" and change its bullet copy accordingly. Do not call this group "your child" anywhere.
+D5. Comparison table legend
+What: The School vs YouTube vs Books vs VidhyaVibe table uses filled/empty dots with no explanation.
+How: Add a small caption above or below the table: "● ● ● = excellent · ● ● ○ = good · ● ○ ○ = limited". Also add aria-labels per cell for screen readers (e.g. aria-label="Practical application: good").
+E. Urgency — make it honest
+E1. Replace "Limited Seats This Month" with a real, dated mechanism
+What: The badge "Founding Batch Pricing — Limited Seats This Month" appears 3 times (hero, pricing, final CTA).
+Why: A digital magazine has no visible seat constraint, so the scarcity reads as fake — which is worse than no urgency, especially on a trust-critical parenting product.
+How: Business owner picks ONE (then implement verbatim):
+•Option A (date-based, recommended): "Founding price Rs.999 ends 31 July — then Rs.1,499". Show the real date; no fake countdown timers.
+•Option B (capacity-based, only if genuinely enforced): "Founding batch: first 500 families". Show a real remaining counter.
+•In both cases add: "Founding families keep this price for life." (loss-aversion hook)
+F. Imagery & video
+Asset prompts for all items below have already been prepared and will be supplied separately with the generated files. Developer tasks are layout/integration only.
+F1. Hero illustration
+What: Replace the abstract icon card (rocket/beaker/book/heart) with a warm storybook-style illustration of an Indian parent and child doing a science experiment together.
+How: Same card container is fine. Image will be supplied ~1600px wide, 4:3. The child in the image faces slightly left — keep the image on the RIGHT of the hero so the gaze points toward the headline/CTA. Add descriptive alt text.
+F2. Product mockup in "What's inside"
+What: Add a visual of the actual magazine: tablet mockup showing 2–3 real sample spreads (preferred) or the supplied AI-generated mockup.
+How: Two-column layout on desktop: existing checklist left, mockup right. Stacked on mobile (mockup first). This is the single highest-conversion-impact visual on the page — parents currently cannot see the product they are buying.
+F3. Journey illustrations (Months 1–4)
+How: One square illustration per journey card, ~400x400px, above each card's text. Four images will be supplied featuring the same child for visual continuity.
+F4. "The problem" section spot illustration
+How: One 4:3 illustration (child scrolling in cold blue light, warm home behind) placed left of the worry bullets on desktop, above on mobile.
+F5. Explainer video (45–60s)
+What: Embed the supplied animated explainer video between the hero and "The problem" section, or directly above pricing.
+How: Self-hosted MP4 or unlisted YouTube embed with custom poster frame (supplied). Muted autoplay OFF; show poster + play button. Lazy-load. Below the video, repeat the primary CTA button.
+F6. Image guidelines
+•All images lazy-loaded (loading="lazy") except the hero (priority).
+•Serve WebP with JPG fallback; max 200KB per image.
+•Never use photorealistic AI-generated children or AI-generated "parent testimonial" faces anywhere on the page.
+G. Copy changes
+G1. Make the worry bullets concrete
+Where: "The problem" section (currently "THE REALIZATION"), the four bullets.
+How: Replace the fourth bullet "Fear that tomorrow's jobs need skills schools never teach" with:
+"While your child scrolls reels, another 12-year-old is already learning how money works."
+Keep the other three bullets as they are.
+G2. Trim the 12-skill chip wall
+Where: "What your child learns" section (currently "HOPE").
+Why: Twelve equal chips = nothing memorable. Three named skills + a count is more persuasive.
+How: Show 3 large featured chips: Financial Literacy, Communication Skills, AI Awareness. Below them one line: "+ 9 more skills including science experiments, critical thinking and leadership" — optionally expandable ("See all 12 skills") revealing the current full chip set.
+G3. Identity line before the final CTA
+Where: Between the FAQ section and the final CTA block.
+How: One centered line, larger italic serif:
+"You're not buying a magazine. You're buying who your child becomes."
+G4. Free sample edition (lead capture)
+What: Add a secondary conversion path for parents not ready to pay: download a free sample edition in exchange for email or WhatsApp number.
+How: Small card after "What's inside": headline "Not sure yet? See a free sample edition", one input (email or phone), button "Send me the sample" (secondary style, NOT emerald). Requires: a sample PDF and wherever leads should be stored (owner to confirm — e.g., Google Sheet via API, or email service).
+G5. WhatsApp chat button
+How: Floating WhatsApp button, bottom-right, all viewports, linking to wa.me/<business number> with prefilled text "Hi, I have a question about VidhyaVibe". Standard green WhatsApp icon is exempt from the C2 green-exclusivity rule (users read it as WhatsApp, not as a page CTA). Keep it clear of the mobile sticky bar (place above it).
+H. QA checklist before relaunch
+•Full Razorpay checkout test end-to-end for each age group (test mode + one live Rs.1 transaction).
+•Mobile layout pass at 360px, 390px, 768px widths — especially pricing cards, comparison table (horizontal scroll or stacked), sticky CTA.
+•Lighthouse: Performance & SEO 90+, contrast checks all pass after C1/C2.
+•WhatsApp link-preview test after A3/A4 (paste URL in a chat, verify title/image).
+•All footer links resolve (Privacy, Terms, Contact, Refund).
+•FAQ accordion keyboard-accessible; all images have alt text.
+Priority order (if time-boxed)
+1) All of Section A  →  2) C1–C3 (CTA color/labels)  →  3) B1 (funnel labels)  →  4) E1 (honest urgency)  →  5) B5 (risk reversal)  →  6) F2 (product mockup)  →  everything else.

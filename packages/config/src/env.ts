@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /** Bare numbers (e.g. "2") mean minutes — jsonwebtoken treats raw numbers as seconds. */
 function normalizeJwtAccessExpires(raw: string | undefined): string {
-  const v = (raw || '15m').trim();
+  const v = (raw || '30d').trim();
   if (/^\d+$/.test(v)) return `${v}m`;
   return v;
 }
@@ -20,8 +20,8 @@ export const envSchema = z.object({
   // JWT and auth
   JWT_ACCESS_SECRET: z.string().min(10).optional(),
   JWT_REFRESH_SECRET: z.string().min(10).optional(),
-  JWT_ACCESS_EXPIRES: z.string().default('15m'),
-  JWT_REFRESH_EXPIRES: z.string().default('7d'),
+  JWT_ACCESS_EXPIRES: z.string().default('30d'),
+  JWT_REFRESH_EXPIRES: z.string().default('30d'),
   BCRYPT_SALT_ROUNDS: z.string().default('10'),
   RATE_LIMIT_WINDOW_MS: z.string().default(String(15 * 60 * 1000)), // 15 minutes
   RATE_LIMIT_MAX: z.string().default('1000'),

@@ -22,6 +22,7 @@ interface UserType {
   id: number;
   name: string;
   email: string;
+  phone: string;
   role: string;
   status: string;
   joinedAt: string;
@@ -56,6 +57,7 @@ export default function UsersPage() {
           id: u.id,
           name: u.name || 'Anonymous',
           email: u.email,
+          phone: u.phone || '—',
           role: u.isAdmin ? 'admin' : 'user',
           status: 'active',
           joinedAt: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A',
@@ -91,6 +93,11 @@ export default function UsersPage() {
       title: 'Email',
       dataIndex: 'email',
       key: 'email',
+    },
+    {
+      title: 'Mobile',
+      dataIndex: 'phone',
+      key: 'phone',
     },
     {
       title: 'Role',

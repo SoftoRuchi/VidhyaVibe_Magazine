@@ -20,3 +20,21 @@ export const loginRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many login attempts, try again later' },
 });
+
+export const guestCheckoutRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.GUEST_CHECKOUT_RATE_LIMIT_MAX || '20'),
+  skip: () => env.NODE_ENV === 'development',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many checkout attempts, try again later' },
+});
+
+export const forgotPasswordRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.FORGOT_PASSWORD_RATE_LIMIT_MAX || '5'),
+  skip: () => env.NODE_ENV === 'development',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many password reset attempts, try again later' },
+});
