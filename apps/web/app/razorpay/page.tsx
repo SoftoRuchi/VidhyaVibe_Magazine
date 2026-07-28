@@ -42,10 +42,6 @@ export default function RazorpayPage() {
   const [confirmStatus, setConfirmStatus] = React.useState<'idle' | 'saving' | 'saved' | 'failed'>(
     'idle',
   );
-  const [confirmResult, setConfirmResult] = React.useState<{
-    subscriptionId?: number;
-    paymentId?: number;
-  } | null>(null);
   const [confirmError, setConfirmError] = React.useState<string | null>(null);
   const [userPrefill, setUserPrefill] = React.useState<UserPrefill | null>(null);
   const [userPrefillLoaded, setUserPrefillLoaded] = React.useState(false);
@@ -84,21 +80,27 @@ export default function RazorpayPage() {
   }, []);
 
   async function savePaymentToOrder(response: any) {
-    if (!orderId) throw new Error('missing_orderId');
+    if (!orderId) {
+      setConfirmStatus('failed');
+      setConfirmError('missing_orderId');
+      return;
+    }
 
     setConfirmStatus('saving');
     setConfirmError(null);
-    setConfirmResult(null);
     try {
       const token = localStorage.getItem('access_token');
-      const endpoint = token
-        ? '/api/payments/razorpay/confirm'
-        : '/api/payments/razorpay/guest-confirm';
-      const headers = token
-        ? { withCredentials: true, headers: { Authorization: `Bearer ${token}` } }
-        : { withCredentials: true };
+      // Guest checkout orders are confirmed by Razorpay signature (no JWT required)
+      const useGuestConfirm = Boolean(readGuestPrefill()) || !token;
+      const endpoint = useGuestConfirm
+        ? '/api/payments/razorpay/guest-confirm'
+        : '/api/payments/razorpay/confirm';
+      const config =
+        !useGuestConfirm && token
+          ? { withCredentials: true, headers: { Authorization: `Bearer ${token}` }, timeout: 60000 }
+          : { withCredentials: true, timeout: 60000 };
 
-      const { data } = await axios.post(
+      await axios.post(
         endpoint,
         {
           orderId: Number(orderId),
@@ -106,17 +108,22 @@ export default function RazorpayPage() {
           razorpay_order_id: response?.razorpay_order_id,
           razorpay_signature: response?.razorpay_signature,
         },
-        headers,
+        config,
       );
-      setConfirmResult({
-        subscriptionId: data?.subscriptionId,
-        paymentId: data?.paymentId,
-      });
       setConfirmStatus('saved');
+      // Guest checkout has no session yet — library would look empty; send users to Browse
+      setTimeout(() => {
+        router.push('/magazines');
+      }, 1500);
     } catch (e: any) {
       setConfirmStatus('failed');
-      setConfirmError(e?.response?.data?.message || e?.message || 'save_failed');
-      throw e;
+      setConfirmError(
+        e?.response?.data?.message ||
+          e?.response?.data?.error ||
+          e?.message ||
+          'Failed to save payment. Please contact support with your payment ID.',
+      );
+      // Do not rethrow — Razorpay handler would surface a Next.js error overlay
     }
   }
 
@@ -129,7 +136,6 @@ export default function RazorpayPage() {
     setFailureResponse(null);
     setConfirmStatus('idle');
     setConfirmError(null);
-    setConfirmResult(null);
 
     const options = {
       key,
@@ -219,21 +225,7 @@ export default function RazorpayPage() {
                     type="success"
                     showIcon
                     message="Payment successful"
-                    description={
-                      <div style={{ display: 'grid', gap: 6 }}>
-                        <div>Your subscription has been saved and activated.</div>
-                        {confirmResult?.subscriptionId != null && (
-                          <div>
-                            <strong>Subscription ID:</strong> {confirmResult.subscriptionId}
-                          </div>
-                        )}
-                        {confirmResult?.paymentId != null && (
-                          <div>
-                            <strong>Payment ID:</strong> {confirmResult.paymentId}
-                          </div>
-                        )}
-                      </div>
-                    }
+                    description="Your subscription has been saved and activated."
                   />
                 </div>
               )}
@@ -271,10 +263,10 @@ export default function RazorpayPage() {
               <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
                 <Button
                   onClick={() =>
-                    confirmStatus === 'saved' ? router.push('/dashboard') : router.back()
+                    confirmStatus === 'saved' ? router.push('/magazines') : router.back()
                   }
                 >
-                  {confirmStatus === 'saved' ? 'Go to Dashboard' : 'Back'}
+                  {confirmStatus === 'saved' ? 'Browse Magazines' : 'Back'}
                 </Button>
                 {confirmStatus !== 'saved' && (
                   <Button

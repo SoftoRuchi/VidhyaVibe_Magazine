@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { hashPassword } from '../auth/password';
 import { getPool } from '../db';
 
-/** 6-digit numeric password for new guest accounts (also emailed as login OTP). */
+/** 6-digit numeric password for guest checkout (emailed as login OTP). */
 export function generateOtpPassword(): string {
   return String(crypto.randomInt(100000, 1000000));
 }
@@ -10,11 +10,15 @@ export function generateOtpPassword(): string {
 export type UpsertGuestBuyerResult = {
   userId: number;
   created: boolean;
-  /** Plain 6-digit password — only set when a new account (or missing auth) was created */
-  temporaryPassword?: string;
+  /** Fresh 6-digit password — always set so guest checkout can email login OTP */
+  temporaryPassword: string;
 };
 
-/** Upsert a buyer by email for guest checkout. Does NOT create a session/token. */
+/**
+ * Upsert a buyer by email for guest checkout.
+ * Always resets login password to a new 6-digit OTP (new or existing email).
+ * Does NOT create a session/token.
+ */
 export async function upsertGuestBuyer(params: {
   name: string;
   email: string;
@@ -39,7 +43,10 @@ export async function upsertGuestBuyer(params: {
     ]);
     let userId: number;
     let created = false;
-    let temporaryPassword: string | undefined;
+
+    // Always issue a fresh 6-digit OTP password (create or reset)
+    const temporaryPassword = generateOtpPassword();
+    const passwordHash = await hashPassword(temporaryPassword);
 
     if (existing?.[0]) {
       userId = Number(existing[0].id);
@@ -48,27 +55,24 @@ export async function upsertGuestBuyer(params: {
         [name, phone, userId],
       );
     } else {
-      temporaryPassword = generateOtpPassword();
-      const passwordHash = await hashPassword(temporaryPassword);
       const [uRes]: any = await conn.query(
         'INSERT INTO users (email, name, phone, updatedAt) VALUES (?, ?, ?, CURRENT_TIMESTAMP(3))',
         [email, name, phone],
       );
       userId = Number(uRes.insertId);
       created = true;
-      await conn.query('INSERT INTO user_auth (user_id, password_hash) VALUES (?, ?)', [
-        userId,
-        passwordHash,
-      ]);
     }
 
     const [authRows]: any = await conn.query(
       'SELECT user_id FROM user_auth WHERE user_id = ? LIMIT 1',
       [userId],
     );
-    if (!authRows?.[0]) {
-      temporaryPassword = generateOtpPassword();
-      const passwordHash = await hashPassword(temporaryPassword);
+    if (authRows?.[0]) {
+      await conn.query('UPDATE user_auth SET password_hash = ? WHERE user_id = ?', [
+        passwordHash,
+        userId,
+      ]);
+    } else {
       await conn.query('INSERT INTO user_auth (user_id, password_hash) VALUES (?, ?)', [
         userId,
         passwordHash,

@@ -28,7 +28,7 @@ type AvailableCoupon = {
 export default function SubscribePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { loggedIn, loading: authLoading } = useAuth();
+  const { loggedIn, loading: authLoading, refreshAuth } = useAuth();
   const magazineIdParam = searchParams?.get('magazineId');
   const groupParam = searchParams?.get('group');
   const [form] = Form.useForm();
@@ -60,9 +60,8 @@ export default function SubscribePage() {
     subtitle: '',
   });
 
-  // Prefer token presence so checkout works even if auth context is still settling
-  const hasToken = typeof window !== 'undefined' ? !!localStorage.getItem('access_token') : false;
-  const needsGuestDetails = !authLoading && !loggedIn && !hasToken;
+  // After auth settles: no valid session → guest checkout fields
+  const needsGuestDetails = !authLoading && !loggedIn;
 
   React.useEffect(() => {
     setChildMode(isChildAudience());
@@ -225,9 +224,17 @@ export default function SubscribePage() {
 
     setSubmitting(true);
     try {
-      if (authLoading) {
-        message.info('Checking your login status…');
-        setSubmitting(false);
+      // Re-validate session so expired tokens logout before checkout
+      await refreshAuth();
+
+      const stillLoggedIn = typeof window !== 'undefined' && !!localStorage.getItem('access_token');
+      const useGuest = !stillLoggedIn;
+
+      // Session expired while the logged-in form was showing — send to login
+      if (useGuest && !needsGuestDetails) {
+        message.error('Your session expired. Please sign in again.');
+        const path = `${window.location.pathname}${window.location.search}`;
+        window.location.href = `/login?redirect=${encodeURIComponent(path)}`;
         return;
       }
 
@@ -238,14 +245,14 @@ export default function SubscribePage() {
         deliveryMode: values.deliveryMode ?? deliveryMode,
         couponCode: rawCoupon || undefined,
       };
-      await startRazorpayCheckout(
+      const checkoutResult = await startRazorpayCheckout(
         {
           planId: Number(payload.planId),
           magazineId,
           months: Number(payload.months),
           deliveryMode: payload.deliveryMode,
           couponCode: payload.couponCode,
-          guest: needsGuestDetails
+          guest: useGuest
             ? {
                 name: values.fullName,
                 phone: values.mobile,
@@ -255,8 +262,16 @@ export default function SubscribePage() {
         },
         router,
       );
-      if (needsGuestDetails) {
-        message.success('Acknowledgement sent to your mobile and email. Opening payment…');
+      if (useGuest) {
+        if (checkoutResult.acknowledgementSent) {
+          message.success('Acknowledgement sent to your email. Opening payment…');
+        } else {
+          message.success('Order created — opening payment…');
+          message.warning(
+            "We couldn't send the acknowledgement email right now. You can still complete payment.",
+            6,
+          );
+        }
       } else {
         message.success('Order created — opening payment…');
       }
@@ -269,9 +284,10 @@ export default function SubscribePage() {
         e.message === 'login_required' ||
         errCode === 'missing_authorization' ||
         errCode === 'token_expired' ||
-        errCode === 'invalid_token'
+        errCode === 'invalid_token' ||
+        e?.response?.status === 401
       ) {
-        message.error('Please sign in again to continue checkout.');
+        message.error('Your session expired. Please sign in again.');
       } else {
         message.error(msg);
       }
@@ -369,31 +385,35 @@ export default function SubscribePage() {
                 ...(magazineIdParam ? { magazineId: Number(magazineIdParam) } : {}),
               }}
               form={form}
-              onValuesChange={(_, all) => {
-                if (all.magazineId != null) {
-                  setSelectedMagazineId(Number(all.magazineId));
-                  // when magazine changes, clear previously selected plan & months
+              onValuesChange={(changed) => {
+                // Only react to fields the user actually changed — using `all`
+                // would wipe plan/months whenever guest name/email/phone is typed.
+                if ('magazineId' in changed) {
+                  const id = changed.magazineId != null ? Number(changed.magazineId) : null;
+                  setSelectedMagazineId(id);
                   setSelectedPlanId(null);
-                  form.setFieldValue('planId', undefined);
-                  form.setFieldValue('months', undefined);
+                  form.setFieldsValue({ planId: undefined, months: undefined });
                   clearCouponPreview();
                 }
-                if (all.planId != null) {
-                  setSelectedPlanId(Number(all.planId));
-                  const plan = plans.find((p) => p.id === all.planId);
+                if ('planId' in changed) {
+                  const planId = changed.planId != null ? Number(changed.planId) : null;
+                  setSelectedPlanId(planId);
+                  const plan = planId != null ? plans.find((p) => p.id === planId) : null;
                   if (plan) form.setFieldValue('months', plan.minMonths ?? 1);
                   clearCouponPreview();
                 }
-                if (all.deliveryMode != null) {
-                  // only update mode; keep current plan selection if still valid
-                  setDeliveryMode(all.deliveryMode);
+                if ('deliveryMode' in changed && changed.deliveryMode != null) {
+                  setDeliveryMode(changed.deliveryMode);
+                  // Plan prices differ by delivery type — reset plan selection
+                  setSelectedPlanId(null);
+                  form.setFieldsValue({ planId: undefined, months: undefined });
                   clearCouponPreview();
                 }
-                if (all.months != null) {
+                if ('months' in changed) {
                   clearCouponPreview();
                 }
-                if (all.couponCode != null && couponPreview) {
-                  const next = String(all.couponCode || '')
+                if ('couponCode' in changed && couponPreview) {
+                  const next = String(changed.couponCode || '')
                     .trim()
                     .toUpperCase();
                   if (next !== couponPreview.code) clearCouponPreview();
@@ -419,7 +439,7 @@ export default function SubscribePage() {
                 rules={[{ required: true }]}
                 initialValue="ELECTRONIC"
               >
-                <Radio.Group options={DELIVERY_OPTIONS} onChange={() => setSelectedPlanId(null)} />
+                <Radio.Group options={DELIVERY_OPTIONS} />
               </Form.Item>
               <Form.Item
                 name="planId"

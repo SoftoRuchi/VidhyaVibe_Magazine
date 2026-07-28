@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
+import { expireSession } from './authRefresh';
 
 export type DeliveryMode = 'ELECTRONIC' | 'PHYSICAL' | 'BOTH';
 
@@ -47,6 +48,7 @@ export function redirectToLogin(returnPath?: string) {
     (typeof window !== 'undefined'
       ? `${window.location.pathname}${window.location.search}`
       : '/subscribe');
+  expireSession({ redirectToLogin: false });
   window.location.href = `/login?redirect=${encodeURIComponent(path)}`;
 }
 
@@ -106,7 +108,7 @@ function pushRazorpayPage(
 export async function startRazorpayCheckout(
   params: RazorpayCheckoutParams,
   router: AppRouterInstance,
-): Promise<void> {
+): Promise<{ acknowledgementSent?: boolean; accountCreated?: boolean }> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 
   // Guest path — no login token required
@@ -127,7 +129,10 @@ export async function startRazorpayCheckout(
       { withCredentials: true },
     );
     pushRazorpayPage(router, data);
-    return;
+    return {
+      acknowledgementSent: Boolean(data?.acknowledgementSent),
+      accountCreated: Boolean(data?.accountCreated),
+    };
   }
 
   if (!token) {
@@ -152,6 +157,7 @@ export async function startRazorpayCheckout(
       },
     );
     pushRazorpayPage(router, data);
+    return {};
   } catch (e: any) {
     const status = e?.response?.status;
     const err = e?.response?.data?.error;

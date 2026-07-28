@@ -1,12 +1,7 @@
 import crypto from 'crypto';
 import { getPool } from '../db';
 import { computeSubscriptionAmount } from '../utils/subscriptionPricing';
-import {
-  applyCouponDiscount,
-  normalizeCouponCode,
-  recordCouponUsage,
-  validateCoupon,
-} from './coupons';
+import { applyCouponDiscount, normalizeCouponCode, validateCoupon } from './coupons';
 import { assertMagazineNotAlreadyPurchased } from './magazinePurchaseGuard';
 import { sendPurchaseConfirmation } from './notifications';
 
@@ -87,7 +82,11 @@ async function fulfillOrderAfterPayment(
   const couponId = order.coupon_id ?? order.couponId;
   const userId = order.user_id ?? order.userId;
   if (couponId) {
-    await recordCouponUsage(Number(couponId), userId ? Number(userId) : undefined, subscriptionId);
+    // Insert on the same connection — do NOT use Prisma here (separate pool → lock wait timeout)
+    await conn.query(
+      'INSERT INTO coupon_usages (couponId, userId, subscriptionId, usedAt) VALUES (?, ?, ?, NOW(3))',
+      [Number(couponId), userId ? Number(userId) : null, subscriptionId],
+    );
   }
 
   await conn.query('UPDATE orders SET status = ? WHERE id = ?', ['PAID', order.id]);

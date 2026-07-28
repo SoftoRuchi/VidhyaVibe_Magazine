@@ -4,7 +4,7 @@ import axios from 'axios';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import api from './api';
 import { getApiOrigin } from './apiBase';
-import { setupAxiosRefresh } from './authRefresh';
+import { expireSession, onSessionExpired, setupAxiosRefresh } from './authRefresh';
 import { getSelectedReaderName, isChildAudience } from './viewingContext';
 
 interface AuthContextValue {
@@ -48,6 +48,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
+  useEffect(() => {
+    onSessionExpired(() => {
+      setLoggedIn(false);
+      setWelcomeName('');
+      setLoading(false);
+    });
+    return () => onSessionExpired(null);
+  }, []);
+
   const refreshAuth = useCallback(async () => {
     initAxiosClients();
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -56,18 +65,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    setLoggedIn(true);
-    if (isChildAudience()) {
-      setWelcomeName(getSelectedReaderName() || 'Reader');
-      setLoading(false);
-      return;
-    }
+    setLoading(true);
 
     try {
       const { data } = await api.get('/api/auth/me');
-      setWelcomeName(data?.name || data?.email || 'User');
-    } catch {
-      setWelcomeName('User');
+      setLoggedIn(true);
+      if (isChildAudience()) {
+        setWelcomeName(getSelectedReaderName() || 'Reader');
+      } else {
+        setWelcomeName(data?.name || data?.email || 'User');
+      }
+    } catch (err: any) {
+      const status = err?.response?.status;
+      // Expired / invalid session — clear local auth (interceptor also redirects on refresh failure)
+      if (status === 401 || status === 403 || !localStorage.getItem('access_token')) {
+        expireSession({ redirectToLogin: false });
+        clearAuth();
+      } else {
+        // Transient error: keep token, treat as logged in with a fallback name
+        setLoggedIn(true);
+        setWelcomeName(isChildAudience() ? getSelectedReaderName() || 'Reader' : 'User');
+      }
     } finally {
       setLoading(false);
     }

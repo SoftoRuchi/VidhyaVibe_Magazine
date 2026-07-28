@@ -7,6 +7,12 @@ import { apiUrl } from './apiBase';
  */
 let isRefreshing = false;
 let pendingQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
+let sessionExpiredHandler: (() => void) | null = null;
+
+/** Register a callback (e.g. AuthProvider.clearAuth) when the session cannot be refreshed. */
+export function onSessionExpired(handler: (() => void) | null) {
+  sessionExpiredHandler = handler;
+}
 
 function processQueue(error: unknown, token: string | null = null) {
   pendingQueue.forEach((p) => {
@@ -21,8 +27,49 @@ function isPublicAuthUrl(url: string) {
     url.includes('/auth/login') ||
     url.includes('/auth/register') ||
     url.includes('/auth/refresh') ||
-    url.includes('/auth/guest-checkout')
+    url.includes('/auth/guest-checkout') ||
+    url.includes('/auth/forgot-password') ||
+    url.includes('/auth/reset-password')
   );
+}
+
+function clearStoredSession() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('access_token');
+}
+
+/** Clear local session and notify AuthProvider; optionally hard-redirect to login. */
+export function expireSession(options?: { redirectToLogin?: boolean }) {
+  clearStoredSession();
+  try {
+    sessionExpiredHandler?.();
+  } catch {
+    // ignore handler errors
+  }
+
+  if (options?.redirectToLogin === false) return;
+  if (typeof window === 'undefined') return;
+  if (window.location.pathname.startsWith('/login')) return;
+
+  // Soft-logout on public/marketing pages; hard-redirect on protected app pages
+  const path = window.location.pathname;
+  const publicPrefixes = [
+    '/',
+    '/magazines',
+    '/magazine',
+    '/posts',
+    '/subscribe',
+    '/sales',
+    '/signup',
+    '/forgot-password',
+  ];
+  const isPublic =
+    path === '/' ||
+    publicPrefixes.some((p) => p !== '/' && (path === p || path.startsWith(`${p}/`)));
+  if (isPublic && options?.redirectToLogin !== true) return;
+
+  const redirect = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+  window.location.href = `/login?redirect=${redirect}`;
 }
 
 function setAuthHeader(config: InternalAxiosRequestConfig | { headers?: any }, token: string) {
@@ -57,8 +104,10 @@ export function setupAxiosRefresh(client: AxiosInstance = axios) {
       const originalRequest = error.config;
 
       if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
-        const url = originalRequest.url || '';
-        if (url.includes('/auth/login') || url.includes('/auth/register')) {
+        const url = String(originalRequest.url || '');
+
+        // Do not try to refresh for public auth endpoints (including refresh itself)
+        if (isPublicAuthUrl(url)) {
           return Promise.reject(error);
         }
 
@@ -100,15 +149,13 @@ export function setupAxiosRefresh(client: AxiosInstance = axios) {
             processQueue(null, newToken);
             return client(originalRequest);
           }
+
+          processQueue(new Error('missing_access_token'), null);
+          expireSession();
+          return Promise.reject(error);
         } catch (refreshError) {
           processQueue(refreshError, null);
-          localStorage.removeItem('access_token');
-          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-            const redirect = encodeURIComponent(
-              `${window.location.pathname}${window.location.search}`,
-            );
-            window.location.href = `/login?redirect=${redirect}`;
-          }
+          expireSession();
           return Promise.reject(refreshError);
         } finally {
           isRefreshing = false;

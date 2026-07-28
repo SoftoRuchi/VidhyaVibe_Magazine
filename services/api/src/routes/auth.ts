@@ -264,9 +264,15 @@ router.post('/guest-checkout', guestCheckoutRateLimiter, async (req, res) => {
       phone,
       temporaryPassword,
       accountCreated: created,
-    }).catch((err) => {
-      console.error('[guest-checkout] acknowledgement failed', err);
-    });
+    })
+      .then((ack) => {
+        if (!ack.emailSent) {
+          console.warn('[guest-checkout] email not sent', { email, detail: ack.detail });
+        }
+      })
+      .catch((err) => {
+        console.error('[guest-checkout] acknowledgement failed', err);
+      });
 
     res.json({
       access_token: access,

@@ -129,19 +129,30 @@ router.post('/guest-create-order', guestCheckoutRateLimiter, async (req, res) =>
       guest: { name, email, phone },
     });
 
-    void sendCheckoutAcknowledgement({
-      name,
-      email,
-      phone,
-      temporaryPassword,
-      accountCreated: created,
-    }).catch((err) => {
+    // Await so mail is actually attempted before the response (avoids dropped fire-and-forget work)
+    let acknowledgementSent = false;
+    let acknowledgementDetail: string | undefined;
+    try {
+      const ack = await sendCheckoutAcknowledgement({
+        name,
+        email,
+        phone,
+        temporaryPassword,
+        accountCreated: created,
+      });
+      acknowledgementSent = Boolean(ack.emailSent);
+      acknowledgementDetail = ack.detail;
+      if (!ack.emailSent) {
+        console.warn('[guest-create-order] email not sent', { email, detail: ack.detail });
+      }
+    } catch (err) {
       console.error('[guest-create-order] acknowledgement failed', err);
-    });
+    }
 
     res.json({
       ...result,
-      acknowledgementSent: true,
+      acknowledgementSent,
+      acknowledgementDetail,
       accountCreated: created,
       guest: { name, email, phone },
     });

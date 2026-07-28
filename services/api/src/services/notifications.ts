@@ -248,7 +248,7 @@ export async function sendCheckoutAcknowledgement(params: {
   /** When a new account was created — 6-digit login password */
   temporaryPassword?: string;
   accountCreated?: boolean;
-}) {
+}): Promise<{ ok: boolean; emailSent: boolean; whatsappSent: boolean; detail?: string }> {
   const firstName = params.name.trim().split(/\s+/)[0] || 'there';
   const loginUrl =
     process.env.READER_BASE_URL ||
@@ -271,41 +271,81 @@ export async function sendCheckoutAcknowledgement(params: {
     `Please continue to payment to complete your subscription.\n\n` +
     `— VidhyaVibe`;
 
-  const tasks: Promise<unknown>[] = [
+  const emailTasks: Promise<NotifyChannelResult>[] = [
     sendEmail(params.email, 'VidhyaVibe — checkout started', ackText),
-    sendWhatsApp(params.phone, waText, {
-      templateName: process.env.WHATSAPP_TEMPLATE_ACK || undefined,
-      templateParams: [firstName],
-    }),
   ];
 
-  // 2) If account was just created — send a separate mail with Email + Password
+  // 2) Always email login Email + 6-digit OTP password (new account or reset for existing)
   if (params.temporaryPassword) {
-    const credentialsText =
-      `Hi ${firstName},\n\n` +
-      `Your VidhyaVibe account has been created. Use these details to log in:\n\n` +
-      `----------------------------------------\n` +
-      `Email: ${params.email}\n` +
-      `Password: ${params.temporaryPassword}\n` +
-      `----------------------------------------\n\n` +
-      `Login here: ${loginUrl}/login\n\n` +
-      `Important:\n` +
-      `- This password is your current login password.\n` +
-      `- After you change your password (Profile → Change password), this 6-digit password will stop working.\n` +
-      `- If you forget your new password, use Forgot password on the login page.\n\n` +
-      `— VidhyaVibe`;
+    const credentialsText = params.accountCreated
+      ? `Hi ${firstName},\n\n` +
+        `Your VidhyaVibe account has been created. Use these details to log in:\n\n` +
+        `----------------------------------------\n` +
+        `Email: ${params.email}\n` +
+        `Password: ${params.temporaryPassword}\n` +
+        `----------------------------------------\n\n` +
+        `Login here: ${loginUrl}/login\n\n` +
+        `Important:\n` +
+        `- This 6-digit password is your current login password.\n` +
+        `- After you change your password (Profile → Change password), this code will stop working.\n` +
+        `- If you forget your password, use Forgot password on the login page.\n\n` +
+        `— VidhyaVibe`
+      : `Hi ${firstName},\n\n` +
+        `We received your VidhyaVibe checkout. Your login password has been reset to a new 6-digit OTP:\n\n` +
+        `----------------------------------------\n` +
+        `Email: ${params.email}\n` +
+        `Password (OTP): ${params.temporaryPassword}\n` +
+        `----------------------------------------\n\n` +
+        `Login here: ${loginUrl}/login\n\n` +
+        `Important:\n` +
+        `- This replaces your previous password.\n` +
+        `- After you change your password (Profile → Change password), this OTP will stop working.\n` +
+        `- If you did not start checkout, contact support@vidhyavibe.in.\n\n` +
+        `— VidhyaVibe`;
 
-    tasks.push(
-      sendEmail(params.email, 'VidhyaVibe — your login email & password', credentialsText),
+    emailTasks.push(
+      sendEmail(
+        params.email,
+        params.accountCreated
+          ? 'VidhyaVibe — your login email & password'
+          : 'VidhyaVibe — your login password OTP',
+        credentialsText,
+      ),
     );
     console.info('[notifications:email] account credentials queued', {
       to: params.email,
+      accountCreated: Boolean(params.accountCreated),
       passwordLength: params.temporaryPassword.length,
     });
   }
 
-  await Promise.all(tasks);
-  return { ok: true };
+  const [emailResults, waResult] = await Promise.all([
+    Promise.all(emailTasks),
+    sendWhatsApp(params.phone, waText, {
+      templateName: process.env.WHATSAPP_TEMPLATE_ACK || undefined,
+      templateParams: [firstName],
+    }),
+  ]);
+
+  const emailSent = emailResults.some((r) => r.ok);
+  const detail =
+    emailResults
+      .map((r) => r.detail)
+      .filter(Boolean)
+      .join(',') || undefined;
+  if (!emailSent) {
+    console.warn('[notifications:email] checkout acknowledgement not delivered', {
+      to: params.email,
+      detail,
+    });
+  }
+
+  return {
+    ok: emailSent || waResult.ok,
+    emailSent,
+    whatsappSent: waResult.ok,
+    detail,
+  };
 }
 
 export async function sendPasswordResetOtp(params: {
