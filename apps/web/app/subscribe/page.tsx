@@ -122,11 +122,14 @@ export default function SubscribePage() {
     if (selectedMagazineId) params.set('magazineId', String(selectedMagazineId));
     if (selectedPlanId) params.set('planId', String(selectedPlanId));
     const qs = params.toString();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
     axios
-      .get(`/api/coupons/available${qs ? `?${qs}` : ''}`)
+      .get(`/api/coupons/available${qs ? `?${qs}` : ''}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
       .then((r) => setAvailableCoupons(r.data || []))
       .catch(() => setAvailableCoupons([]));
-  }, [selectedMagazineId, selectedPlanId]);
+  }, [selectedMagazineId, selectedPlanId, loggedIn]);
 
   // Show plans that have a price for the selected delivery type (not only by plan.deliveryMode).
   // This way plans with prices.PHYSICAL show under "Physical", prices.BOTH under "Both", etc.
@@ -175,13 +178,20 @@ export default function SubscribePage() {
     setCouponApplying(true);
     setCouponError(null);
     try {
-      const { data } = await axios.post('/api/payments/validate-coupon', {
-        couponCode: code,
-        planId: Number(planId),
-        magazineId: Number(magazineId),
-        months: Number(months),
-        deliveryMode,
-      });
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      const { data } = await axios.post(
+        '/api/payments/validate-coupon',
+        {
+          couponCode: code,
+          planId: Number(planId),
+          magazineId: Number(magazineId),
+          months: Number(months),
+          deliveryMode,
+        },
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
       setCouponPreview({
         code,
         amount: Number(data.amount),
@@ -239,24 +249,34 @@ export default function SubscribePage() {
       }
 
       const rawCoupon = String(values.couponCode || '').trim();
-      const payload = {
-        ...values,
-        magazineId,
-        deliveryMode: values.deliveryMode ?? deliveryMode,
-        couponCode: rawCoupon || undefined,
-      };
+      const mode = values.deliveryMode ?? deliveryMode;
+      const needsShipping = mode === 'PHYSICAL' || mode === 'BOTH';
+      const shipping = needsShipping
+        ? {
+            deliveryAddress: String(values.deliveryAddress || '').trim(),
+            city: String(values.city || '').trim(),
+            state: String(values.state || '').trim() || undefined,
+            pincode: String(values.pincode || '').trim(),
+          }
+        : undefined;
+
       const checkoutResult = await startRazorpayCheckout(
         {
-          planId: Number(payload.planId),
+          planId: Number(values.planId),
           magazineId,
-          months: Number(payload.months),
-          deliveryMode: payload.deliveryMode,
-          couponCode: payload.couponCode,
+          months: Number(values.months),
+          deliveryMode: mode,
+          couponCode: rawCoupon || undefined,
+          shipping,
           guest: useGuest
             ? {
                 name: values.fullName,
                 phone: values.mobile,
                 email: values.email,
+                deliveryAddress: shipping?.deliveryAddress,
+                city: shipping?.city,
+                state: shipping?.state,
+                pincode: shipping?.pincode,
               }
             : undefined,
         },
@@ -529,7 +549,7 @@ export default function SubscribePage() {
                   {needsAddress && (
                     <Alert
                       type="info"
-                      message="Physical delivery requires a shipping address. Please ensure your profile has an address saved."
+                      message="Physical delivery requires a shipping address below."
                       style={{ marginTop: 12 }}
                       showIcon
                     />
@@ -674,6 +694,79 @@ export default function SubscribePage() {
                   </Form.Item>
                 </div>
               )}
+
+              {needsAddress ? (
+                <div
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 8,
+                    padding: '14px 14px 4px',
+                    borderRadius: 12,
+                    background: 'rgba(61, 41, 20, 0.04)',
+                    border: '1px solid rgba(61, 41, 20, 0.12)',
+                  }}
+                >
+                  <p
+                    style={{
+                      margin: '0 0 12px',
+                      fontWeight: 700,
+                      color: '#3d2914',
+                      fontSize: 14,
+                    }}
+                  >
+                    Delivery address
+                  </p>
+                  <p style={{ margin: '0 0 12px', fontSize: 13, color: '#5c4a3a' }}>
+                    Required for physical magazine delivery.
+                  </p>
+                  <Form.Item
+                    name="deliveryAddress"
+                    label="Address"
+                    rules={[
+                      { required: true, message: 'Enter your delivery address' },
+                      { min: 8, message: 'Please enter a complete address' },
+                    ]}
+                  >
+                    <Input.TextArea
+                      rows={3}
+                      placeholder="House / flat, street, area, landmark"
+                      autoComplete="street-address"
+                    />
+                  </Form.Item>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                      gap: 16,
+                    }}
+                  >
+                    <Form.Item
+                      name="city"
+                      label="City"
+                      rules={[{ required: true, message: 'Enter your city' }]}
+                    >
+                      <Input placeholder="City" autoComplete="address-level2" />
+                    </Form.Item>
+                    <Form.Item name="state" label="State">
+                      <Input placeholder="State" autoComplete="address-level1" />
+                    </Form.Item>
+                  </div>
+                  <Form.Item
+                    name="pincode"
+                    label="PIN Code"
+                    rules={[
+                      { required: true, message: 'Enter PIN code' },
+                      { pattern: /^\d{6}$/, message: 'Enter a valid 6-digit PIN code' },
+                    ]}
+                  >
+                    <Input
+                      placeholder="6-digit PIN code"
+                      autoComplete="postal-code"
+                      maxLength={6}
+                    />
+                  </Form.Item>
+                </div>
+              ) : null}
 
               <Form.Item style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <Button

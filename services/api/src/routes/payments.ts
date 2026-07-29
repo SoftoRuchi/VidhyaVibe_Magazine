@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { getPool } from '../db';
+import { verifyAccessToken } from '../auth/jwt';
+import { getPool, query } from '../db';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { guestCheckoutRateLimiter } from '../middleware/rateLimiter';
 import { memoryUpload } from '../middleware/upload';
 import { getStorageAdapter } from '../providers/storage';
 import { previewCouponDiscount, normalizeCouponCode } from '../services/coupons';
-import { upsertGuestBuyer } from '../services/guestBuyer';
+import { upsertGuestBuyer, ensureShippingAddress } from '../services/guestBuyer';
 import {
   AlreadyPurchasedError,
   assertMagazineNotAlreadyPurchased,
@@ -24,6 +25,29 @@ import { computeSubscriptionAmount } from '../utils/subscriptionPricing';
 const router = Router();
 const upload = memoryUpload;
 
+function optionalUserIdFromRequest(req: any): number | undefined {
+  try {
+    const auth = req.headers?.authorization;
+    let token: string | null = null;
+    if (auth) {
+      const parts = String(auth).split(' ');
+      if (parts.length === 2 && parts[0].toLowerCase() === 'bearer' && parts[1]) {
+        token = parts[1];
+      }
+    }
+    if (!token) {
+      const alt = req.headers?.['x-access-token'];
+      if (typeof alt === 'string' && alt.trim()) token = alt.trim();
+    }
+    if (!token) return undefined;
+    const payload = verifyAccessToken(token);
+    const id = Number(payload?.sub);
+    return Number.isFinite(id) && id > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function mapCouponReason(reason?: string) {
   switch (reason) {
     case 'not_found':
@@ -40,6 +64,8 @@ function mapCouponReason(reason?: string) {
       return 'This coupon is not valid for the selected plan.';
     case 'invalid_for_magazine':
       return 'This coupon is not valid for the selected magazine.';
+    case 'not_allowed_for_user':
+      return 'This coupon is not available for your account.';
     default:
       return 'Invalid coupon code.';
   }
@@ -69,6 +95,27 @@ function mapOrderError(e: any) {
       },
     };
   }
+  if (msg === 'physical_address_required' || msg === 'delivery_address_required') {
+    return {
+      status: 400,
+      body: {
+        error: 'physical_address_required',
+        message: 'Please enter a delivery address for physical magazine delivery.',
+      },
+    };
+  }
+  if (msg === 'city_required') {
+    return {
+      status: 400,
+      body: { error: 'city_required', message: 'Please enter your city.' },
+    };
+  }
+  if (msg === 'pincode_required') {
+    return {
+      status: 400,
+      body: { error: 'pincode_required', message: 'Please enter a valid 6-digit PIN code.' },
+    };
+  }
   return {
     status: 400,
     body: { error: 'order_failed', message: e?.message || 'Order failed' },
@@ -85,6 +132,13 @@ router.post('/guest-create-order', guestCheckoutRateLimiter, async (req, res) =>
   const phoneRaw = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
   const phoneDigits = phoneRaw.replace(/\D/g, '');
   const { planId, months, deliveryMode, couponCode, magazineId } = req.body || {};
+  const deliveryAddress =
+    typeof req.body?.deliveryAddress === 'string' ? req.body.deliveryAddress.trim() : '';
+  const city = typeof req.body?.city === 'string' ? req.body.city.trim() : '';
+  const state = typeof req.body?.state === 'string' ? req.body.state.trim() : '';
+  const pincode = typeof req.body?.pincode === 'string' ? req.body.pincode.trim() : '';
+  const mode = deliveryMode || 'ELECTRONIC';
+  const needsShipping = ['PHYSICAL', 'BOTH'].includes(String(mode));
 
   if (!name || name.length < 2) {
     return res
@@ -106,6 +160,23 @@ router.post('/guest-create-order', guestCheckoutRateLimiter, async (req, res) =>
       .status(400)
       .json({ error: 'missing_fields', message: 'Plan, months and magazine are required.' });
   }
+  if (needsShipping) {
+    if (!deliveryAddress || deliveryAddress.length < 8) {
+      return res.status(400).json({
+        error: 'delivery_address_required',
+        message: 'Please enter your full delivery address.',
+      });
+    }
+    if (!city) {
+      return res.status(400).json({ error: 'city_required', message: 'Please enter your city.' });
+    }
+    if (!/^\d{6}$/.test(pincode)) {
+      return res.status(400).json({
+        error: 'pincode_required',
+        message: 'Please enter a valid 6-digit PIN code.',
+      });
+    }
+  }
 
   const phone = phoneDigits.length === 10 ? phoneDigits : phoneDigits.slice(-10);
   const magId = Number(magazineId);
@@ -118,14 +189,32 @@ router.post('/guest-create-order', guestCheckoutRateLimiter, async (req, res) =>
       phone,
     });
 
-    const { userId, created, temporaryPassword } = await upsertGuestBuyer({ name, email, phone });
+    const { userId, created, temporaryPassword } = await upsertGuestBuyer({
+      name,
+      email,
+      phone,
+      deliveryAddress: needsShipping ? deliveryAddress : undefined,
+    });
+
+    let addressId: number | undefined;
+    if (needsShipping) {
+      addressId = await ensureShippingAddress({
+        userId,
+        line1: deliveryAddress,
+        city,
+        state,
+        pincode,
+      });
+    }
+
     const result = await createOrder({
       userId,
       planId: Number(planId),
       months: Number(months),
-      deliveryMode: deliveryMode || 'ELECTRONIC',
+      deliveryMode: mode,
       couponCode,
       magazineId: magId,
+      addressId,
       guest: { name, email, phone },
     });
 
@@ -176,7 +265,7 @@ router.post('/validate-coupon', async (req: AuthRequest, res) => {
   const magazineId = req.body?.magazineId != null ? Number(req.body.magazineId) : undefined;
   const months = req.body?.months != null ? Number(req.body.months) : undefined;
   const deliveryMode = req.body?.deliveryMode || 'ELECTRONIC';
-  const userId = req.user?.id ? Number(req.user.id) : undefined;
+  const userId = req.user?.id ? Number(req.user.id) : optionalUserIdFromRequest(req);
 
   if (!code) {
     return res
@@ -296,15 +385,57 @@ router.use(requireAuth);
 // create order (user-facing)
 router.post('/create-order', async (req: AuthRequest, res) => {
   const userId = Number(req.user?.id);
-  const { planId, months, readerId, deliveryMode, addressId, couponCode, magazineId } = req.body;
+  const {
+    planId,
+    months,
+    readerId,
+    deliveryMode,
+    addressId,
+    couponCode,
+    magazineId,
+    deliveryAddress,
+    city,
+    state,
+    pincode,
+  } = req.body;
   try {
+    const mode = deliveryMode || 'ELECTRONIC';
+    const needsShipping = ['PHYSICAL', 'BOTH'].includes(String(mode));
+    let resolvedAddressId = addressId ? Number(addressId) : undefined;
+
+    if (needsShipping && !resolvedAddressId) {
+      const line1 = typeof deliveryAddress === 'string' ? deliveryAddress.trim() : '';
+      const cityVal = typeof city === 'string' ? city.trim() : '';
+      const stateVal = typeof state === 'string' ? state.trim() : '';
+      const pin = typeof pincode === 'string' ? pincode.trim() : '';
+      if (!line1 || !cityVal || !/^\d{6}$/.test(pin)) {
+        return res.status(400).json({
+          error: 'physical_address_required',
+          message: 'Please enter delivery address, city and 6-digit PIN code.',
+        });
+      }
+      resolvedAddressId = await ensureShippingAddress({
+        userId,
+        line1,
+        city: cityVal,
+        state: stateVal,
+        pincode: pin,
+      });
+      // Keep profile deliveryAddress in sync
+      try {
+        await query('UPDATE users SET deliveryAddress = ? WHERE id = ?', [line1, userId]);
+      } catch {
+        // ignore profile sync errors
+      }
+    }
+
     const result = await createOrder({
       userId,
       planId: Number(planId),
       months: Number(months),
       readerId,
-      deliveryMode,
-      addressId,
+      deliveryMode: mode,
+      addressId: resolvedAddressId,
       couponCode,
       magazineId,
     });

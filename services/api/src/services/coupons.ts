@@ -1,4 +1,5 @@
 import { prisma } from '@magazine/db';
+import { getPool } from '../db';
 
 export type CouponValidationResult = {
   valid: boolean;
@@ -14,6 +15,68 @@ export function normalizeCouponCode(code: string): string {
   return String(code || '')
     .trim()
     .toUpperCase();
+}
+
+/** Ensure visibility columns + assignment table exist (safe to call repeatedly). */
+let visibilitySchemaReady = false;
+export async function ensureCouponVisibilitySchema() {
+  if (visibilitySchemaReady) return;
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    const [showCols]: any = await conn.query(
+      `SELECT COUNT(*) AS cnt
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'coupons'
+         AND COLUMN_NAME = 'showToUsers'`,
+    );
+    if (!Number(showCols?.[0]?.cnt)) {
+      await conn.query(
+        'ALTER TABLE coupons ADD COLUMN showToUsers TINYINT(1) NOT NULL DEFAULT 1 AFTER active',
+      );
+    }
+
+    const [restrictCols]: any = await conn.query(
+      `SELECT COUNT(*) AS cnt
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'coupons'
+         AND COLUMN_NAME = 'restrictToUsers'`,
+    );
+    if (!Number(restrictCols?.[0]?.cnt)) {
+      await conn.query(
+        'ALTER TABLE coupons ADD COLUMN restrictToUsers TINYINT(1) NOT NULL DEFAULT 0 AFTER showToUsers',
+      );
+    }
+
+    await conn.query(
+      `CREATE TABLE IF NOT EXISTS coupon_user_assignments (
+         id BIGINT NOT NULL AUTO_INCREMENT,
+         couponId BIGINT NOT NULL,
+         userId BIGINT NOT NULL,
+         createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+         PRIMARY KEY (id),
+         UNIQUE KEY coupon_user_assignments_coupon_user_unique (couponId, userId),
+         INDEX coupon_user_assignments_couponId_idx (couponId),
+         INDEX coupon_user_assignments_userId_idx (userId)
+       ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+    );
+    visibilitySchemaReady = true;
+  } catch (e) {
+    console.warn('[coupons] ensureCouponVisibilitySchema:', (e as Error)?.message || e);
+  } finally {
+    conn.release();
+  }
+}
+
+export async function isUserAssignedToCoupon(couponId: number, userId: number): Promise<boolean> {
+  const pool = getPool();
+  const [rows]: any = await pool.query(
+    'SELECT id FROM coupon_user_assignments WHERE couponId = ? AND userId = ? LIMIT 1',
+    [couponId, userId],
+  );
+  return Boolean(rows?.[0]);
 }
 
 /** Read discount fields whether Prisma (camelCase) or raw SQL (snake_case). */
@@ -48,6 +111,7 @@ export async function validateCoupon(
   planId?: number,
   magazineId?: number,
 ): Promise<CouponValidationResult> {
+  await ensureCouponVisibilitySchema();
   const normalized = normalizeCouponCode(code);
   if (!normalized) return { valid: false, reason: 'not_found' };
 
@@ -60,6 +124,14 @@ export async function validateCoupon(
   if (!coupon.active) return { valid: false, reason: 'inactive' };
   if (coupon.expiresAt && new Date(coupon.expiresAt) < new Date()) {
     return { valid: false, reason: 'expired' };
+  }
+
+  // Selected-users only
+  const restricted = Boolean((coupon as any).restrictToUsers);
+  if (restricted) {
+    if (!userId) return { valid: false, reason: 'not_allowed_for_user' };
+    const allowed = await isUserAssignedToCoupon(Number(coupon.id), Number(userId));
+    if (!allowed) return { valid: false, reason: 'not_allowed_for_user' };
   }
 
   // scope checks

@@ -8,6 +8,11 @@ export interface GuestContact {
   name: string;
   phone: string;
   email: string;
+  /** Required when delivery includes physical copy */
+  deliveryAddress?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
 }
 
 export interface RazorpayCheckoutParams {
@@ -18,6 +23,13 @@ export interface RazorpayCheckoutParams {
   couponCode?: string;
   /** When provided and user is not logged in, uses guest checkout (no token). */
   guest?: GuestContact;
+  /** Shipping address for PHYSICAL / BOTH (logged-in or guest). */
+  shipping?: {
+    deliveryAddress: string;
+    city: string;
+    state?: string;
+    pincode: string;
+  };
 }
 
 interface PlanLike {
@@ -125,6 +137,10 @@ export async function startRazorpayCheckout(
         months: params.months,
         deliveryMode: params.deliveryMode ?? 'ELECTRONIC',
         couponCode: params.couponCode,
+        deliveryAddress: params.shipping?.deliveryAddress || params.guest.deliveryAddress,
+        city: params.shipping?.city || params.guest.city,
+        state: params.shipping?.state || params.guest.state,
+        pincode: params.shipping?.pincode || params.guest.pincode,
       },
       { withCredentials: true },
     );
@@ -150,6 +166,10 @@ export async function startRazorpayCheckout(
         months: params.months,
         deliveryMode: params.deliveryMode ?? 'ELECTRONIC',
         couponCode: params.couponCode,
+        deliveryAddress: params.shipping?.deliveryAddress,
+        city: params.shipping?.city,
+        state: params.shipping?.state,
+        pincode: params.shipping?.pincode,
       },
       {
         withCredentials: true,

@@ -42,9 +42,16 @@ const Navbar = () => {
     { href: '/magazines', label: 'Browse' },
     { href: '/posts', label: 'Posts' },
     // { href: '/sales', label: 'Sales' },
-    { href: '/dashboard', label: 'My Library' },
-    { href: '/profile', label: 'Profile' },
+    { href: '/dashboard', label: 'My Library', requiresAuth: true },
+    { href: '/profile', label: 'Profile', requiresAuth: true },
   ];
+
+  const resolveHref = (tab: { href: string; requiresAuth?: boolean }) => {
+    if (tab.requiresAuth && !loggedIn) {
+      return `/login?redirect=${encodeURIComponent(tab.href)}`;
+    }
+    return tab.href;
+  };
 
   const prefetchNav = (href: string) => {
     prefetchRouteData(api, href);
@@ -79,14 +86,15 @@ const Navbar = () => {
 
         <div className="vv-navbar-center">
           {navLinks.map((tab) => {
+            const href = resolveHref(tab);
             const active = tab.href === '/' ? pathname === '/' : pathname.startsWith(tab.href);
             return (
               <Link
                 key={tab.href}
-                href={tab.href}
+                href={href}
                 prefetch
-                onMouseEnter={() => prefetchNav(tab.href)}
-                onFocus={() => prefetchNav(tab.href)}
+                onMouseEnter={() => prefetchNav(href)}
+                onFocus={() => prefetchNav(href)}
                 className={`vv-navbar-tab${active ? ' vv-navbar-tab--active' : ''}`}
               >
                 {tab.label}
@@ -163,18 +171,21 @@ const Navbar = () => {
           {loggedIn && <div className="vv-mobile-welcome">Welcome, {welcomeName}</div>}
 
           <div className="vv-mobile-menu">
-            {navLinks.map((tab) => (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                prefetch
-                onMouseEnter={() => prefetchNav(tab.href)}
-                onClick={() => setMobileOpen(false)}
-                className="vv-mobile-menu-item"
-              >
-                {tab.label}
-              </Link>
-            ))}
+            {navLinks.map((tab) => {
+              const href = resolveHref(tab);
+              return (
+                <Link
+                  key={tab.href}
+                  href={href}
+                  prefetch
+                  onMouseEnter={() => prefetchNav(href)}
+                  onClick={() => setMobileOpen(false)}
+                  className="vv-mobile-menu-item"
+                >
+                  {tab.label}
+                </Link>
+              );
+            })}
           </div>
 
           <div className="vv-mobile-auth">

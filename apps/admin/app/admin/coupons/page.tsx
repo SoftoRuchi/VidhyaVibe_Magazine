@@ -73,6 +73,16 @@ export default function CouponsPage() {
                 v ? <Tag color="green">Active</Tag> : <Tag color="default">Inactive</Tag>,
             },
             {
+              title: 'Visibility',
+              key: 'visibility',
+              render: (_, r) => {
+                if (r.restrictToUsers) return <Tag color="purple">Selected users</Tag>;
+                if (r.showToUsers === 0 || r.showToUsers === false)
+                  return <Tag color="default">Hidden</Tag>;
+                return <Tag color="blue">Public list</Tag>;
+              },
+            },
+            {
               title: 'Expires',
               dataIndex: 'expiresAt',
               render: (v) => formatCouponDateTime(v),

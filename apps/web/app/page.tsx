@@ -78,7 +78,11 @@ export default function Page() {
 
         if (cancelled) return;
 
-        setCarouselSlides((postsRes.data?.carouselSlides ?? []) as typeof carouselSlides);
+        setCarouselSlides(
+          ((postsRes.data?.carouselSlides ?? []) as typeof carouselSlides).filter(
+            (s) => s && String(s.mediaKey || '').trim().length > 0,
+          ),
+        );
         setLatestPosts(postsRes.data?.posts ?? []);
         setAgeGroups(ageGroupsRes.data || []);
 
@@ -125,6 +129,8 @@ export default function Page() {
               backgroundColor: 'rgba(255, 255, 255, 0.78)',
               border: '1px solid rgba(61,41,20,0.18)',
               boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
+              overflow: 'hidden',
+              minWidth: 0,
             }}
           >
             <div
@@ -215,80 +221,30 @@ export default function Page() {
                   <div />
                 </div>
 
-                <p
-                  style={{
-                    margin: '0.6rem 0 1rem',
-                    color: '#3a2f26',
-                    maxWidth: 560,
-                    lineHeight: 1.6,
-                  }}
-                >
+                <p className="vv-home-heroLead">
                   Explore space, oceans, culture, science, and ideas in every issue. Read anywhere,
                   anytime — thoughtfully curated and ad‑free.
                 </p>
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <a
-                    href="/magazines"
-                    style={{
-                      padding: '0.7rem 1.2rem',
-                      borderRadius: 999,
-                      background: 'var(--btn-view-green, #2d7a3e)',
-                      color: 'white',
-                      fontWeight: 700,
-                      fontSize: 14,
-                      boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
-                    }}
-                  >
+                <div className="vv-home-ctaRow">
+                  <a href="/magazines" className="vv-home-cta vv-home-cta--browse">
                     Browse Magazines
                   </a>
-                  <a
-                    href="/sales"
-                    style={{
-                      padding: '0.7rem 1.2rem',
-                      borderRadius: 999,
-                      background: 'var(--btn-read-red, #c0392b)',
-                      color: 'white',
-                      fontWeight: 700,
-                      fontSize: 14,
-                      boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
-                    }}
-                  >
+                  <a href="/sales" className="vv-home-cta vv-home-cta--deals">
                     View Deals
                   </a>
-                  <a
-                    href="/subscribe"
-                    style={{
-                      padding: '0.7rem 1.2rem',
-                      borderRadius: 999,
-                      background: 'rgba(61,41,20,0.85)',
-                      color: 'white',
-                      fontWeight: 700,
-                      fontSize: 14,
-                      boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
-                    }}
-                  >
+                  <a href="/subscribe" className="vv-home-cta vv-home-cta--subscribe">
                     Subscribe
                   </a>
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                <div className="vv-home-chipRow">
                   {[
                     { label: 'New every month', bg: 'rgba(45,122,62,0.12)' },
                     { label: 'For all ages', bg: 'rgba(61,41,20,0.08)' },
                     { label: 'Read anywhere', bg: 'rgba(192,57,43,0.10)' },
                   ].map((chip) => (
-                    <span
-                      key={chip.label}
-                      style={{
-                        fontSize: 12,
-                        color: '#3d2914',
-                        padding: '6px 10px',
-                        borderRadius: 999,
-                        background: chip.bg,
-                        border: '1px solid rgba(61,41,20,0.12)',
-                      }}
-                    >
+                    <span key={chip.label} className="vv-home-chip" style={{ background: chip.bg }}>
                       {chip.label}
                     </span>
                   ))}

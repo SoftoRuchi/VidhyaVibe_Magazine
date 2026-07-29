@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { getPool } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
 import { requireAuth } from '../../middleware/auth';
-import { normalizeCouponCode } from '../../services/coupons';
+import { ensureCouponVisibilitySchema, normalizeCouponCode } from '../../services/coupons';
 import { toMysqlDateTime } from '../../utils/mysqlDateTime';
 
 const router = Router();
@@ -13,7 +13,8 @@ router.use(requireAdmin);
 const COUPON_SELECT = `
   c.id, c.code, c.description, c.discountPct, c.discountCents,
   DATE_FORMAT(c.expiresAt, '%Y-%m-%d %H:%i:%s') AS expiresAt,
-  c.maxUses, c.perUserLimit, c.active, c.planId, c.magazineId, c.createdAt,
+  c.maxUses, c.perUserLimit, c.active, c.showToUsers, c.restrictToUsers,
+  c.planId, c.magazineId, c.createdAt,
   (SELECT COUNT(*) FROM coupon_usages u WHERE u.couponId = c.id) AS useCount
 `;
 
@@ -34,6 +35,9 @@ function buildCouponFields(body: any) {
     throw err;
   }
 
+  const showToUsers = body.showToUsers === false || body.showToUsers === 0 ? 0 : 1;
+  const restrictToUsers = body.restrictToUsers === true || body.restrictToUsers === 1 ? 1 : 0;
+
   return {
     code: normalized,
     description: body.description || null,
@@ -46,15 +50,34 @@ function buildCouponFields(body: any) {
     perUserLimit:
       body.perUserLimit != null && body.perUserLimit !== '' ? Number(body.perUserLimit) : null,
     active: body.active ? 1 : 0,
+    showToUsers,
+    restrictToUsers,
     planId: body.planId != null && body.planId !== '' ? Number(body.planId) : null,
     magazineId: body.magazineId != null && body.magazineId !== '' ? Number(body.magazineId) : null,
   };
+}
+
+function parseAssignedUserIds(body: any): number[] {
+  const raw = body?.assignedUserIds ?? body?.userIds ?? [];
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((v: any) => Number(v)).filter((n) => Number.isFinite(n) && n > 0))];
+}
+
+async function syncCouponAssignments(conn: any, couponId: number, userIds: number[]) {
+  await conn.query('DELETE FROM coupon_user_assignments WHERE couponId = ?', [couponId]);
+  for (const userId of userIds) {
+    await conn.query(
+      'INSERT INTO coupon_user_assignments (couponId, userId, createdAt) VALUES (?, ?, NOW(3))',
+      [couponId, userId],
+    );
+  }
 }
 
 router.get('/list', async (req, res) => {
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    await ensureCouponVisibilitySchema();
     const [rows]: any = await conn.query(
       `SELECT ${COUPON_SELECT}
        FROM coupons c
@@ -124,6 +147,7 @@ router.get('/:id', async (req, res) => {
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    await ensureCouponVisibilitySchema();
     const [rows]: any = await conn.query(
       `SELECT ${COUPON_SELECT}
        FROM coupons c
@@ -132,7 +156,25 @@ router.get('/:id', async (req, res) => {
       [id],
     );
     if (!rows[0]) return res.status(404).json({ error: 'not_found' });
-    res.json(rows[0]);
+
+    const [assignments]: any = await conn.query(
+      `SELECT a.userId, u.email, u.name
+       FROM coupon_user_assignments a
+       LEFT JOIN users u ON u.id = a.userId
+       WHERE a.couponId = ?
+       ORDER BY u.email ASC`,
+      [id],
+    );
+
+    res.json({
+      ...rows[0],
+      assignedUserIds: (assignments || []).map((a: any) => Number(a.userId)),
+      assignedUsers: (assignments || []).map((a: any) => ({
+        id: Number(a.userId),
+        email: a.email,
+        name: a.name,
+      })),
+    });
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'get_failed', details: e.message });
@@ -148,14 +190,18 @@ router.post('/', async (req, res) => {
   } catch (e: any) {
     return res.status(e.status || 400).json({ error: e.message });
   }
+  const assignedUserIds = fields.restrictToUsers ? parseAssignedUserIds(req.body) : [];
 
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    await ensureCouponVisibilitySchema();
+    await conn.beginTransaction();
     const [r]: any = await conn.query(
       `INSERT INTO coupons
-        (code, description, discountPct, discountCents, expiresAt, maxUses, perUserLimit, active, planId, magazineId, createdAt)
-       VALUES (?, ?, ?, ?, STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s'), ?, ?, ?, ?, ?, NOW())`,
+        (code, description, discountPct, discountCents, expiresAt, maxUses, perUserLimit,
+         active, showToUsers, restrictToUsers, planId, magazineId, createdAt)
+       VALUES (?, ?, ?, ?, STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s'), ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         fields.code,
         fields.description,
@@ -165,12 +211,29 @@ router.post('/', async (req, res) => {
         fields.maxUses,
         fields.perUserLimit,
         fields.active,
+        fields.showToUsers,
+        fields.restrictToUsers,
         fields.planId,
         fields.magazineId,
       ],
     );
-    res.status(201).json({ id: r.insertId, code: fields.code, expiresAt: fields.expiresAt });
+    const couponId = Number(r.insertId);
+    if (fields.restrictToUsers) {
+      await syncCouponAssignments(conn, couponId, assignedUserIds);
+    }
+    await conn.commit();
+    res.status(201).json({
+      id: couponId,
+      code: fields.code,
+      expiresAt: fields.expiresAt,
+      assignedUserIds,
+    });
   } catch (e: any) {
+    try {
+      await conn.rollback();
+    } catch {
+      // ignore
+    }
     console.error(e);
     if (e.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'code_exists', details: 'Coupon code already exists' });
@@ -191,18 +254,22 @@ router.put('/:id', async (req, res) => {
   } catch (e: any) {
     return res.status(e.status || 400).json({ error: e.message });
   }
+  const assignedUserIds = fields.restrictToUsers ? parseAssignedUserIds(req.body) : [];
 
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    await ensureCouponVisibilitySchema();
     const [existing]: any = await conn.query('SELECT id FROM coupons WHERE id = ? LIMIT 1', [id]);
     if (!existing[0]) return res.status(404).json({ error: 'not_found' });
 
+    await conn.beginTransaction();
     await conn.query(
       `UPDATE coupons
        SET code = ?, description = ?, discountPct = ?, discountCents = ?,
            expiresAt = STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s'),
-           maxUses = ?, perUserLimit = ?, active = ?, planId = ?, magazineId = ?
+           maxUses = ?, perUserLimit = ?, active = ?, showToUsers = ?, restrictToUsers = ?,
+           planId = ?, magazineId = ?
        WHERE id = ?`,
       [
         fields.code,
@@ -213,13 +280,22 @@ router.put('/:id', async (req, res) => {
         fields.maxUses,
         fields.perUserLimit,
         fields.active,
+        fields.showToUsers,
+        fields.restrictToUsers,
         fields.planId,
         fields.magazineId,
         id,
       ],
     );
-    res.json({ id, code: fields.code, expiresAt: fields.expiresAt });
+    await syncCouponAssignments(conn, id, assignedUserIds);
+    await conn.commit();
+    res.json({ id, code: fields.code, expiresAt: fields.expiresAt, assignedUserIds });
   } catch (e: any) {
+    try {
+      await conn.rollback();
+    } catch {
+      // ignore
+    }
     console.error(e);
     if (e.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'code_exists', details: 'Coupon code already exists' });

@@ -26,6 +26,8 @@ export default function NewCouponPage() {
   const [loadingOptions, setLoadingOptions] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const discountType = Form.useWatch('discountType', form) || 'percent';
+  const restrictToUsers = Form.useWatch('restrictToUsers', form);
+  const [userOptions, setUserOptions] = React.useState<{ label: string; value: number }[]>([]);
 
   React.useEffect(() => {
     setLoadingOptions(true);
@@ -42,15 +44,23 @@ export default function NewCouponPage() {
           value: Number(m.id),
         })),
       ),
+      api.get('/admin/users').then((r) =>
+        (r.data || []).map((u: any) => ({
+          label: `${u.email}${u.name ? ` (${u.name})` : ''}`,
+          value: Number(u.id),
+        })),
+      ),
     ])
-      .then(([planOpts, magazineOpts]) => {
+      .then(([planOpts, magazineOpts, usersOpts]) => {
         setPlans(planOpts);
         setMagazines(magazineOpts);
+        setUserOptions(usersOpts);
       })
       .catch(() => {
-        message.error('Failed to load plans/magazines');
+        message.error('Failed to load plans/magazines/users');
         setPlans([]);
         setMagazines([]);
+        setUserOptions([]);
       })
       .finally(() => setLoadingOptions(false));
   }, []);
@@ -69,6 +79,9 @@ export default function NewCouponPage() {
         maxUses: values.maxUses || null,
         perUserLimit: values.perUserLimit || null,
         active: values.active !== false,
+        showToUsers: values.showToUsers !== false,
+        restrictToUsers: Boolean(values.restrictToUsers),
+        assignedUserIds: values.restrictToUsers ? values.assignedUserIds || [] : [],
         planId: values.planId || null,
         magazineId: values.magazineId || null,
         discountPct: null,
@@ -98,7 +111,12 @@ export default function NewCouponPage() {
           form={form}
           layout="vertical"
           onFinish={onFinish}
-          initialValues={{ active: true, discountType: 'percent' }}
+          initialValues={{
+            active: true,
+            showToUsers: true,
+            restrictToUsers: false,
+            discountType: 'percent',
+          }}
         >
           <Row gutter={16}>
             <Col xs={24} sm={12}>
@@ -219,11 +237,66 @@ export default function NewCouponPage() {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
-              <Form.Item name="active" label="Active" valuePropName="checked">
+              <Form.Item
+                name="active"
+                label="Active"
+                valuePropName="checked"
+                extra="Inactive coupons cannot be used"
+              >
                 <Switch />
               </Form.Item>
             </Col>
           </Row>
+
+          <Row gutter={16} align="middle">
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="showToUsers"
+                label="Show to users"
+                valuePropName="checked"
+                extra="Off = hidden from subscribe coupon list (code can still be typed if not user-restricted)"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="restrictToUsers"
+                label="Only selected users"
+                valuePropName="checked"
+                extra="On = only chosen users can see and redeem this coupon"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {restrictToUsers ? (
+            <Form.Item
+              name="assignedUserIds"
+              label="Selected users"
+              rules={[
+                {
+                  validator: async (_, value) => {
+                    if (!value || !value.length) {
+                      throw new Error('Select at least one user');
+                    }
+                  },
+                },
+              ]}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                loading={loadingOptions}
+                options={userOptions}
+                placeholder="Search and select users"
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          ) : null}
 
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={submitting}>

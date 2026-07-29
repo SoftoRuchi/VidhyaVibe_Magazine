@@ -55,6 +55,7 @@ model User {
   payments           Payment[]
   editionPurchases   EditionPurchase[]
   couponUsages       CouponUsage[]
+  couponAssignments  CouponUserAssignment[]
   sessions           Session[]
   editionOrders      EditionOrder[]
   editionOrderProofs EditionOrderProof[]
@@ -304,23 +305,41 @@ model Payment {
 }
 
 model Coupon {
-  id            BigInt   @id @default(autoincrement())
-  code          String   @unique
-  description   String?
-  discountPct   Int?
-  discountCents Int?
-  expiresAt     DateTime?
-  maxUses       Int?
-  perUserLimit  Int?
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
+  id              BigInt    @id @default(autoincrement())
+  code            String    @unique
+  description     String?
+  discountPct     Int?
+  discountCents   Int?
+  expiresAt       DateTime?
+  maxUses         Int?
+  perUserLimit    Int?
+  active          Boolean   @default(true)
+  showToUsers     Boolean   @default(true)
+  restrictToUsers Boolean   @default(false)
+  createdAt       DateTime  @default(now())
 
   usages CouponUsage[]
   userSubscriptions UserSubscription[]
+  userAssignments CouponUserAssignment[]
   planId BigInt?
   magazineId BigInt?
 
   @@map("coupons")
+}
+
+model CouponUserAssignment {
+  id        BigInt   @id @default(autoincrement())
+  couponId  BigInt
+  userId    BigInt
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([couponId, userId])
+  @@index([couponId])
+  @@index([userId])
+  @@map("coupon_user_assignments")
 }
 
 model CouponUsage {

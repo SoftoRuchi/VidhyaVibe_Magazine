@@ -501,7 +501,7 @@ export default function ProfilePage() {
                       <Form.Item name="deliveryMode" label="Preferred Delivery">
                         <Select>
                           <Option value="ELECTRONIC">E-Magazine</Option>
-                          <Option value="PHYSICAL">Physical Copy</Option>
+                          {/* <Option value="PHYSICAL">Physical Copy</Option> */}
                           <Option value="BOTH">Both</Option>
                         </Select>
                       </Form.Item>
@@ -610,7 +610,7 @@ export default function ProfilePage() {
                     >
                       <Select>
                         <Option value="ELECTRONIC">E-Magazine</Option>
-                        <Option value="PHYSICAL">Physical Copy</Option>
+                        {/* <Option value="PHYSICAL">Physical Copy</Option> */}
                         <Option value="BOTH">Both</Option>
                       </Select>
                     </Form.Item>

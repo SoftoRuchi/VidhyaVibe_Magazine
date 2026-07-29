@@ -2,12 +2,14 @@
 
 import { Empty, Spin } from 'antd';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import libraryImg from '../../components/images/library.png';
 import MagazineCard from '../../components/MagazineCard';
 import PostCard, { type SitePostItem } from '../../components/PostCard';
 import api from '../../lib/api';
 import { assetUrl } from '../../lib/apiBase';
+import { useAuth } from '../../lib/authContext';
 import { cachedGet } from '../../lib/requestCache';
 import { getSelectedReaderId, isChildAudience } from '../../lib/viewingContext';
 
@@ -25,41 +27,47 @@ interface LibraryItem {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { loggedIn, loading: authLoading } = useAuth();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [posts, setPosts] = useState<SitePostItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return;
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!loggedIn && !token) {
+      router.replace('/login?redirect=/dashboard');
+    }
+  }, [authLoading, loggedIn, router]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadDashboard() {
       const token = localStorage.getItem('access_token');
+      if (!token) {
+        if (!cancelled) {
+          setItems([]);
+          setLoading(false);
+          setLoadingPosts(false);
+        }
+        return;
+      }
       try {
         const readerId = isChildAudience() ? getSelectedReaderId() : null;
         const suffix = readerId ? `?readerId=${readerId}` : '';
-        const requests: Promise<unknown>[] = [
+        const [postsRes, libraryRes] = await Promise.all([
           cachedGet<{ posts?: SitePostItem[] }>(api, '/api/posts', undefined, 60_000),
-        ];
-        if (token) {
-          requests.push(
-            api.get(`/api/library${suffix}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            }),
-          );
-        }
-
-        const [postsRes, libraryRes] = await Promise.all(requests);
+          api.get(`/api/library${suffix}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+        ]);
         if (cancelled) return;
 
-        const postsData = postsRes as { data: { posts?: SitePostItem[] } };
-        setPosts(postsData.data?.posts ?? []);
-
-        if (libraryRes && typeof libraryRes === 'object' && 'data' in libraryRes) {
-          setItems((libraryRes as { data: { items?: LibraryItem[] } }).data?.items || []);
-        } else if (!token) {
-          setItems([]);
-        }
+        setPosts(postsRes.data?.posts ?? []);
+        setItems((libraryRes.data as { items?: LibraryItem[] })?.items || []);
       } catch (err) {
         if (!cancelled) {
           console.error('Failed to fetch dashboard data:', err);
@@ -72,11 +80,11 @@ export default function DashboardPage() {
       }
     }
 
-    loadDashboard();
+    if (!authLoading) loadDashboard();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authLoading, loggedIn]);
 
   const formatDate = (publishedAt?: string) => {
     if (!publishedAt) return '';
