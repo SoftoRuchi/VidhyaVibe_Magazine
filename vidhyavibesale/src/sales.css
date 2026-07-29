@@ -42,6 +42,8 @@
   color: #3d2914;
   text-decoration: none;
   line-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .vv-sale-brandLogo {
@@ -90,6 +92,7 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-shrink: 0;
 }
 
 .vv-sale-headerLink {
@@ -110,6 +113,11 @@
   padding: 0.55rem 1rem !important;
   font-size: 0.82rem !important;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.vv-sale-headerCtaShort {
+  display: none;
 }
 
 /* B5 — risk-reversal line */
@@ -1125,10 +1133,49 @@ a.vv-sale-btn {
     order: -1;
   }
 
+  /* Compact header so logo + magazine title + CTA all fit */
+  .vv-sale-brandLogo {
+    height: 48px;
+    max-width: min(120px, 28vw);
+  }
+
+  .vv-sale-titleBadge {
+    display: inline-flex;
+    padding: 0.2rem 0.55rem 0.2rem 0.45rem;
+    gap: 4px;
+  }
+
+  .vv-sale-brandText {
+    font-size: 0.78rem;
+  }
+
+  .vv-sale-titleIcon--star,
+  .vv-sale-titleIcon--pen {
+    font-size: 12px;
+  }
+
+  .vv-sale-brandHeaderInner {
+    gap: 0.4rem;
+  }
+
+  .vv-sale-brandMark {
+    gap: 6px;
+  }
+
   .vv-sale-btn--sm {
-    max-width: 42vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    max-width: none;
+    overflow: visible;
+    text-overflow: unset;
+    font-size: 0.75rem !important;
+    padding: 0.48rem 0.65rem !important;
+  }
+
+  .vv-sale-headerCtaFull {
+    display: none;
+  }
+
+  .vv-sale-headerCtaShort {
+    display: inline;
   }
 }
 
@@ -1143,10 +1190,38 @@ a.vv-sale-btn {
     display: none;
   }
 
+  .vv-sale-brandLogo {
+    height: 40px;
+    max-width: min(96px, 24vw);
+  }
+
+  .vv-sale-titleBadge {
+    padding: 0.16rem 0.45rem 0.16rem 0.38rem;
+    gap: 3px;
+  }
+
+  .vv-sale-brandText {
+    font-size: 0.7rem;
+  }
+
+  .vv-sale-titleIcon--star,
+  .vv-sale-titleIcon--pen {
+    font-size: 11px;
+  }
+
   .vv-sale-btn--sm {
     max-width: none;
-    font-size: 0.75rem !important;
-    padding: 0.5rem 0.75rem !important;
+    font-size: 0.7rem !important;
+    padding: 0.42rem 0.58rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .vv-sale-brandHeader {
+    height: 64px;
+  }
+
+  .vv-sale-landing {
+    padding-top: 64px;
   }
 }
 

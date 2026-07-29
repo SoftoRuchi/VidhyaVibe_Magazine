@@ -206,7 +206,7 @@ export async function confirmRazorpayPayment(params: {
         },
       });
       await conn.commit();
-      void notifyPurchaseConfirmation(order, result).catch((err) => {
+      void notifyPurchaseConfirmation(order, result, params.razorpay_payment_id).catch((err) => {
         console.error('[payments] purchase confirmation notify failed', err);
       });
       return { ok: true, ...result };
@@ -229,7 +229,7 @@ export async function confirmRazorpayPayment(params: {
     });
 
     await conn.commit();
-    void notifyPurchaseConfirmation(order, result).catch((err) => {
+    void notifyPurchaseConfirmation(order, result, params.razorpay_payment_id).catch((err) => {
       console.error('[payments] purchase confirmation notify failed', err);
     });
     return { ok: true, ...result };
@@ -243,7 +243,8 @@ export async function confirmRazorpayPayment(params: {
 
 async function notifyPurchaseConfirmation(
   order: any,
-  result: { subscriptionId: number; paymentId: number },
+  _result: { subscriptionId: number; paymentId: number },
+  razorpayPaymentId?: string,
 ) {
   const pool = getPool();
   const [userRows]: any = await pool.query(
@@ -261,6 +262,8 @@ async function notifyPurchaseConfirmation(
     magazineTitle = magRows?.[0]?.title || null;
   }
 
+  const paymentRef = razorpayPaymentId || order.rp_payment_id || order.rpPaymentId || null;
+
   await sendPurchaseConfirmation({
     name: user.name || 'Customer',
     email: user.email,
@@ -270,8 +273,7 @@ async function notifyPurchaseConfirmation(
     currency: order.currency || 'INR',
     months: Number(order.months || 1),
     magazineTitle,
-    subscriptionId: result.subscriptionId,
-    paymentId: result.paymentId,
+    paymentId: paymentRef,
   });
 }
 

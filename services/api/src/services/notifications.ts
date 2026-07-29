@@ -378,8 +378,8 @@ export async function sendPurchaseConfirmation(params: {
   currency: string;
   months: number;
   magazineTitle?: string | null;
-  subscriptionId?: number | null;
-  paymentId?: number | null;
+  /** Razorpay payment id, e.g. pay_TlyBas... */
+  paymentId?: string | null;
 }) {
   const firstName = params.name.trim().split(/\s+/)[0] || 'there';
   const amountLabel = `${params.currency === 'INR' ? '₹' : ''}${Number(params.amount).toFixed(2)} ${params.currency}`;
@@ -392,8 +392,7 @@ export async function sendPurchaseConfirmation(params: {
     `Hi ${firstName},\n\n` +
     `Your VidhyaVibe purchase was successful.\n\n` +
     `Order ID: ${params.orderId}\n` +
-    (params.subscriptionId != null ? `Subscription ID: ${params.subscriptionId}\n` : '') +
-    (params.paymentId != null ? `Payment ID: ${params.paymentId}\n` : '') +
+    (params.paymentId ? `Payment ID: ${params.paymentId}\n` : '') +
     `Plan duration: ${params.months} month(s)${mag}\n` +
     `Amount paid: ${amountLabel}\n\n` +
     `Log in with your email (${params.email}) to access your magazine:\n` +
@@ -403,6 +402,7 @@ export async function sendPurchaseConfirmation(params: {
   const waText =
     `VidhyaVibe ✅ Payment successful\n` +
     `Order #${params.orderId}\n` +
+    (params.paymentId ? `Payment ID: ${params.paymentId}\n` : '') +
     `${amountLabel} · ${params.months} month(s)${mag}\n` +
     `Thank you for your purchase!`;
 

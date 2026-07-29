@@ -345,7 +345,8 @@ export default function SalesLandingPage() {
               loading={checkoutLoading}
               onClick={handleCheckout}
             >
-              {CTA_LABEL}
+              <span className="vv-sale-headerCtaFull">{CTA_LABEL}</span>
+              <span className="vv-sale-headerCtaShort">Stay Ahead</span>
             </Btn>
           </div>
         </div>
