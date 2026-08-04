@@ -267,7 +267,7 @@ export async function sendCheckoutAcknowledgement(params: {
     `We received your VidhyaVibe checkout details.\n` +
     (params.temporaryPassword
       ? `Login Email: ${params.email}\nLogin Password: ${params.temporaryPassword}\n`
-      : '') +
+      : `Please log in using this email: ${params.email}\n`) +
     `Please continue to payment to complete your subscription.\n\n` +
     `— VidhyaVibe`;
 
@@ -275,47 +275,44 @@ export async function sendCheckoutAcknowledgement(params: {
     sendEmail(params.email, 'VidhyaVibe — checkout started', ackText),
   ];
 
-  // 2) Always email login Email + 6-digit OTP password (new account or reset for existing)
-  if (params.temporaryPassword) {
-    const credentialsText = params.accountCreated
-      ? `Hi ${firstName},\n\n` +
-        `Your VidhyaVibe account has been created. Use these details to log in:\n\n` +
-        `----------------------------------------\n` +
-        `Email: ${params.email}\n` +
-        `Password: ${params.temporaryPassword}\n` +
-        `----------------------------------------\n\n` +
-        `Login here: ${loginUrl}/login\n\n` +
-        `Important:\n` +
-        `- This 6-digit password is your current login password.\n` +
-        `- After you change your password (Profile → Change password), this code will stop working.\n` +
-        `- If you forget your password, use Forgot password on the login page.\n\n` +
-        `— VidhyaVibe`
-      : `Hi ${firstName},\n\n` +
-        `We received your VidhyaVibe checkout. Your login password has been reset to a new 6-digit OTP:\n\n` +
-        `----------------------------------------\n` +
-        `Email: ${params.email}\n` +
-        `Password (OTP): ${params.temporaryPassword}\n` +
-        `----------------------------------------\n\n` +
-        `Login here: ${loginUrl}/login\n\n` +
-        `Important:\n` +
-        `- This replaces your previous password.\n` +
-        `- After you change your password (Profile → Change password), this OTP will stop working.\n` +
-        `- If you did not start checkout, contact support@vidhyavibe.in.\n\n` +
-        `— VidhyaVibe`;
+  // 2) New account → email login + 6-digit OTP. Existing account → remind to log in with this email (no password reset).
+  if (params.temporaryPassword && params.accountCreated) {
+    const credentialsText =
+      `Hi ${firstName},\n\n` +
+      `Your VidhyaVibe account has been created. Use these details to log in:\n\n` +
+      `----------------------------------------\n` +
+      `Email: ${params.email}\n` +
+      `Password: ${params.temporaryPassword}\n` +
+      `----------------------------------------\n\n` +
+      `Login here: ${loginUrl}/login\n\n` +
+      `Important:\n` +
+      `- This 6-digit password is your current login password.\n` +
+      `- After you change your password (Profile → Change password), this code will stop working.\n` +
+      `- If you forget your password, use Forgot password on the login page.\n\n` +
+      `— VidhyaVibe`;
 
     emailTasks.push(
-      sendEmail(
-        params.email,
-        params.accountCreated
-          ? 'VidhyaVibe — your login email & password'
-          : 'VidhyaVibe — your login password OTP',
-        credentialsText,
-      ),
+      sendEmail(params.email, 'VidhyaVibe — your login email & password', credentialsText),
     );
     console.info('[notifications:email] account credentials queued', {
       to: params.email,
-      accountCreated: Boolean(params.accountCreated),
+      accountCreated: true,
       passwordLength: params.temporaryPassword.length,
+    });
+  } else if (!params.accountCreated) {
+    const existingLoginText =
+      `Hi ${firstName},\n\n` +
+      `We received your VidhyaVibe checkout details. An account already exists for this email.\n\n` +
+      `Please log in using this email: ${params.email}\n` +
+      `Login here: ${loginUrl}/login\n\n` +
+      `Your existing password is unchanged. If you forgot it, use Forgot password on the login page.\n\n` +
+      `— VidhyaVibe`;
+
+    emailTasks.push(
+      sendEmail(params.email, 'VidhyaVibe — log in with this email', existingLoginText),
+    );
+    console.info('[notifications:email] existing account login reminder queued', {
+      to: params.email,
     });
   }
 

@@ -146,9 +146,10 @@ export default function LoginPage() {
 
                 <Form.Item
                   name="password"
-                  rules={[{ required: true, message: 'Please input your Password!' }]}
+                  label="Password / OTP"
+                  rules={[{ required: true, message: 'Please enter your password or OTP!' }]}
                 >
-                  <Input.Password prefix={<LockOutlined />} placeholder="Password" />
+                  <Input.Password prefix={<LockOutlined />} placeholder="Password / OTP" />
                 </Form.Item>
 
                 <div style={{ textAlign: 'right', marginTop: -8, marginBottom: 16 }}>
