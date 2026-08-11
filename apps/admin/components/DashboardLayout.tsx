@@ -17,6 +17,7 @@ import {
   AppstoreOutlined,
   MailOutlined,
   PercentageOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import { Layout, Menu, theme, Button } from 'antd';
 import axios from 'axios';
@@ -56,6 +57,7 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
     if (pathname.includes('/posts')) return 'posts';
     if (pathname.includes('/email-settings')) return 'email-settings';
     if (pathname.includes('/coupons')) return 'coupons';
+    if (pathname.includes('/activities')) return 'activities';
     return 'dashboard';
   };
 
@@ -99,6 +101,11 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       key: 'posts',
       icon: <PictureOutlined />,
       label: <Link href="/admin/posts">Posts & Carousel</Link>,
+    },
+    {
+      key: 'activities',
+      icon: <ExperimentOutlined />,
+      label: <Link href="/admin/activities">Activities</Link>,
     },
     {
       key: 'subscriptions',
@@ -155,6 +162,9 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
           paddingTop: 12,
           height: '100vh',
           overflow: 'hidden',
+          position: 'sticky',
+          top: 0,
+          left: 0,
         }}
       >
         <div
@@ -162,10 +172,12 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
+            minHeight: 0,
           }}
         >
           <div
             style={{
+              flex: '0 0 auto',
               margin: collapsed ? '0 8px 12px' : '0 12px 14px',
               minHeight: collapsed ? 56 : 72,
               padding: collapsed ? '8px 6px' : '10px 12px',
@@ -192,16 +204,28 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
             />
           </div>
 
-          <Menu
-            theme="dark"
-            mode="inline"
-            selectedKeys={[getSelectedKey()]}
-            items={menuItems}
-            style={{ background: 'transparent', flex: 1 }}
-          />
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              WebkitOverflowScrolling: 'touch',
+            }}
+            className="admin-sider-menu-scroll"
+          >
+            <Menu
+              theme="dark"
+              mode="inline"
+              selectedKeys={[getSelectedKey()]}
+              items={menuItems}
+              style={{ background: 'transparent', borderInlineEnd: 'none' }}
+            />
+          </div>
 
           <div
             style={{
+              flex: '0 0 auto',
               borderTop: '1px solid rgba(255,255,255,0.14)',
               margin: collapsed ? '8px 10px 10px' : '10px 14px 12px',
               paddingTop: 10,
@@ -334,6 +358,24 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
         .ant-menu-dark .ant-menu-item-selected::after,
         .ant-menu-dark .ant-menu-submenu-selected > .ant-menu-submenu-title::after {
           border-right: none !important;
+        }
+
+        .admin-sider-menu-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+        }
+
+        .admin-sider-menu-scroll::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .admin-sider-menu-scroll::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.28);
+          border-radius: 999px;
+        }
+
+        .admin-sider-menu-scroll::-webkit-scrollbar-track {
+          background: transparent;
         }
       `}</style>
     </Layout>

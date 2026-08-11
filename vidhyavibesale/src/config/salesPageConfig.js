@@ -2,8 +2,8 @@ export const offerConfig = {
   // E1 Option A (recommended): honest date-based founding price — no fake countdown
   urgencyType: 'founding-date',
   autoRenew: false,
-  deadlineIso: '2026-07-31T23:59:59+05:30',
-  foundingLabel: 'Offer price starting from Rs.999 — ends 31 July, then from Rs.1,499',
+  deadlineIso: '2026-08-15T23:59:59+05:30',
+  foundingLabel: 'Independence Offer — from Rs.999 · ends 15 August, then from Rs.1,499 🎉',
   // foundingHook: 'Founding families keep this price for life.',
 };
 
