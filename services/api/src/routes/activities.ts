@@ -1,6 +1,6 @@
+import { getEnv } from '@magazine/config';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { getEnv } from '@magazine/config';
 import {
   ActivityGenerateError,
   generateActivityPack,

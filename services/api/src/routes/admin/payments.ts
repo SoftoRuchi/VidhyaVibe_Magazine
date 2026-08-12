@@ -25,11 +25,29 @@ router.get('/orders', async (req, res) => {
              u.email as userEmail, u.name as userName, u.phone as userPhone,
              m.title as magazineTitle,
              sp.name as planName,
-             po.guest_name as guestName, po.guest_email as guestEmail, po.guest_phone as guestPhone
+             po.guest_name as guestName, po.guest_email as guestEmail, po.guest_phone as guestPhone,
+             COALESCE(
+               NULLIF(TRIM(BOTH ', ' FROM CONCAT_WS(', ',
+                 NULLIF(a.line1, ''), NULLIF(a.line2, ''), NULLIF(a.city, ''),
+                 NULLIF(a.state, ''), NULLIF(a.postalCode, ''), NULLIF(a.country, '')
+               )), ''),
+               NULLIF(TRIM(BOTH ', ' FROM CONCAT_WS(', ',
+                 NULLIF(au.line1, ''), NULLIF(au.line2, ''), NULLIF(au.city, ''),
+                 NULLIF(au.state, ''), NULLIF(au.postalCode, ''), NULLIF(au.country, '')
+               )), ''),
+               u.deliveryAddress
+             ) as address
       FROM orders po
       LEFT JOIN users u ON u.id = po.user_id
       LEFT JOIN magazines m ON m.id = po.magazine_id
       LEFT JOIN subscription_plans sp ON sp.id = po.plan_id
+      LEFT JOIN addresses a ON a.id = po.address_id
+      LEFT JOIN addresses au ON au.id = (
+        SELECT a2.id FROM addresses a2
+        WHERE a2.userId = po.user_id
+        ORDER BY a2.id DESC
+        LIMIT 1
+      )
       ORDER BY po.created_at DESC
     `,
       )
@@ -42,11 +60,29 @@ router.get('/orders', async (req, res) => {
              u.email as userEmail, u.name as userName, u.phone as userPhone,
              m.title as magazineTitle,
              sp.name as planName,
-             NULL as guestName, NULL as guestEmail, NULL as guestPhone
+             NULL as guestName, NULL as guestEmail, NULL as guestPhone,
+             COALESCE(
+               NULLIF(TRIM(BOTH ', ' FROM CONCAT_WS(', ',
+                 NULLIF(a.line1, ''), NULLIF(a.line2, ''), NULLIF(a.city, ''),
+                 NULLIF(a.state, ''), NULLIF(a.postalCode, ''), NULLIF(a.country, '')
+               )), ''),
+               NULLIF(TRIM(BOTH ', ' FROM CONCAT_WS(', ',
+                 NULLIF(au.line1, ''), NULLIF(au.line2, ''), NULLIF(au.city, ''),
+                 NULLIF(au.state, ''), NULLIF(au.postalCode, ''), NULLIF(au.country, '')
+               )), ''),
+               u.deliveryAddress
+             ) as address
       FROM orders po
       LEFT JOIN users u ON u.id = po.user_id
       LEFT JOIN magazines m ON m.id = po.magazine_id
       LEFT JOIN subscription_plans sp ON sp.id = po.plan_id
+      LEFT JOIN addresses a ON a.id = po.address_id
+      LEFT JOIN addresses au ON au.id = (
+        SELECT a2.id FROM addresses a2
+        WHERE a2.userId = po.user_id
+        ORDER BY a2.id DESC
+        LIMIT 1
+      )
       ORDER BY po.created_at DESC
     `);
         return [rows];

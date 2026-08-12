@@ -21,11 +21,24 @@ router.get('/', async (req, res) => {
       SELECT us.id, us.userId, us.readerId, us.magazineId, us.planId, us.status, us.startsAt, us.endsAt, us.price, us.currency, us.createdAt,
              u.email as userEmail, u.name as userName,
              m.title as magazineTitle, m.slug as magazineSlug,
-             sp.name as planName, sp.slug as planSlug
+             sp.name as planName, sp.slug as planSlug,
+             COALESCE(
+               NULLIF(TRIM(BOTH ', ' FROM CONCAT_WS(', ',
+                 NULLIF(a.line1, ''), NULLIF(a.line2, ''), NULLIF(a.city, ''),
+                 NULLIF(a.state, ''), NULLIF(a.postalCode, ''), NULLIF(a.country, '')
+               )), ''),
+               u.deliveryAddress
+             ) as address
       FROM user_subscriptions us
       LEFT JOIN users u ON u.id = us.userId
       LEFT JOIN magazines m ON m.id = us.magazineId
       LEFT JOIN subscription_plans sp ON sp.id = us.planId
+      LEFT JOIN addresses a ON a.id = (
+        SELECT a2.id FROM addresses a2
+        WHERE a2.userId = us.userId
+        ORDER BY a2.id DESC
+        LIMIT 1
+      )
       WHERE 1=1
     `;
     const params: any[] = [];

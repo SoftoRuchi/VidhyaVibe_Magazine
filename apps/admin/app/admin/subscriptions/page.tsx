@@ -4,6 +4,32 @@ import { Card, Table, Tag, Select, Spin, Button, Badge, Space, Popover, Input } 
 import React from 'react';
 import api from '../../../lib/api';
 
+const ADDRESS_PREVIEW_LEN = 60;
+
+function ExpandableAddress({ address }: { address: string }) {
+  const [expanded, setExpanded] = React.useState(false);
+  if (!address) return <>{'—'}</>;
+  const needsToggle = address.length > ADDRESS_PREVIEW_LEN;
+  const shown =
+    !needsToggle || expanded ? address : `${address.slice(0, ADDRESS_PREVIEW_LEN).trimEnd()}…`;
+
+  return (
+    <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.4 }}>
+      <span>{shown}</span>
+      {needsToggle ? (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: '0 0 0 4px', height: 'auto', fontSize: 12 }}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? 'View less' : 'View more'}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function SubscriptionsPage() {
   const PAGE_SIZE = 10;
   const [rows, setRows] = React.useState<any[]>([]);
@@ -35,12 +61,26 @@ export default function SubscriptionsPage() {
       width: 70,
       render: (_: any, __: any, index: number) => (currentPage - 1) * PAGE_SIZE + index + 1,
     },
-    { title: 'User', key: 'user', render: (_: any, r: any) => r.userEmail || r.userName || '-' },
-    { title: 'Magazine', dataIndex: 'magazineTitle' },
-    { title: 'Plan', dataIndex: 'planName' },
+    {
+      title: 'User',
+      key: 'user',
+      width: 200,
+      render: (_: any, r: any) => r.userEmail || r.userName || '-',
+    },
+    { title: 'Magazine', dataIndex: 'magazineTitle', width: 220 },
+    { title: 'Plan', dataIndex: 'planName', width: 140 },
+    {
+      title: 'Address',
+      key: 'address',
+      width: 280,
+      render: (_: any, r: any) => (
+        <ExpandableAddress address={typeof r.address === 'string' ? r.address.trim() : ''} />
+      ),
+    },
     {
       title: 'Status',
       dataIndex: 'status',
+      width: 110,
       render: (s: any) => (
         <Tag color={s === 'ACTIVE' ? 'green' : s === 'CANCELLED' ? 'red' : 'default'}>{s}</Tag>
       ),
@@ -48,16 +88,19 @@ export default function SubscriptionsPage() {
     {
       title: 'Start',
       dataIndex: 'startsAt',
+      width: 110,
       render: (d: any) => (d ? new Date(d).toLocaleDateString() : '-'),
     },
     {
       title: 'End',
       dataIndex: 'endsAt',
+      width: 110,
       render: (d: any) => (d ? new Date(d).toLocaleDateString() : '-'),
     },
     {
       title: 'Amount',
       key: 'amount',
+      width: 120,
       render: (_: any, r: any) =>
         r.price != null ? `${Number(r.price).toFixed(2)} ${r.currency || 'USD'}` : '-',
     },
@@ -88,7 +131,8 @@ export default function SubscriptionsPage() {
       const user = String(r.userEmail || r.userName || '').toLowerCase();
       const magazine = String(r.magazineTitle || '').toLowerCase();
       const plan = String(r.planName || '').toLowerCase();
-      return user.includes(q) || magazine.includes(q) || plan.includes(q);
+      const address = String(r.address || '').toLowerCase();
+      return user.includes(q) || magazine.includes(q) || plan.includes(q) || address.includes(q);
     });
   }, [rows, searchText, statusFilter, planFilter, magazineFilter]);
 
@@ -116,7 +160,7 @@ export default function SubscriptionsPage() {
         <div>
           <div style={{ marginBottom: 6, fontWeight: 500 }}>Search</div>
           <Input
-            placeholder="Search by user, magazine, plan"
+            placeholder="Search by user, magazine, plan, address"
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
           />
@@ -199,6 +243,7 @@ export default function SubscriptionsPage() {
             rowKey="id"
             dataSource={filteredRows}
             columns={columns}
+            scroll={{ x: 1300 }}
             pagination={{ pageSize: PAGE_SIZE, current: currentPage }}
             onChange={(pagination) => setCurrentPage(pagination.current || 1)}
           />

@@ -15,6 +15,37 @@ function buyerPhone(r: any) {
   return r.guestPhone || r.userPhone || '—';
 }
 
+function buyerAddressText(r: any) {
+  const addr = typeof r.address === 'string' ? r.address.trim() : '';
+  return addr || '';
+}
+
+const ADDRESS_PREVIEW_LEN = 60;
+
+function ExpandableAddress({ address }: { address: string }) {
+  const [expanded, setExpanded] = React.useState(false);
+  if (!address) return <>{'—'}</>;
+  const needsToggle = address.length > ADDRESS_PREVIEW_LEN;
+  const shown =
+    !needsToggle || expanded ? address : `${address.slice(0, ADDRESS_PREVIEW_LEN).trimEnd()}…`;
+
+  return (
+    <div style={{ whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.4 }}>
+      <span>{shown}</span>
+      {needsToggle ? (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: '0 0 0 4px', height: 'auto', fontSize: 12 }}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? 'View less' : 'View more'}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function formatAmount(amount: number | null | undefined, currency?: string) {
   if (amount == null || Number.isNaN(Number(amount))) return '—';
   const cur = currency || 'INR';
@@ -196,7 +227,7 @@ export default function OrdersPage() {
         title="Purchase History"
         extra={
           <span style={{ color: '#666', fontSize: 13 }}>
-            Buyer name, mobile, email · magazine · date &amp; time
+            Buyer name, mobile, email, address · magazine · date &amp; time
           </span>
         }
       >
@@ -211,7 +242,7 @@ export default function OrdersPage() {
                   rowKey="id"
                   dataSource={data.subscriptionOrders}
                   size="small"
-                  scroll={{ x: 1100 }}
+                  scroll={{ x: 1400 }}
                   pagination={{
                     pageSize: PAGE_SIZE,
                     current: subscriptionOrdersPage,
@@ -243,6 +274,14 @@ export default function OrdersPage() {
                       key: 'buyerEmail',
                       width: 200,
                       render: (_: any, r: any) => buyerEmail(r),
+                    },
+                    {
+                      title: 'Address',
+                      key: 'address',
+                      width: 280,
+                      render: (_: any, r: any) => (
+                        <ExpandableAddress address={buyerAddressText(r)} />
+                      ),
                     },
                     {
                       title: 'Magazine',
