@@ -87,6 +87,7 @@ class ApiConfig {
   static String get learnActivitiesUrl => url('/learn/activities');
   static String get learnSubjectsUrl => url('/learn/activities/subjects');
   static String get learnMyProgressUrl => url('/learn/activities/me/progress');
+  static String get learnWalletUrl => url('/learn/activities/me/wallet');
   static String learnActivityUrl(Object id) => url('/learn/activities/$id');
   static String learnActivityStartUrl(Object id) =>
       url('/learn/activities/$id/start');

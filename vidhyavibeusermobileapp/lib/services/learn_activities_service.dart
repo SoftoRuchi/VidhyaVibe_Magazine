@@ -39,8 +39,11 @@ class LearnActivitiesService {
       subjectSlug: subjectSlug,
       activityType: activityType,
     );
-    if (ageBand == null || ageBand.isEmpty) return all;
+    if (ageBand == null || ageBand.isEmpty) {
+      return all.where((a) => a.progressStatus != 'COMPLETED').toList();
+    }
     return all
+        .where((a) => a.progressStatus != 'COMPLETED')
         .where((a) => a.ageBands.isEmpty || a.ageBands.contains(ageBand))
         .toList();
   }
@@ -97,11 +100,19 @@ class LearnActivitiesService {
   }
 
   static Future<void> start(int id, {int? readerId}) async {
-    await ApiClient.post(
+    final res = await ApiClient.post(
       ApiConfig.learnActivityStartUrl(id),
       body: {if (readerId != null) 'readerId': readerId},
       auth: true,
     );
+    if (!ApiClient.isOk(res)) {
+      final data = ApiClient.decodeMap(res);
+      throw Exception(
+        data['message']?.toString() ??
+            data['error']?.toString() ??
+            'Could not start activity',
+      );
+    }
   }
 
   static Future<LearnCompleteResult> complete(
@@ -128,5 +139,13 @@ class LearnActivitiesService {
       );
     }
     return LearnCompleteResult.fromJson(data);
+  }
+
+  static Future<int> walletBalance() async {
+    final res = await ApiClient.get(ApiConfig.learnWalletUrl, auth: true)
+        .timeout(const Duration(seconds: 20));
+    if (!ApiClient.isOk(res)) return 0;
+    final data = ApiClient.decodeMap(res);
+    return int.tryParse('${data['balance']}') ?? 0;
   }
 }

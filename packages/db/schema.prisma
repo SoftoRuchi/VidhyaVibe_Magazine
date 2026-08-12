@@ -701,3 +701,26 @@ model LearnActivityProgress {
   @@map("learn_activity_progress")
 }
 
+model LearnWallet {
+  userId    BigInt   @id @map("user_id")
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("learn_wallets")
+}
+
+model LearnWalletLedger {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @map("user_id")
+  amount       Int
+  balanceAfter Int      @map("balance_after")
+  entryType    String   @map("entry_type") @db.VarChar(32)
+  activityId   BigInt?  @map("activity_id")
+  note         String?  @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([activityId])
+  @@map("learn_wallet_ledger")
+}
+

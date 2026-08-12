@@ -52,10 +52,7 @@ function num(v: unknown, fallback = 0): number {
 }
 
 /** Validate type-specific config. Returns issues (empty = valid). */
-export function validateActivityConfig(
-  activityType: string,
-  config: unknown,
-): ValidationIssue[] {
+export function validateActivityConfig(activityType: string, config: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!isLearnActivityType(activityType)) {
     issues.push({ path: 'activityType', message: 'Unsupported activity type' });
@@ -84,14 +81,18 @@ export function validateActivityConfig(
     }
     case 'PAINT': {
       if (!str(c.templateImageKey) && !str(c.templateImageUrl)) {
-        issues.push({ path: 'config.templateImageKey', message: 'Coloring template image required' });
+        issues.push({
+          path: 'config.templateImageKey',
+          message: 'Coloring template image required',
+        });
       }
       break;
     }
     case 'DRAG_DROP': {
       const items = asArray(c.items);
       const targets = asArray(c.targets);
-      if (targets.length < 1) issues.push({ path: 'config.targets', message: 'Need at least 1 target' });
+      if (targets.length < 1)
+        issues.push({ path: 'config.targets', message: 'Need at least 1 target' });
       if (items.length < 2) issues.push({ path: 'config.items', message: 'Need at least 2 items' });
       items.forEach((it: any, i) => {
         if (!str(it?.id) || !str(it?.target)) {
@@ -113,7 +114,8 @@ export function validateActivityConfig(
     case 'SORTING': {
       const cats = asArray(c.categories);
       const items = asArray(c.items);
-      if (cats.length < 2) issues.push({ path: 'config.categories', message: 'Need at least 2 categories' });
+      if (cats.length < 2)
+        issues.push({ path: 'config.categories', message: 'Need at least 2 categories' });
       if (items.length < 2) issues.push({ path: 'config.items', message: 'Need at least 2 items' });
       items.forEach((it: any, i) => {
         if (!str(it?.id) || !str(it?.categoryId)) {
@@ -132,7 +134,8 @@ export function validateActivityConfig(
     }
     case 'TAP_CORRECT': {
       const options = asArray(c.options);
-      if (options.length < 2) issues.push({ path: 'config.options', message: 'Need at least 2 options' });
+      if (options.length < 2)
+        issues.push({ path: 'config.options', message: 'Need at least 2 options' });
       if (!str(c.correctOptionId) && !Number.isFinite(Number(c.correctIndex))) {
         issues.push({ path: 'config.correctOptionId', message: 'Correct option required' });
       }
@@ -154,19 +157,27 @@ export function validateActivityConfig(
       } else {
         questions.forEach((q: any, i) => {
           if (!str(q?.prompt) || asArray(q?.options).length < 2) {
-            issues.push({ path: `config.questions[${i}]`, message: 'Each question needs prompt + options' });
+            issues.push({
+              path: `config.questions[${i}]`,
+              message: 'Each question needs prompt + options',
+            });
           }
           if (q?.correctIndex == null && !str(q?.correctOptionId)) {
-            issues.push({ path: `config.questions[${i}].correctIndex`, message: 'Correct answer required' });
+            issues.push({
+              path: `config.questions[${i}].correctIndex`,
+              message: 'Correct answer required',
+            });
           }
         });
       }
       break;
     }
     case 'FINANCIAL_DECISION': {
-      if (!str(c.scenario)) issues.push({ path: 'config.scenario', message: 'Scenario text required' });
+      if (!str(c.scenario))
+        issues.push({ path: 'config.scenario', message: 'Scenario text required' });
       const choices = asArray(c.choices);
-      if (choices.length < 2) issues.push({ path: 'config.choices', message: 'Need at least 2 choices' });
+      if (choices.length < 2)
+        issues.push({ path: 'config.choices', message: 'Need at least 2 choices' });
       break;
     }
     default:
@@ -239,13 +250,15 @@ export function evaluateActivity(input: EvaluateInput): EvaluateOutput {
   const res = input.response || {};
   const basePoints = Math.max(0, Number(input.points ?? 10) || 10);
   const explanation = str(input.explanation) || 'Keep practicing — every attempt helps you learn.';
-  const success =
-    str(input.successMessage) || '🎉 Great job! You completed the activity.';
+  const success = str(input.successMessage) || '🎉 Great job! You completed the activity.';
 
   const type = input.activityType;
 
   if (type === 'PAINT') {
-    const pct = Math.min(100, Math.max(0, num(res.completionPercent, num(cfg.minCompletionPercent, 50))));
+    const pct = Math.min(
+      100,
+      Math.max(0, num(res.completionPercent, num(cfg.minCompletionPercent, 50))),
+    );
     const minPct = num(cfg.minCompletionPercent, 40);
     const ok = res.completed === true || pct >= minPct;
     return {
@@ -260,22 +273,70 @@ export function evaluateActivity(input: EvaluateInput): EvaluateOutput {
   }
 
   if (type === 'CONNECT_DOTS') {
-    const expected = asArray(cfg.sequence).map(String);
-    const given = asArray(res.sequence).map(String);
+    const dots = asArray(cfg.dots) as Array<{
+      id?: unknown;
+      label?: unknown;
+      x?: unknown;
+      y?: unknown;
+    }>;
+    const labelOf = (id: string) => {
+      const d = dots.find((x) => String(x?.id ?? '') === id);
+      return String(d?.label ?? id).trim();
+    };
+    const sequenceFromDotsByLabel = () => {
+      const items = dots
+        .map((d) => {
+          const id = String(d?.id ?? '').trim();
+          const label = String(d?.label ?? id).trim();
+          const n = Number(label);
+          return { id, label, n };
+        })
+        .filter((d) => d.id);
+      items.sort((a, b) => {
+        const aNum = Number.isFinite(a.n);
+        const bNum = Number.isFinite(b.n);
+        if (aNum && bNum && a.n !== b.n) return a.n - b.n;
+        return a.label.localeCompare(b.label, undefined, { numeric: true });
+      });
+      return items.map((d) => d.id);
+    };
+
+    let expected = asArray(cfg.sequence)
+      .map((x) => String(x).trim())
+      .filter(Boolean);
+    if (!expected.length) expected = sequenceFromDotsByLabel();
+    const given = asArray(res.sequence)
+      .map((x) => String(x).trim())
+      .filter(Boolean);
+    const byLabel = sequenceFromDotsByLabel();
+
+    const sameIds = (a: string[], b: string[]) =>
+      a.length > 0 && a.length === b.length && a.every((id, i) => id === b[i]);
+    const sameLabels = (a: string[], b: string[]) =>
+      a.length > 0 && a.length === b.length && a.every((id, i) => labelOf(id) === labelOf(b[i]));
+
     const ok =
-      expected.length > 0 &&
-      expected.length === given.length &&
-      expected.every((id, i) => id === given[i]);
+      sameIds(given, expected) ||
+      sameIds(given, byLabel) ||
+      sameLabels(given, expected) ||
+      sameLabels(given, byLabel);
+
     return {
       resultStatus: ok ? 'COMPLETED_SUCCESS' : 'TRY_AGAIN',
       resultMessage: ok ? success : '💡 Try again — connect the dots in number order.',
       explanation: ok
         ? explanation || 'You connected all the dots in the correct order.'
         : explanation,
-      score: ok ? 100 : 0,
+      score: ok
+        ? 100
+        : Math.round((Math.min(given.length, expected.length) / Math.max(expected.length, 1)) * 40),
       pointsEarned: ok ? basePoints : 0,
       correct: ok,
-      details: { appreciation: appreciation(ok ? 'COMPLETED_SUCCESS' : 'TRY_AGAIN') },
+      details: {
+        appreciation: appreciation(ok ? 'COMPLETED_SUCCESS' : 'TRY_AGAIN'),
+        expected,
+        given,
+      },
     };
   }
 
@@ -343,7 +404,8 @@ export function evaluateActivity(input: EvaluateInput): EvaluateOutput {
       score === 100 ? 'CORRECT' : score >= 50 ? 'PARTIAL' : 'INCORRECT';
     return {
       resultStatus: status,
-      resultMessage: score === 100 ? success : '💡 Check which items are needs vs wants (or categories).',
+      resultMessage:
+        score === 100 ? success : '💡 Check which items are needs vs wants (or categories).',
       explanation,
       score,
       pointsEarned: Math.round(basePoints * (score / 100)),
@@ -376,8 +438,7 @@ export function evaluateActivity(input: EvaluateInput): EvaluateOutput {
     const pickedId = str(res.selectedOptionId);
     const pickedIndex = num(res.selectedIndex, -1);
     const ok =
-      (correctId && pickedId === correctId) ||
-      (correctIndex >= 0 && pickedIndex === correctIndex);
+      (correctId && pickedId === correctId) || (correctIndex >= 0 && pickedIndex === correctIndex);
     return {
       resultStatus: ok ? 'CORRECT' : 'INCORRECT',
       resultMessage: ok ? success : '💡 Not quite — try another object.',
@@ -398,10 +459,12 @@ export function evaluateActivity(input: EvaluateInput): EvaluateOutput {
       pointsMultiplier?: number;
     }>;
     const selectedId = str(res.selectedChoiceId);
-    const choice = choices.find((c) => String(c.id) === selectedId) || choices[num(res.selectedIndex, -1)];
+    const choice =
+      choices.find((c) => String(c.id) === selectedId) || choices[num(res.selectedIndex, -1)];
     const best = choices.find((c) => c.isBest) || choices[0];
     const isBest = !!choice && best && String(choice.id) === String(best.id);
-    const mult = choice?.pointsMultiplier != null ? Number(choice.pointsMultiplier) : isBest ? 1 : 0.5;
+    const mult =
+      choice?.pointsMultiplier != null ? Number(choice.pointsMultiplier) : isBest ? 1 : 0.5;
     const outcome = str(choice?.outcome) || explanation;
     return {
       resultStatus: isBest ? 'CORRECT' : 'PARTIAL',
@@ -448,7 +511,8 @@ export function evaluateActivity(input: EvaluateInput): EvaluateOutput {
   // single question quiz shape
   const opts = asArray(cfg.options);
   const idx = num(res.selectedIndex, -1);
-  const ok = idx === num(cfg.correctIndex, -1) || str(res.selectedOptionId) === str(cfg.correctOptionId);
+  const ok =
+    idx === num(cfg.correctIndex, -1) || str(res.selectedOptionId) === str(cfg.correctOptionId);
   return {
     resultStatus: ok ? 'CORRECT' : 'INCORRECT',
     resultMessage: ok ? success : '💡 Not quite — read the explanation and try again.',
@@ -456,7 +520,10 @@ export function evaluateActivity(input: EvaluateInput): EvaluateOutput {
     score: ok ? 100 : 0,
     pointsEarned: ok ? basePoints : 0,
     correct: ok,
-    details: { appreciation: appreciation(ok ? 'CORRECT' : 'INCORRECT'), optionsCount: opts.length },
+    details: {
+      appreciation: appreciation(ok ? 'CORRECT' : 'INCORRECT'),
+      optionsCount: opts.length,
+    },
   };
 }
 
@@ -469,4 +536,3 @@ export function listActivityTypeMeta() {
       .join(' '),
   }));
 }
-

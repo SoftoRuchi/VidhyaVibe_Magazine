@@ -110,29 +110,32 @@ const defaultConfig = (type: string): Record<string, any> => {
       };
     case 'FINANCIAL_DECISION':
       return {
-        scenario: 'You receive ₹500 pocket money.',
-        budget: 500,
+        scenario: 'You earned points from learning. How will you use your wallet?',
+        budget: 100,
         currency: '₹',
         choices: [
           {
             id: 'c1',
-            label: 'Save ₹200 and spend ₹300',
+            label: 'Save most points and spend a little (use 20 pts)',
+            walletSpend: 20,
             isBest: true,
-            outcome: 'Saving part of your money builds a habit for future goals.',
+            outcome: 'Saving builds a habit. Small spends are fine when planned.',
             pointsMultiplier: 1,
           },
           {
             id: 'c2',
-            label: 'Spend all ₹500',
+            label: 'Spend a big treat now (use 80 pts)',
+            walletSpend: 80,
             isBest: false,
-            outcome: 'Spending everything leaves nothing for later needs.',
-            pointsMultiplier: 0.4,
+            outcome: 'Fun is okay — keep some points for future goals too.',
+            pointsMultiplier: 0.5,
           },
           {
             id: 'c3',
-            label: 'Save all ₹500',
+            label: 'Keep everything saved (use 0 pts)',
+            walletSpend: 0,
             isBest: false,
-            outcome: 'Saving is good — also plan a small reward so the habit sticks.',
+            outcome: 'Saving is great. A small planned reward can help the habit stick.',
             pointsMultiplier: 0.8,
           },
         ],
@@ -170,7 +173,10 @@ export function ActivityForm({
   const activityType = Form.useWatch('activityType', form);
 
   React.useEffect(() => {
-    api.get('/admin/activities/meta').then((r) => setMeta(r.data)).catch(() => {});
+    api
+      .get('/admin/activities/meta')
+      .then((r) => setMeta(r.data))
+      .catch(() => {});
   }, []);
 
   React.useEffect(() => {
@@ -328,8 +334,8 @@ export function ActivityForm({
 
         <Divider>Type configuration (JSON)</Divider>
         <p style={{ color: '#666', marginTop: -8 }}>
-          Current type: <strong>{activityType || '—'}</strong>. Starter template loads when you change
-          type. Validate before publish.
+          Current type: <strong>{activityType || '—'}</strong>. Starter template loads when you
+          change type. Validate before publish.
         </p>
         <Form.Item
           name="config"

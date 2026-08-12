@@ -3,6 +3,11 @@ import { getPool } from '../db';
 import { requireAuth, type AuthRequest } from '../middleware/auth';
 import { optionalAuth } from '../middleware/optionalAuth';
 import { evaluateActivity } from '../services/learnActivityEngine';
+import {
+  applyLearnWalletChange,
+  creditLearnActivityPoints,
+  getLearnWalletBalance,
+} from '../services/learnWallet';
 
 const router = Router();
 router.use(optionalAuth);
@@ -131,6 +136,16 @@ router.get('/', async (req: AuthRequest, res) => {
       where.push('a.difficulty = ?');
       params.push(difficulty);
     }
+    // Hide activities the signed-in user already completed.
+    if (userId) {
+      where.push(
+        `NOT EXISTS (
+           SELECT 1 FROM learn_activity_progress p
+           WHERE p.user_id = ? AND p.activity_id = a.id AND p.status = 'COMPLETED'
+         )`,
+      );
+      params.push(userId);
+    }
 
     const [rows]: any = await conn.query(
       `SELECT a.id, a.title, a.description, a.activity_type AS activityType,
@@ -224,6 +239,51 @@ router.get('/me/progress', requireAuth, async (req: AuthRequest, res) => {
   }
 });
 
+/** GET /api/learn/activities/me/wallet */
+router.get('/me/wallet', requireAuth, async (req: AuthRequest, res) => {
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    const balance = await getLearnWalletBalance(conn, req.user!.id);
+    const [ledger]: any = await conn.query(
+      `SELECT id, amount, balance_after AS balanceAfter, entry_type AS entryType,
+              activity_id AS activityId, note, created_at AS createdAt
+       FROM learn_wallet_ledger
+       WHERE user_id = ?
+       ORDER BY id DESC
+       LIMIT 30`,
+      [req.user!.id],
+    );
+    res.json({
+      balance,
+      currency: 'pts',
+      ledger: (ledger || []).map((r: any) => ({
+        id: Number(r.id),
+        amount: Number(r.amount),
+        balanceAfter: Number(r.balanceAfter),
+        entryType: r.entryType,
+        activityId: r.activityId != null ? Number(r.activityId) : null,
+        note: r.note,
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (err: any) {
+    console.error('[learn/activities] wallet failed', err?.message || err);
+    if (!res.headersSent) {
+      const missing =
+        String(err?.message || '').includes("doesn't exist") || err?.code === 'ER_NO_SUCH_TABLE';
+      res.status(missing ? 503 : 500).json({
+        error: missing ? 'migration_required' : 'wallet_failed',
+        message: missing
+          ? 'Run migration 20260812_learn_wallet.sql on the database'
+          : err?.message || 'Failed to load wallet',
+      });
+    }
+  } finally {
+    conn.release();
+  }
+});
+
 /** GET /api/learn/activities/:id */
 router.get('/:id', async (req: AuthRequest, res) => {
   const id = Number(req.params.id);
@@ -283,6 +343,19 @@ router.post('/:id/start', requireAuth, async (req: AuthRequest, res) => {
     );
     if (!acts?.[0]) return res.status(404).json({ error: 'not_found' });
 
+    const [done]: any = await conn.query(
+      `SELECT id FROM learn_activity_progress
+       WHERE user_id = ? AND activity_id = ? AND status = 'COMPLETED'
+       LIMIT 1`,
+      [req.user!.id, id],
+    );
+    if (done?.[0]) {
+      return res.status(409).json({
+        error: 'already_completed',
+        message: 'You already completed this activity',
+      });
+    }
+
     const [existing]: any = await conn.query(
       `SELECT id, status, attempts FROM learn_activity_progress
        WHERE user_id = ? AND activity_id = ? AND ${readerId == null ? 'reader_id IS NULL' : 'reader_id = ?'}
@@ -293,7 +366,7 @@ router.post('/:id/start', requireAuth, async (req: AuthRequest, res) => {
     if (existing?.[0]) {
       await conn.query(
         `UPDATE learn_activity_progress
-         SET status = IF(status = 'COMPLETED', status, 'IN_PROGRESS'),
+         SET status = 'IN_PROGRESS',
              attempts = attempts + 1,
              started_at = COALESCE(started_at, NOW(3)),
              updated_at = NOW(3)
@@ -320,27 +393,46 @@ router.post('/:id/complete', requireAuth, async (req: AuthRequest, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'invalid_id' });
   const readerId = req.body?.readerId != null ? Number(req.body.readerId) : null;
-  const response = (req.body?.response && typeof req.body.response === 'object'
-    ? req.body.response
-    : {}) as Record<string, any>;
-  const timeSpentSec =
-    req.body?.timeSpentSec != null ? Number(req.body.timeSpentSec) : null;
+  const response = (
+    req.body?.response && typeof req.body.response === 'object' ? req.body.response : {}
+  ) as Record<string, any>;
+  const timeSpentSec = req.body?.timeSpentSec != null ? Number(req.body.timeSpentSec) : null;
 
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    await conn.beginTransaction();
+
     const [acts]: any = await conn.query(
-      `SELECT id, activity_type AS activityType, config, success_message AS successMessage,
+      `SELECT id, title, activity_type AS activityType, config, success_message AS successMessage,
               explanation, points
        FROM learn_activities WHERE id = ? AND status = 'PUBLISHED' LIMIT 1`,
       [id],
     );
     const act = acts?.[0];
-    if (!act) return res.status(404).json({ error: 'not_found' });
+    if (!act) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'not_found' });
+    }
 
+    const [already]: any = await conn.query(
+      `SELECT id, status FROM learn_activity_progress
+       WHERE user_id = ? AND activity_id = ? AND status = 'COMPLETED'
+       LIMIT 1`,
+      [req.user!.id, id],
+    );
+    if (already?.[0]) {
+      await conn.rollback();
+      return res.status(409).json({
+        error: 'already_completed',
+        message: 'You already completed this activity',
+      });
+    }
+
+    const cfg = parseJson(act.config);
     const result = evaluateActivity({
       activityType: act.activityType,
-      config: parseJson(act.config),
+      config: cfg,
       response,
       successMessage: act.successMessage,
       explanation: act.explanation,
@@ -352,6 +444,42 @@ router.post('/:id/complete', requireAuth, async (req: AuthRequest, res) => {
       result.resultStatus === 'COMPLETED_SUCCESS' ||
       result.resultStatus === 'COMPLETED_CREATIVE' ||
       result.resultStatus === 'PARTIAL';
+
+    // Financial literacy: spend wallet points when a choice declares walletSpend.
+    let walletSpent = 0;
+    let walletBalance = await getLearnWalletBalance(conn, req.user!.id);
+    if (act.activityType === 'FINANCIAL_DECISION') {
+      const choices = Array.isArray(cfg.choices) ? cfg.choices : [];
+      const selectedId = String(response.selectedChoiceId || '');
+      const choice =
+        choices.find((c: any) => String(c?.id) === selectedId) ||
+        choices[Number(response.selectedIndex)];
+      const spend = Math.max(0, Math.trunc(Number(choice?.walletSpend ?? 0) || 0));
+      if (spend > 0) {
+        try {
+          const debited = await applyLearnWalletChange(conn, {
+            userId: req.user!.id,
+            amount: -spend,
+            entryType: 'FINANCIAL_SPEND',
+            activityId: id,
+            note: `Spent on ${act.title}`,
+          });
+          walletSpent = spend;
+          walletBalance = debited.balance;
+        } catch (e: any) {
+          await conn.rollback();
+          if (e?.code === 'insufficient_wallet_balance') {
+            return res.status(400).json({
+              error: 'insufficient_wallet_balance',
+              message: `Not enough points. Need ${spend}, wallet has ${walletBalance}.`,
+              balance: walletBalance,
+              required: spend,
+            });
+          }
+          throw e;
+        }
+      }
+    }
 
     const [existing]: any = await conn.query(
       `SELECT id, attempts FROM learn_activity_progress
@@ -408,19 +536,49 @@ router.post('/:id/complete', requireAuth, async (req: AuthRequest, res) => {
       progressId = Number(ins.insertId);
     }
 
-    if (completed) {
+    let pointsCredited = 0;
+    if (completed && result.pointsEarned > 0) {
+      const credit = await creditLearnActivityPoints(conn, {
+        userId: req.user!.id,
+        activityId: id,
+        points: result.pointsEarned,
+        title: act.title,
+      });
+      pointsCredited = credit.credited;
+      walletBalance = credit.balance;
       await conn.query(
         `UPDATE learn_activities SET completion_count = completion_count + 1 WHERE id = ?`,
         [id],
       );
     }
 
+    await conn.commit();
     res.json({
       ok: true,
       progressId,
       ...result,
       badgeLabel: null,
+      pointsCredited,
+      walletSpent,
+      walletBalance,
     });
+  } catch (err: any) {
+    try {
+      await conn.rollback();
+    } catch {
+      /* ignore */
+    }
+    console.error('[learn/activities] complete failed', err?.message || err);
+    if (!res.headersSent) {
+      const missing =
+        String(err?.message || '').includes("doesn't exist") || err?.code === 'ER_NO_SUCH_TABLE';
+      res.status(missing ? 503 : 500).json({
+        error: missing ? 'migration_required' : 'complete_failed',
+        message: missing
+          ? 'Run migration 20260812_learn_wallet.sql on the database'
+          : err?.message || 'Could not complete activity',
+      });
+    }
   } finally {
     conn.release();
   }

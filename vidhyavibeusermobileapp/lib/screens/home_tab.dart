@@ -6,8 +6,6 @@ import '../services/api_client.dart';
 import '../services/auth_storage.dart';
 import '../services/viewing_context.dart';
 import '../widgets/auth_widgets.dart';
-import 'activities_page.dart';
-import 'learn_hub_page.dart';
 import 'login_page.dart';
 import 'magazine_detail_page.dart';
 import 'post_login_setup_page.dart';
@@ -123,8 +121,6 @@ class _HomeTabState extends State<HomeTab> {
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
                     SliverToBoxAdapter(child: _buildHeader()),
-                    SliverToBoxAdapter(child: _buildQuickActions()),
-                    SliverToBoxAdapter(child: _buildLearnTeaser()),
                     const SliverToBoxAdapter(
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(20, 8, 20, 8),
@@ -192,146 +188,65 @@ class _HomeTabState extends State<HomeTab> {
     final roleLabel =
         _audience == LoginAudience.child ? 'Reading as child' : 'Reading as parent';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-      child: Column(
+      padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Welcome, $_welcomeName',
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: AuthTheme.brown,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            roleLabel,
-            style: const TextStyle(color: AuthTheme.mutedBrown, fontSize: 13),
-          ),
-          if (_me?.email != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              _me!.email,
-              style: TextStyle(
-                color: AuthTheme.mutedBrown.withValues(alpha: 0.85),
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActions() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.78),
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: _switchUser,
-          borderRadius: BorderRadius.circular(14),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.swap_horiz, color: AuthTheme.green, size: 20),
-                SizedBox(width: 8),
-                Text(
-                  'Switch parent / child',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: AuthTheme.brown,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLearnTeaser() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const LearnHubPage(),
-              ),
-            );
-          },
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome, color: AuthTheme.green),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'AI Learn packs',
-                        style: TextStyle(
-                          fontFamily: 'serif',
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: AuthTheme.brown,
-                        ),
-                      ),
-                    ),
-                    Icon(Icons.chevron_right, color: AuthTheme.mutedBrown),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Sketch & paint on screen · endless AI packs by age & subject — chemistry, art, maths & more.',
-                  style: TextStyle(
-                    color: AuthTheme.mutedBrown,
-                    fontSize: 12.5,
-                    height: 1.4,
+                Text(
+                  'Welcome, $_welcomeName',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: AuthTheme.brown,
                   ),
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final s in const [
-                      'Chemistry',
-                      'Painting',
-                      'Mathematics',
-                      'English',
-                    ])
-                      ActionChip(
-                        label: Text(s, style: const TextStyle(fontSize: 12)),
-                        onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => LearnHubPage(
-                                  initialSubject: s,
-                                  autoGenerate: true,
-                                ),
-                              ),
-                            );
-                        },
-                      ),
-                  ],
+                const SizedBox(height: 4),
+                Text(
+                  roleLabel,
+                  style: const TextStyle(
+                    color: AuthTheme.mutedBrown,
+                    fontSize: 13,
+                  ),
+                ),
+                if (_me?.email != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    _me!.email,
+                    style: TextStyle(
+                      color: AuthTheme.mutedBrown.withValues(alpha: 0.85),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: _switchUser,
+            style: TextButton.styleFrom(
+              foregroundColor: AuthTheme.green,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.swap_horiz, size: 18),
+                SizedBox(width: 4),
+                Text(
+                  'Switch',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                 ),
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }

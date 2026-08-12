@@ -22,9 +22,11 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
   LearnCompleteResult? _result;
   bool _submitting = false;
   DateTime? _startedAt;
+  int _walletBalance = 0;
 
   // shared interaction state
   final List<String> _connectSeq = [];
+  Offset? _connectFinger;
   final Map<String, String> _placements = {};
   final Map<String, String> _matches = {};
   List<String> _order = [];
@@ -48,6 +50,9 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
     try {
       final detail = await LearnActivitiesService.getById(widget.activityId);
       final readerId = await ViewingContext.getSelectedReaderId();
+      try {
+        _walletBalance = await LearnActivitiesService.walletBalance();
+      } catch (_) {}
       await LearnActivitiesService.start(widget.activityId, readerId: readerId);
       final cfg = detail.config;
       if (detail.activityType == 'ARRANGE_ORDER') {
@@ -63,9 +68,18 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      if (msg.contains('already_completed') ||
+          msg.toLowerCase().contains('already completed')) {
+        setState(() {
+          _loading = false;
+          _error = 'You already completed this activity.';
+        });
+        return;
+      }
       setState(() {
         _loading = false;
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = msg;
       });
     }
   }
@@ -112,6 +126,25 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
 
   Future<void> _submit() async {
     if (_activity == null || _submitting) return;
+
+    if (_activity!.activityType == 'CONNECT_DOTS') {
+      final cfg = _activity!.config;
+      final dots = (cfg['dots'] is List) ? List.from(cfg['dots'] as List) : [];
+      final expected = _connectExpectedIds(cfg);
+      _appendStackedConnectIds(dots, expected);
+      if (_connectSeq.length < expected.length) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Connect all dots in order (${_connectSeq.length}/${expected.length}).',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() => _submitting = true);
     try {
       final readerId = await ViewingContext.getSelectedReaderId();
@@ -125,7 +158,12 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
         timeSpentSec: spent,
       );
       if (!mounted) return;
-      setState(() => _result = result);
+      setState(() {
+        _result = result;
+        if (result.walletBalance != null) {
+          _walletBalance = result.walletBalance!;
+        }
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -140,6 +178,7 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
     setState(() {
       _result = null;
       _connectSeq.clear();
+      _connectFinger = null;
       _placements.clear();
       _matches.clear();
       _selectedIndex = null;
@@ -171,66 +210,91 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
     }
 
     final a = _activity!;
+    final isConnect = a.activityType == 'CONNECT_DOTS' && _result == null;
+    final header = <Widget>[
+      Text(
+        '${a.subjectName ?? 'Learn'} · ${a.activityType} · ${a.difficulty}',
+        style: const TextStyle(
+          color: AuthTheme.green,
+          fontWeight: FontWeight.w700,
+          fontSize: 12.5,
+        ),
+      ),
+      if (a.instructions != null && a.instructions!.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(
+          a.instructions!,
+          style: const TextStyle(color: AuthTheme.mutedBrown, height: 1.4),
+        ),
+      ],
+      const SizedBox(height: 12),
+    ];
+
+    final footer = <Widget>[
+      if (_result == null) ...[
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _reset,
+                child: const Text('Reset'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: AuthPrimaryButton(
+                label: 'Complete',
+                loading: _submitting,
+                onPressed: _submit,
+              ),
+            ),
+          ],
+        ),
+      ] else ...[
+        const SizedBox(height: 12),
+        AuthPrimaryButton(
+          label: 'Try again',
+          loading: false,
+          onPressed: _reset,
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Back to list'),
+        ),
+      ],
+    ];
+
     return Scaffold(
       appBar: AuthTheme.buildAppBar(a.title),
       body: Container(
         decoration: AuthTheme.pageBackground,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-          children: [
-            Text(
-              '${a.subjectName ?? 'Learn'} · ${a.activityType} · ${a.difficulty}',
-              style: const TextStyle(
-                color: AuthTheme.green,
-                fontWeight: FontWeight.w700,
-                fontSize: 12.5,
-              ),
-            ),
-            if (a.instructions != null && a.instructions!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                a.instructions!,
-                style: const TextStyle(color: AuthTheme.mutedBrown, height: 1.4),
-              ),
-            ],
-            const SizedBox(height: 16),
-            if (_result != null) _resultCard(_result!) else ..._player(a),
-            if (_result == null) ...[
-              const SizedBox(height: 16),
-              Row(
+        child: isConnect
+            ? Padding(
+                padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ...header,
+                    Expanded(
+                      flex: 7,
+                      child: Column(children: _player(a)),
+                    ),
+                    ...footer,
+                    const Spacer(flex: 2),
+                  ],
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _reset,
-                      child: const Text('Reset'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: AuthPrimaryButton(
-                      label: 'Complete',
-                      loading: _submitting,
-                      onPressed: _submit,
-                    ),
-                  ),
+                  ...header,
+                  if (_result != null) _resultCard(_result!) else ..._player(a),
+                  ...footer,
                 ],
               ),
-            ] else ...[
-              const SizedBox(height: 12),
-              AuthPrimaryButton(
-                label: 'Try again',
-                loading: false,
-                onPressed: _reset,
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Back to list'),
-              ),
-            ],
-          ],
-        ),
       ),
     );
   }
@@ -263,6 +327,25 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
               color: AuthTheme.green,
             ),
           ),
+          if (r.pointsCredited > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Wallet +${r.pointsCredited} pts'
+              '${r.walletBalance != null ? ' · Balance ${r.walletBalance} pts' : ''}',
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AuthTheme.brown,
+              ),
+            ),
+          ],
+          if (r.walletSpent > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Spent ${r.walletSpent} pts from wallet'
+              '${r.walletBalance != null ? ' · Balance ${r.walletBalance} pts' : ''}',
+              style: const TextStyle(color: AuthTheme.mutedBrown),
+            ),
+          ],
           const SizedBox(height: 12),
           const Text(
             'What did you learn?',
@@ -303,161 +386,192 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
 
   List<Widget> _connectDots(Map<String, dynamic> cfg) {
     final dots = (cfg['dots'] is List) ? List.from(cfg['dots'] as List) : [];
-    final expected = (cfg['sequence'] is List)
-        ? (cfg['sequence'] as List).map((e) => '$e').toList()
-        : <String>[];
-    final reveal = cfg['revealLabel']?.toString();
-    final nextId = _connectSeq.length < expected.length
-        ? expected[_connectSeq.length]
-        : null;
 
     return [
-      AspectRatio(
-        aspectRatio: 1,
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFFF7F1E8),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AuthTheme.brown.withValues(alpha: 0.15)),
-          ),
-          child: LayoutBuilder(
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF7F1E8),
+              borderRadius: BorderRadius.circular(16),
+              border:
+                  Border.all(color: AuthTheme.brown.withValues(alpha: 0.15)),
+            ),
+            child: LayoutBuilder(
             builder: (context, box) {
-              final radius = _connectDotRadius(box.maxWidth, dots.length);
-              final pad = radius + 6;
-              return Stack(
-                children: [
-                  CustomPaint(
-                    size: Size(box.maxWidth, box.maxHeight),
-                    painter: _ConnectPainter(
-                      dots: dots,
-                      sequence: _connectSeq,
-                      width: box.maxWidth,
-                      height: box.maxHeight,
-                      pad: pad,
-                      strokeWidth: (radius * 0.28).clamp(2.0, 4.0),
+              final radius = _connectDotRadius(
+                box.maxWidth < box.maxHeight ? box.maxWidth : box.maxHeight,
+                dots.length,
+              );
+              final pad = radius + 8;
+              final hitRadius = radius * 1.55;
+
+              void handlePoint(Offset local, {required bool allowUndo}) {
+                final hit = _hitConnectDot(
+                  local,
+                  dots,
+                  box.maxWidth,
+                  box.maxHeight,
+                  pad,
+                  hitRadius,
+                );
+                if (hit == null) return;
+
+                final expected = _connectExpectedIds(cfg);
+
+                // If several ids share this spot, pick the next unfinished sequence id.
+                String tapId = '${hit['id'] ?? ''}';
+                if (expected.isNotEmpty) {
+                  for (final id in expected) {
+                    if (_connectSeq.contains(id)) continue;
+                    final d = _dotById(dots, id);
+                    if (d != null && _sameConnectPos(hit, d)) {
+                      tapId = id;
+                      break;
+                    }
+                  }
+                }
+                if (tapId.isEmpty) return;
+
+                if (allowUndo &&
+                    _connectSeq.isNotEmpty &&
+                    _connectSeq.last == tapId) {
+                  setState(() {
+                    _connectSeq.removeLast();
+                    _connectFinger = local;
+                  });
+                  return;
+                }
+
+                if (_connectSeq.contains(tapId)) return;
+                setState(() {
+                  _connectSeq.add(tapId);
+                  _appendStackedConnectIds(dots, expected);
+                  _connectFinger = local;
+                });
+              }
+
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapUp: (d) => handlePoint(d.localPosition, allowUndo: true),
+                onPanStart: (d) {
+                  setState(() => _connectFinger = d.localPosition);
+                  handlePoint(d.localPosition, allowUndo: false);
+                },
+                onPanUpdate: (d) {
+                  setState(() => _connectFinger = d.localPosition);
+                  handlePoint(d.localPosition, allowUndo: false);
+                },
+                onPanEnd: (_) => setState(() => _connectFinger = null),
+                onPanCancel: () => setState(() => _connectFinger = null),
+                child: Stack(
+                  children: [
+                    CustomPaint(
+                      size: Size(box.maxWidth, box.maxHeight),
+                      painter: _ConnectPainter(
+                        dots: dots,
+                        sequence: _connectSeq,
+                        width: box.maxWidth,
+                        height: box.maxHeight,
+                        pad: pad,
+                        strokeWidth: (radius * 0.32).clamp(2.0, 3.5),
+                        finger: _connectFinger,
+                      ),
                     ),
-                  ),
-                  ..._visibleConnectDots(dots).map((d) {
-                    final id = '${d['id'] ?? ''}';
-                    final label = '${d['label'] ?? id}';
-                    final selected = _connectSeq.contains(id);
-                    final isNext = nextId != null &&
-                        (nextId == id ||
-                            _sameConnectPos(d, _dotById(dots, nextId)));
-                    final pos = _connectDotOffset(
-                      d,
-                      box.maxWidth,
-                      box.maxHeight,
-                      pad,
-                    );
-                    return Positioned(
-                      left: pos.dx - radius,
-                      top: pos.dy - radius,
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            // If a later sequence id shares this spot, prefer the next expected id.
-                            var tapId = id;
-                            if (nextId != null &&
-                                nextId != id &&
-                                _sameConnectPos(d, _dotById(dots, nextId))) {
-                              tapId = nextId;
-                            }
-                            if (_connectSeq.contains(tapId)) {
-                              final idx = _connectSeq.indexOf(tapId);
-                              _connectSeq.removeRange(idx, _connectSeq.length);
-                            } else {
-                              _connectSeq.add(tapId);
-                            }
-                          });
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          width: radius * 2,
-                          height: radius * 2,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: selected
-                                ? AuthTheme.green
-                                : Colors.white,
-                            border: Border.all(
-                              color: isNext && !selected
-                                  ? AuthTheme.green
-                                  : AuthTheme.brown.withValues(alpha: 0.35),
-                              width: isNext && !selected ? 2.5 : 1.2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.08),
-                                blurRadius: 3,
-                                offset: const Offset(0, 1),
+                    ..._visibleConnectDots(dots).map((d) {
+                      final id = '${d['id'] ?? ''}';
+                      final label = '${d['label'] ?? id}';
+                      final selected = _connectSeq.contains(id);
+                      final pos = _connectDotOffset(
+                        d,
+                        box.maxWidth,
+                        box.maxHeight,
+                        pad,
+                      );
+                      return Positioned(
+                        left: pos.dx - radius,
+                        top: pos.dy - radius,
+                        child: IgnorePointer(
+                          child: Container(
+                            width: radius * 2,
+                            height: radius * 2,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color:
+                                  selected ? AuthTheme.green : Colors.white,
+                              border: Border.all(
+                                color: selected
+                                    ? AuthTheme.green
+                                    : AuthTheme.brown.withValues(alpha: 0.35),
+                                width: 1.1,
                               ),
-                            ],
-                          ),
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              fontSize: (radius * 0.95).clamp(9.0, 14.0),
-                              fontWeight: FontWeight.w800,
-                              color: selected ? Colors.white : AuthTheme.brown,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.07),
+                                  blurRadius: 2,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: (radius * 0.9).clamp(8.0, 12.0),
+                                fontWeight: FontWeight.w800,
+                                color: selected
+                                    ? Colors.white
+                                    : AuthTheme.brown,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  }),
-                ],
+                      );
+                    }),
+                  ],
+                ),
               );
             },
           ),
         ),
+        ),
       ),
-      const SizedBox(height: 10),
-      if (reveal != null && reveal.isNotEmpty)
-        Text(
-          'Picture: $reveal',
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            color: AuthTheme.brown,
-          ),
-        ),
-      Text(
-        expected.isEmpty
-            ? 'Tap the dots in number order'
-            : 'Connect ${expected.first} → … → ${expected.last} in order',
-        style: const TextStyle(color: AuthTheme.mutedBrown),
+      const SizedBox(height: 8),
+      const Text(
+        'Tap or drag the numbers in order',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: AuthTheme.mutedBrown),
       ),
-      if (nextId != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            'Next: $nextId',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              color: AuthTheme.green,
-            ),
-          ),
-        ),
-      if (_connectSeq.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            'Your path: ${_connectSeq.join(' → ')}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: AuthTheme.mutedBrown,
-            ),
-          ),
-        ),
     ];
   }
 
   double _connectDotRadius(double canvasSize, int count) {
-    if (count <= 0) return 16;
-    // Keep dots readable but avoid overlap on dense shapes.
-    final byCount = canvasSize / (count * 0.85 + 6);
-    return byCount.clamp(10.0, count > 14 ? 14.0 : 18.0);
+    if (count <= 0) return 12;
+    final byCount = canvasSize / (count * 1.05 + 8);
+    return byCount.clamp(8.0, count > 12 ? 11.0 : 13.0);
+  }
+
+  Map? _hitConnectDot(
+    Offset local,
+    List dots,
+    double w,
+    double h,
+    double pad,
+    double hitRadius,
+  ) {
+    Map? best;
+    var bestDist = hitRadius;
+    for (final d in _visibleConnectDots(dots)) {
+      final pos = _connectDotOffset(d, w, h, pad);
+      final dist = (pos - local).distance;
+      if (dist <= bestDist) {
+        bestDist = dist;
+        best = d;
+      }
+    }
+    return best;
   }
 
   /// Hide duplicate stacked dots (same x/y) so closing points don't cover each other.
@@ -482,6 +596,57 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
     final usableW = (w - 2 * pad).clamp(1.0, w);
     final usableH = (h - 2 * pad).clamp(1.0, h);
     return Offset(pad + x * usableW, pad + y * usableH);
+  }
+
+  /// Sequence ids that actually exist on the board (ignores orphan config ids).
+  List<String> _connectExpectedIds(Map<String, dynamic> cfg) {
+    final dots = (cfg['dots'] is List) ? List.from(cfg['dots'] as List) : [];
+    final existing = <String>{
+      for (final raw in dots)
+        if (raw is Map && '${raw['id'] ?? ''}'.isNotEmpty) '${raw['id']}',
+    };
+    var expected = (cfg['sequence'] is List)
+        ? (cfg['sequence'] as List)
+            .map((e) => '$e')
+            .where((id) => existing.contains(id))
+            .toList()
+        : <String>[];
+    if (expected.isEmpty) {
+      expected = existing.toList()
+        ..sort((a, b) {
+          final an = int.tryParse(a);
+          final bn = int.tryParse(b);
+          if (an != null && bn != null) return an.compareTo(bn);
+          return a.compareTo(b);
+        });
+    }
+    return expected;
+  }
+
+  /// After the unique dots are connected, auto-finish stacked/closing ids
+  /// that sit on the same coordinates (e.g. last point = first point).
+  void _appendStackedConnectIds(List dots, List<String> expected) {
+    var guard = 0;
+    while (_connectSeq.length < expected.length && guard < expected.length + 2) {
+      guard += 1;
+      final next = expected[_connectSeq.length];
+      if (_connectSeq.contains(next)) {
+        // Same id repeated in sequence — treat as already satisfied.
+        _connectSeq.add(next);
+        continue;
+      }
+      final nextDot = _dotById(dots, next);
+      if (nextDot == null) {
+        _connectSeq.add(next);
+        continue;
+      }
+      final covers = _connectSeq.any((id) {
+        final d = _dotById(dots, id);
+        return d != null && _sameConnectPos(d, nextDot);
+      });
+      if (!covers) break;
+      _connectSeq.add(next);
+    }
   }
 
   Map? _dotById(List dots, String id) {
@@ -758,18 +923,27 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
 
   List<Widget> _financial(Map<String, dynamic> cfg) {
     final choices = (cfg['choices'] is List) ? cfg['choices'] as List : [];
+    final currency = '${cfg['currency'] ?? '₹'}';
     return [
       Text(
         '${cfg['scenario'] ?? ''}',
         style: const TextStyle(fontSize: 16, height: 1.4, fontWeight: FontWeight.w600),
       ),
+      const SizedBox(height: 8),
+      Text(
+        'Your wallet: $_walletBalance pts',
+        style: const TextStyle(
+          color: AuthTheme.green,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
       if (cfg['budget'] != null) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Text(
-          'Budget: ${cfg['currency'] ?? '₹'}${cfg['budget']}',
+          'Scenario budget: $currency${cfg['budget']}',
           style: const TextStyle(
-            color: AuthTheme.green,
-            fontWeight: FontWeight.w800,
+            color: AuthTheme.mutedBrown,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ],
@@ -777,25 +951,56 @@ class _LearnPlayPageState extends State<LearnPlayPage> {
       ...choices.asMap().entries.map((e) {
         final m = e.value is Map ? e.value as Map : {};
         final id = '${m['id'] ?? e.key}';
+        final spend = int.tryParse('${m['walletSpend'] ?? 0}') ?? 0;
         final selected = _selectedId == id || _selectedIndex == e.key;
+        final canAfford = spend <= 0 || spend <= _walletBalance;
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Material(
-            color: selected
-                ? AuthTheme.green.withValues(alpha: 0.15)
-                : Colors.white.withValues(alpha: 0.92),
+            color: !canAfford
+                ? Colors.black12
+                : selected
+                    ? AuthTheme.green.withValues(alpha: 0.15)
+                    : Colors.white.withValues(alpha: 0.92),
             borderRadius: BorderRadius.circular(12),
             child: InkWell(
-              onTap: () => setState(() {
-                _selectedId = id;
-                _selectedIndex = e.key;
-              }),
+              onTap: !canAfford
+                  ? null
+                  : () => setState(() {
+                        _selectedId = id;
+                        _selectedIndex = e.key;
+                      }),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding: const EdgeInsets.all(14),
-                child: Text(
-                  '${m['label'] ?? id}',
-                  style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${m['label'] ?? id}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        height: 1.35,
+                        color: canAfford ? AuthTheme.brown : AuthTheme.mutedBrown,
+                      ),
+                    ),
+                    if (spend > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          canAfford
+                              ? 'Uses $spend wallet pts'
+                              : 'Need $spend pts (not enough)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: canAfford
+                                ? AuthTheme.green
+                                : Colors.red.shade700,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -872,6 +1077,7 @@ class _ConnectPainter extends CustomPainter {
     required this.height,
     required this.pad,
     this.strokeWidth = 3,
+    this.finger,
   });
 
   final List dots;
@@ -880,6 +1086,7 @@ class _ConnectPainter extends CustomPainter {
   final double height;
   final double pad;
   final double strokeWidth;
+  final Offset? finger;
 
   Offset? _pos(String id) {
     for (final raw in dots) {
@@ -897,16 +1104,30 @@ class _ConnectPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (sequence.length < 2) return;
     final paint = Paint()
       ..color = AuthTheme.green
       ..strokeWidth = strokeWidth
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
-    for (var i = 0; i < sequence.length - 1; i++) {
-      final a = _pos(sequence[i]);
-      final b = _pos(sequence[i + 1]);
-      if (a != null && b != null) canvas.drawLine(a, b, paint);
+
+    if (sequence.length >= 2) {
+      for (var i = 0; i < sequence.length - 1; i++) {
+        final a = _pos(sequence[i]);
+        final b = _pos(sequence[i + 1]);
+        if (a != null && b != null) canvas.drawLine(a, b, paint);
+      }
+    }
+
+    if (finger != null && sequence.isNotEmpty) {
+      final from = _pos(sequence.last);
+      if (from != null) {
+        final preview = Paint()
+          ..color = AuthTheme.green.withValues(alpha: 0.45)
+          ..strokeWidth = strokeWidth
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round;
+        canvas.drawLine(from, finger!, preview);
+      }
     }
   }
 

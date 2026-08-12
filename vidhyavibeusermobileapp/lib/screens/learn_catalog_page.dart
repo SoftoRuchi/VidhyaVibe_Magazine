@@ -22,6 +22,7 @@ class _LearnCatalogPageState extends State<LearnCatalogPage> {
   List<LearnSubject> _subjects = [];
   String? _subjectSlug;
   String _ageBand = '11-13';
+  int _walletBalance = 0;
 
   @override
   void initState() {
@@ -41,10 +42,15 @@ class _LearnCatalogPageState extends State<LearnCatalogPage> {
         ageBand: _ageBand,
         subjectSlug: _subjectSlug,
       );
+      var wallet = 0;
+      try {
+        wallet = await LearnActivitiesService.walletBalance();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _subjects = subjects;
         _items = items;
+        _walletBalance = wallet;
         _loading = false;
       });
     } catch (e) {
@@ -95,9 +101,14 @@ class _LearnCatalogPageState extends State<LearnCatalogPage> {
         ageBand: _ageBand,
         subjectSlug: _subjectSlug,
       );
+      var wallet = _walletBalance;
+      try {
+        wallet = await LearnActivitiesService.walletBalance();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _items = items;
+        _walletBalance = wallet;
         _loading = false;
         _error = null;
       });
@@ -140,6 +151,23 @@ class _LearnCatalogPageState extends State<LearnCatalogPage> {
                   ),
                 ),
               ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AuthTheme.green.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'Wallet $_walletBalance pts',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: AuthTheme.green,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               DropdownButton<String>(
                 value: _ageBand,
                 underline: const SizedBox.shrink(),
@@ -217,7 +245,7 @@ class _LearnCatalogPageState extends State<LearnCatalogPage> {
                           child: Padding(
                             padding: EdgeInsets.all(24),
                             child: Text(
-                              'No published activities for this age/subject yet.\nAsk an admin to create & publish some.',
+                              'No new activities right now.\nCompleted ones stay in your wallet points — keep learning!',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: AuthTheme.mutedBrown),
                             ),

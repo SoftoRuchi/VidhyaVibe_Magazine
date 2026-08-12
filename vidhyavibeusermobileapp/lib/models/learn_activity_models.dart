@@ -121,6 +121,9 @@ class LearnCompleteResult {
     required this.score,
     required this.pointsEarned,
     this.appreciation,
+    this.pointsCredited = 0,
+    this.walletSpent = 0,
+    this.walletBalance,
   });
 
   final String resultStatus;
@@ -129,6 +132,9 @@ class LearnCompleteResult {
   final num score;
   final int pointsEarned;
   final String? appreciation;
+  final int pointsCredited;
+  final int walletSpent;
+  final int? walletBalance;
 
   factory LearnCompleteResult.fromJson(Map<String, dynamic> json) {
     final details = json['details'];
@@ -139,6 +145,11 @@ class LearnCompleteResult {
       score: num.tryParse('${json['score']}') ?? 0,
       pointsEarned: int.tryParse('${json['pointsEarned']}') ?? 0,
       appreciation: details is Map ? details['appreciation']?.toString() : null,
+      pointsCredited: int.tryParse('${json['pointsCredited']}') ?? 0,
+      walletSpent: int.tryParse('${json['walletSpent']}') ?? 0,
+      walletBalance: json['walletBalance'] != null
+          ? int.tryParse('${json['walletBalance']}')
+          : null,
     );
   }
 }
