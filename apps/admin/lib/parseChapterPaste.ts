@@ -83,16 +83,20 @@ function parseFlashcard(text: string): { front: string; back: string } {
   return { front: lines[0] || '', back: '' };
 }
 
+/** A) 1. (B) [C] or a dash. Avoid [] character classes that webpack treats as empty. */
+const OPTION_PREFIX = /^(?:[A-Da-d][).:]|[0-9]+[).:]|[-•]|\([A-Da-d0-9]\)|\[[A-Da-d0-9]\])\s+/;
+const OPTION_MARK = /[*✓✔]\s*$/;
+
 function stripOption(line: string) {
   return line
-    .replace(/^(?:[[(]?[A-Da-d0-9][]).:]|\d+[]).:]|[-•])\s+/, '')
-    .replace(/\s*[*✓✔]\s*$/, '')
+    .replace(OPTION_PREFIX, '')
+    .replace(OPTION_MARK, '')
     .replace(/\s*\((correct|right|answer)\)\s*$/i, '')
     .trim();
 }
 
 function isOptionLine(line: string) {
-  return /^(?:[[(]?[A-Da-d][]).:]|\d+[]).:]|[-•])\s+\S/.test(line) || /[*✓✔]\s*$/.test(line);
+  return OPTION_PREFIX.test(line) || OPTION_MARK.test(line);
 }
 
 function parseQuiz(text: string, type: 'quick_check' | 'mcq'): TextbookBlock {
@@ -109,9 +113,13 @@ function parseQuiz(text: string, type: 'quick_check' | 'mcq'): TextbookBlock {
     const answer = line.match(/^(answer|correct|ans)\s*:\s*(.+)$/i);
     if (answer) {
       const value = answer[2].trim();
-      const letter = value.match(/^[[(]?([A-Da-d])[]).:]?$/);
-      if (letter) marked = letter[1].toUpperCase().charCodeAt(0) - 65;
-      else if (/^\d+$/.test(value)) marked = Number(value) - 1;
+      const token = value
+        .replace(/[().:]/g, '')
+        .replace(/\[/g, '')
+        .replace(/]/g, '')
+        .trim();
+      if (/^[A-Da-d]$/.test(token)) marked = token.toUpperCase().charCodeAt(0) - 65;
+      else if (/^\d+$/.test(token)) marked = Number(token) - 1;
       else named = value;
       continue;
     }
@@ -150,7 +158,12 @@ function parseQuiz(text: string, type: 'quick_check' | 'mcq'): TextbookBlock {
 
 function parseList(text: string): string[] {
   return nonempty(text.split('\n'))
-    .map((line) => line.replace(/^[-•*\d.)\]]+\s*/, '').trim())
+    .map((line) =>
+      line
+        .replace(/^[-•*]+(?:\s+|$)/, '')
+        .replace(/^[0-9]+[.)]\s*/, '')
+        .trim(),
+    )
     .filter(Boolean);
 }
 
