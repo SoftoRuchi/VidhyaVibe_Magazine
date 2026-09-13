@@ -38,3 +38,12 @@ export const forgotPasswordRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many password reset attempts, try again later' },
 });
+
+export const loginOtpRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.LOGIN_OTP_RATE_LIMIT_MAX || '5'),
+  skip: () => env.NODE_ENV === 'development',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many OTP attempts, try again later' },
+});

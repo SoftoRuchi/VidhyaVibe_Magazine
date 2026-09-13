@@ -106,7 +106,7 @@ router.get('/', async (req: AuthRequest, res) => {
     const difficulty = String(req.query.difficulty || '').trim();
     const userId = req.user?.id ?? null;
 
-    const where: string[] = [`a.status = 'PUBLISHED'`];
+    const where: string[] = [`a.status = 'PUBLISHED'`, `COALESCE(a.hidden_from_catalog, 0) = 0`];
     const params: any[] = [];
 
     if (ageBand) {

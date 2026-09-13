@@ -639,6 +639,7 @@ model LearnActivity {
   createdBy         BigInt?  @map("created_by")
   publishedAt       DateTime? @map("published_at")
   completionCount   Int      @default(0) @map("completion_count")
+  hiddenFromCatalog Boolean  @default(false) @map("hidden_from_catalog")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
@@ -722,5 +723,195 @@ model LearnWalletLedger {
   @@index([userId])
   @@index([activityId])
   @@map("learn_wallet_ledger")
+}
+
+model Course {
+  id          BigInt   @id @default(autoincrement())
+  name        String   @db.VarChar(160)
+  slug        String   @unique @db.VarChar(120)
+  university  String?  @db.VarChar(160)
+  description String?  @db.Text
+  coverKey    String?  @map("cover_key") @db.VarChar(1024)
+  sortOrder   Int      @default(0) @map("sort_order")
+  status      String   @default("DRAFT") @db.VarChar(32)
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  semesters CourseSemester[]
+
+  @@index([status])
+  @@index([sortOrder])
+  @@map("courses")
+}
+
+model CourseSemester {
+  id        BigInt @id @default(autoincrement())
+  courseId  BigInt @map("course_id")
+  number    Int
+  title     String @db.VarChar(160)
+  sortOrder Int    @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  course   Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  subjects CourseSubject[]
+
+  @@unique([courseId, number])
+  @@index([courseId])
+  @@map("course_semesters")
+}
+
+model CourseSubject {
+  id          BigInt    @id @default(autoincrement())
+  semesterId  BigInt    @map("semester_id")
+  name        String    @db.VarChar(255)
+  slug        String    @db.VarChar(160)
+  description String?   @db.Text
+  syllabusCode String?  @map("syllabus_code") @db.VarChar(80)
+  coverKey    String?   @map("cover_key") @db.VarChar(1024)
+  fileKey     String?   @map("file_key") @db.VarChar(1024)
+  sampleKey   String?   @map("sample_key") @db.VarChar(1024)
+  pages       Int?
+  sortOrder   Int       @default(0) @map("sort_order")
+  status      String    @default("DRAFT") @db.VarChar(32)
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  semester CourseSemester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  chapters CourseChapter[]
+  progress CourseProgress[]
+
+  @@unique([semesterId, slug])
+  @@index([semesterId])
+  @@index([status])
+  @@map("course_subjects")
+}
+
+model CourseChapter {
+  id          BigInt  @id @default(autoincrement())
+  subjectId   BigInt  @map("subject_id")
+  title       String  @db.VarChar(255)
+  slug        String  @db.VarChar(160)
+  sortOrder   Int     @default(0) @map("sort_order")
+  startPage   Int?    @map("start_page")
+  endPage     Int?    @map("end_page")
+  content     String? @db.MediumText
+  contentJson Json?   @map("content_json")
+  contentFormat String @default("html") @map("content_format") @db.VarChar(16)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  subject     CourseSubject            @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  activities  CourseChapterActivity[]
+  bookmarks   CourseBookmark[]
+  notes       CourseNote[]
+  highlights  CourseHighlight[]
+  flashcards  CourseFlashcard[]
+
+  @@unique([subjectId, slug])
+  @@index([subjectId])
+  @@map("course_chapters")
+}
+
+model CourseChapterActivity {
+  id          BigInt  @id @default(autoincrement())
+  chapterId   BigInt  @map("chapter_id")
+  activityId  BigInt  @map("activity_id")
+  pageNumber  Int?    @map("page_number")
+  placement   String  @default("PRACTICE") @db.VarChar(32)
+  sortOrder   Int     @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  chapter CourseChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([chapterId, activityId])
+  @@index([chapterId])
+  @@index([activityId])
+  @@map("course_chapter_activities")
+}
+
+model CourseProgress {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @map("user_id")
+  readerId    BigInt?  @map("reader_id")
+  subjectId   BigInt   @map("subject_id")
+  chapterId   BigInt?  @map("chapter_id")
+  currentPage Int?     @map("current_page")
+  percent     Float?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  subject CourseSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subjectId])
+  @@index([userId])
+  @@index([subjectId])
+  @@map("course_progress")
+}
+
+model CourseBookmark {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  chapterId  BigInt   @map("chapter_id")
+  pageNumber Int      @map("page_number")
+  markType   String   @default("important") @map("mark_type") @db.VarChar(16)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  chapter CourseChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chapterId, pageNumber])
+  @@index([chapterId])
+  @@map("course_bookmarks")
+}
+
+model CourseNote {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  chapterId  BigInt   @map("chapter_id")
+  pageNumber Int?     @map("page_number")
+  content    String   @db.Text
+  quote      String?  @db.VarChar(1000)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  chapter CourseChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@index([userId, chapterId])
+  @@index([chapterId])
+  @@map("course_notes")
+}
+
+model CourseHighlight {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  chapterId  BigInt   @map("chapter_id")
+  pageNumber Int?     @map("page_number")
+  text       String   @db.VarChar(1000)
+  color      String?  @db.VarChar(32)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  chapter CourseChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@index([userId, chapterId])
+  @@index([chapterId])
+  @@map("course_highlights")
+}
+
+model CourseFlashcard {
+  id         BigInt   @id @default(autoincrement())
+  chapterId  BigInt   @map("chapter_id")
+  userId     BigInt?  @map("user_id")
+  front      String   @db.VarChar(500)
+  back       String   @db.VarChar(2000)
+  pageNumber Int?     @map("page_number")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  chapter CourseChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@index([chapterId])
+  @@index([userId])
+  @@map("course_flashcards")
 }
 

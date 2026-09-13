@@ -93,4 +93,24 @@ class ApiConfig {
       url('/learn/activities/$id/start');
   static String learnActivityCompleteUrl(Object id) =>
       url('/learn/activities/$id/complete');
+
+  // University courses
+  static String get coursesUrl => url('/courses');
+  static String courseUrl(String slug) => url('/courses/$slug');
+  static String courseSemesterUrl(String slug, int number) =>
+      url('/courses/$slug/semesters/$number');
+  static String courseSubjectUrl(Object id) => url('/courses/subjects/$id');
+  static String courseSubjectPdfUrl(Object id) => url('/courses/subjects/$id/pdf');
+  static String courseChapterUrl(Object id) => url('/courses/chapters/$id');
+  static String get courseProgressUrl => url('/courses/progress');
+  static String get courseContinueUrl => url('/courses/continue');
+  static String courseChapterStudyUrl(Object id) => url('/courses/chapters/$id/study');
+  static String courseChapterBookmarksUrl(Object id) => url('/courses/chapters/$id/bookmarks');
+  static String courseBookmarkUrl(Object id) => url('/courses/bookmarks/$id');
+  static String courseChapterNotesUrl(Object id) => url('/courses/chapters/$id/notes');
+  static String courseNoteUrl(Object id) => url('/courses/notes/$id');
+  static String courseChapterHighlightsUrl(Object id) => url('/courses/chapters/$id/highlights');
+  static String courseHighlightUrl(Object id) => url('/courses/highlights/$id');
+  static String courseChapterFlashcardsUrl(Object id) => url('/courses/chapters/$id/flashcards');
+  static String courseFlashcardUrl(Object id) => url('/courses/flashcards/$id');
 }

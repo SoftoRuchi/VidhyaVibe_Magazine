@@ -5,13 +5,21 @@ import Image from 'next/image';
 import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
 import AgeGroupSection from '../components/AgeGroupSection';
+import { CourseContinueCard, CourseHomeCard } from '../components/CourseBrowse';
 import childImg from '../components/images/child.png';
 import MagazineCard from '../components/MagazineCard';
 import PostCard, { type SitePostItem } from '../components/PostCard';
 import type { AgeGroup } from '../lib/ageGroups';
 import api from '../lib/api';
 import { assetUrl } from '../lib/apiBase';
+import {
+  fetchCourseContinue,
+  fetchCourses,
+  type CourseContinue,
+  type CourseSummary,
+} from '../lib/coursesApi';
 import { cachedGet } from '../lib/requestCache';
+import { isChildAudience } from '../lib/viewingContext';
 
 const PostMediaCarousel = dynamic(() => import('../components/PostMediaCarousel'), {
   loading: () => <div style={{ textAlign: 'center', padding: '3rem 0' }}>Loading…</div>,
@@ -57,15 +65,20 @@ export default function Page() {
   >([]);
   const [latestPosts, setLatestPosts] = useState<SitePost[]>([]);
   const [ageGroups, setAgeGroups] = useState<AgeGroup[]>([]);
+  const [courses, setCourses] = useState<CourseSummary[]>([]);
+  const [continueReading, setContinueReading] = useState<CourseContinue | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  const showCourses = !isChildAudience();
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadHomeData() {
       try {
-        const [postsRes, magazinesRes, ageGroupsRes] = await Promise.all([
+        const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+        const hideCourses = isChildAudience();
+        const [postsRes, magazinesRes, ageGroupsRes, coursesRes, continueRes] = await Promise.all([
           cachedGet<{ carouselSlides?: unknown[]; posts?: SitePost[] }>(
             api,
             '/api/posts',
@@ -74,6 +87,10 @@ export default function Page() {
           ),
           cachedGet<any[]>(api, '/api/magazines', undefined, 120_000),
           cachedGet<AgeGroup[]>(api, '/api/age-groups', undefined, 120_000),
+          hideCourses
+            ? Promise.resolve([] as CourseSummary[])
+            : fetchCourses().catch(() => [] as CourseSummary[]),
+          token && !hideCourses ? fetchCourseContinue() : Promise.resolve(null),
         ]);
 
         if (cancelled) return;
@@ -85,6 +102,8 @@ export default function Page() {
         );
         setLatestPosts(postsRes.data?.posts ?? []);
         setAgeGroups(ageGroupsRes.data || []);
+        setCourses(coursesRes || []);
+        setContinueReading(continueRes);
 
         const mapped = (magazinesRes.data || []).map((m: any) => ({
           ...m,
@@ -98,6 +117,8 @@ export default function Page() {
           setLatestPosts([]);
           setAgeGroups([]);
           setRecentMagazines([]);
+          setCourses([]);
+          setContinueReading(null);
         }
       } finally {
         if (!cancelled) {
@@ -230,6 +251,11 @@ export default function Page() {
                   <a href="/magazines" className="vv-home-cta vv-home-cta--browse">
                     Browse Magazines
                   </a>
+                  {showCourses ? (
+                    <a href="/courses" className="vv-home-cta vv-home-cta--browse">
+                      Courses
+                    </a>
+                  ) : null}
                   <a href="/sales" className="vv-home-cta vv-home-cta--deals">
                     View Deals
                   </a>
@@ -421,6 +447,34 @@ export default function Page() {
           </div>
         </div>
       </section>
+
+      {showCourses ? (
+        <section style={{ padding: '0 0 1.25rem' }}>
+          <div className="container">
+            <div className="course-home-stack">
+              {continueReading?.href ? (
+                <CourseContinueCard
+                  href={continueReading.href}
+                  chapterTitle={continueReading.chapterTitle}
+                  courseName={continueReading.courseName}
+                  subjectName={continueReading.subjectName}
+                  percent={continueReading.percent}
+                />
+              ) : null}
+              <CourseHomeCard
+                subtitle={
+                  courses.length
+                    ? `${courses
+                        .slice(0, 2)
+                        .map((c) => c.name)
+                        .join(', ')}${courses.length > 2 ? ' and more' : ''}`
+                    : 'BCA, BBA and university textbooks'
+                }
+              />
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {/* FEATURED MAGAZINES */}
       <section style={{ padding: '1.5rem 0 1.25rem' }}>

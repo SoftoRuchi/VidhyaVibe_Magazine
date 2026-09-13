@@ -26,6 +26,18 @@ class ApiClient {
     return http.get(Uri.parse(url), headers: await _headers(auth: auth));
   }
 
+  /// Binary GET (images/PDFs). Do not send JSON Content-Type.
+  static Future<http.Response> getBytes(String url, {bool auth = true}) async {
+    final headers = <String, String>{'Accept': '*/*'};
+    if (auth) {
+      final token = await AuthStorage.getAccessToken();
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+    }
+    return http.get(Uri.parse(url), headers: headers);
+  }
+
   static Future<http.Response> post(
     String url, {
     Map<String, dynamic>? body,

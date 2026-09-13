@@ -37,9 +37,11 @@ const Navbar = () => {
     window.location.href = '/login';
   };
 
+  const childMode = isChildAudience();
   const navLinks = [
     { href: '/', label: 'Home' },
     { href: '/magazines', label: 'Browse' },
+    ...(!childMode ? [{ href: '/courses', label: 'Courses' }] : []),
     { href: '/posts', label: 'Posts' },
     // { href: '/sales', label: 'Sales' },
     { href: '/dashboard', label: 'My Library', requiresAuth: true },

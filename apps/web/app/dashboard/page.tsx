@@ -4,12 +4,19 @@ import { Empty, Spin } from 'antd';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
+import { CourseContinueCard, CourseHomeCard } from '../../components/CourseBrowse';
 import libraryImg from '../../components/images/library.png';
 import MagazineCard from '../../components/MagazineCard';
 import PostCard, { type SitePostItem } from '../../components/PostCard';
 import api from '../../lib/api';
 import { assetUrl } from '../../lib/apiBase';
 import { useAuth } from '../../lib/authContext';
+import {
+  fetchCourseContinue,
+  fetchCourses,
+  type CourseContinue,
+  type CourseSummary,
+} from '../../lib/coursesApi';
 import { cachedGet } from '../../lib/requestCache';
 import { getSelectedReaderId, isChildAudience } from '../../lib/viewingContext';
 
@@ -31,8 +38,11 @@ export default function DashboardPage() {
   const { loggedIn, loading: authLoading } = useAuth();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [posts, setPosts] = useState<SitePostItem[]>([]);
+  const [continueReading, setContinueReading] = useState<CourseContinue | null>(null);
+  const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  const showCourses = !isChildAudience();
 
   useEffect(() => {
     if (authLoading) return;
@@ -58,16 +68,22 @@ export default function DashboardPage() {
       try {
         const readerId = isChildAudience() ? getSelectedReaderId() : null;
         const suffix = readerId ? `?readerId=${readerId}` : '';
-        const [postsRes, libraryRes] = await Promise.all([
+        const [postsRes, libraryRes, continueRes, coursesRes] = await Promise.all([
           cachedGet<{ posts?: SitePostItem[] }>(api, '/api/posts', undefined, 60_000),
           api.get(`/api/library${suffix}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
+          isChildAudience() ? Promise.resolve(null) : fetchCourseContinue(),
+          isChildAudience()
+            ? Promise.resolve([] as CourseSummary[])
+            : fetchCourses().catch(() => [] as CourseSummary[]),
         ]);
         if (cancelled) return;
 
         setPosts(postsRes.data?.posts ?? []);
         setItems((libraryRes.data as { items?: LibraryItem[] })?.items || []);
+        setContinueReading(continueRes);
+        setCourses(coursesRes || []);
       } catch (err) {
         if (!cancelled) {
           console.error('Failed to fetch dashboard data:', err);
@@ -142,6 +158,32 @@ export default function DashboardPage() {
           </div>
           <div />
         </div>
+
+        {showCourses ? (
+          <section style={{ marginBottom: '1.5rem' }}>
+            <div className="course-home-stack">
+              {continueReading?.href ? (
+                <CourseContinueCard
+                  href={continueReading.href}
+                  chapterTitle={continueReading.chapterTitle}
+                  courseName={continueReading.courseName}
+                  subjectName={continueReading.subjectName}
+                  percent={continueReading.percent}
+                />
+              ) : null}
+              <CourseHomeCard
+                subtitle={
+                  courses.length
+                    ? `${courses
+                        .slice(0, 2)
+                        .map((c) => c.name)
+                        .join(', ')}${courses.length > 2 ? ' and more' : ''}`
+                    : 'BCA, BBA and university textbooks'
+                }
+              />
+            </div>
+          </section>
+        ) : null}
 
         {!loadingPosts && posts.length > 0 && (
           <section style={{ marginBottom: '1.5rem' }}>

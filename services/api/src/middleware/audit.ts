@@ -4,7 +4,11 @@ import { query } from '../db';
 function shouldSkipAudit(req: Request): boolean {
   const path = (req.originalUrl || req.url || '').split('?')[0];
   if (path === '/' || path === '/api/health') return true;
-  if (req.method === 'GET' && path.startsWith('/api/assets/serve')) return true;
+  if (
+    req.method === 'GET' &&
+    (path.startsWith('/api/assets/serve') || path.startsWith('/api/assets/file/'))
+  )
+    return true;
   if (req.method === 'GET' && /^\/api\/editions\/\d+\/(pages|sample|pdf)/.test(path)) return true;
   if (req.method === 'GET' && path.startsWith('/api/magazines')) return true;
   return false;

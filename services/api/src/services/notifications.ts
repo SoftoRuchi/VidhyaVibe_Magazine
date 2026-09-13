@@ -366,6 +366,18 @@ export async function sendPasswordResetOtp(params: {
   return sendEmail(params.email, 'VidhyaVibe — password reset OTP', text);
 }
 
+export async function sendLoginOtp(params: { name?: string | null; email: string; otp: string }) {
+  const firstName = (params.name || '').trim().split(/\s+/)[0] || 'there';
+  const text =
+    `Hi ${firstName},\n\n` +
+    `Use this code to log in to your VidhyaVibe account. Your password is unchanged.\n\n` +
+    `Your OTP code: ${params.otp}\n` +
+    `This code expires in 15 minutes.\n\n` +
+    `If you did not request this, you can ignore this email.\n\n` +
+    `— VidhyaVibe`;
+  return sendEmail(params.email, 'VidhyaVibe — login OTP', text);
+}
+
 export async function sendPurchaseConfirmation(params: {
   name: string;
   email: string;

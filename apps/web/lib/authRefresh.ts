@@ -63,8 +63,13 @@ export function expireSession(options?: { redirectToLogin?: boolean }) {
     '/signup',
     '/forgot-password',
   ];
+  const isCourseCatalogue =
+    path === '/courses' ||
+    /^\/courses\/[^/]+$/.test(path) ||
+    /^\/courses\/[^/]+\/sem-\d+$/.test(path);
   const isPublic =
     path === '/' ||
+    isCourseCatalogue ||
     publicPrefixes.some((p) => p !== '/' && (path === p || path.startsWith(`${p}/`)));
   if (isPublic && options?.redirectToLogin !== true) return;
 

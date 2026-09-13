@@ -6,6 +6,54 @@ import { requireAuth } from '../middleware/auth';
 const router = Router();
 router.use(requireAuth);
 
+/** GET /api/interactions/bookmarks?editionId=&readerId= */
+router.get('/bookmarks', async (req: AuthRequest, res) => {
+  const userId = Number(req.user?.id);
+  const editionId = req.query.editionId != null ? Number(req.query.editionId) : null;
+  const readerId = req.query.readerId != null ? Number(req.query.readerId) : null;
+  if (!userId) return res.status(401).json({ error: 'unauthenticated' });
+  if (editionId != null && !Number.isFinite(editionId)) {
+    return res.status(400).json({ error: 'invalid_editionId' });
+  }
+
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    const where = ['r.userId = ?'];
+    const params: any[] = [userId];
+    if (readerId) {
+      where.push('b.readerId = ?');
+      params.push(readerId);
+    }
+    if (editionId) {
+      where.push('b.editionId = ?');
+      params.push(editionId);
+    }
+    const [rows]: any = await conn.query(
+      `SELECT b.id, b.readerId, b.editionId, b.pageNumber, b.createdAt
+       FROM bookmarks b
+       JOIN readers r ON r.id = b.readerId
+       WHERE ${where.join(' AND ')}
+       ORDER BY b.createdAt DESC, b.id DESC`,
+      params,
+    );
+    res.json({
+      items: (rows || []).map((r: any) => ({
+        id: Number(r.id),
+        readerId: Number(r.readerId),
+        editionId: Number(r.editionId),
+        pageNumber: r.pageNumber != null ? Number(r.pageNumber) : null,
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).json({ error: 'list_bookmarks_failed' });
+  } finally {
+    conn.release();
+  }
+});
+
 // Bookmarks
 router.post('/bookmarks', async (req: AuthRequest, res) => {
   const userId = Number(req.user?.id);
@@ -22,9 +70,19 @@ router.post('/bookmarks', async (req: AuthRequest, res) => {
       [readerId, userId],
     );
     if (!rRows[0]) return res.status(403).json({ error: 'forbidden' });
+    const page = pageNumber != null ? Number(pageNumber) : null;
+    if (page != null && Number.isFinite(page)) {
+      const [existing]: any = await conn.query(
+        'SELECT id FROM bookmarks WHERE readerId = ? AND editionId = ? AND pageNumber = ? LIMIT 1',
+        [readerId, editionId, page],
+      );
+      if (existing[0]) {
+        return res.json({ id: Number(existing[0].id), existing: true });
+      }
+    }
     const [ins]: any = await conn.query(
       'INSERT INTO bookmarks (readerId, editionId, pageNumber, createdAt) VALUES (?, ?, ?, NOW())',
-      [readerId, editionId, pageNumber || null],
+      [readerId, editionId, page],
     );
     res.status(201).json({ id: ins.insertId });
   } catch (e: any) {

@@ -15,10 +15,16 @@ import { getPool, query } from '../db';
 import {
   forgotPasswordRateLimiter,
   guestCheckoutRateLimiter,
+  loginOtpRateLimiter,
   loginRateLimiter,
 } from '../middleware/rateLimiter';
 import { upsertGuestBuyer } from '../services/guestBuyer';
-import { sendCheckoutAcknowledgement, sendPasswordResetOtp } from '../services/notifications';
+import { createLoginOtp, findUserByLoginIdentifier, verifyLoginOtp } from '../services/loginOtp';
+import {
+  sendCheckoutAcknowledgement,
+  sendLoginOtp,
+  sendPasswordResetOtp,
+} from '../services/notifications';
 import {
   changePassword,
   createPasswordResetOtp,
@@ -85,6 +91,49 @@ async function resolveSessionFromRefreshCookie(
   } catch {
     return null;
   }
+}
+
+async function issueAuthTokens(
+  req: any,
+  res: any,
+  user: { id: number; email: string; isAdmin?: boolean | number },
+) {
+  const deviceName = typeof req.body?.deviceName === 'string' ? req.body.deviceName : null;
+  const ua = req.headers['user-agent'];
+  const userAgent = ua ? String(ua).substring(0, 1000) : null;
+  const snake = await isSessionsSnakeCase();
+  const isAdmin = rowIsAdmin(user);
+  const role = isAdmin ? 'admin' : 'user';
+  const access = signAccessToken({ sub: user.id, role });
+  const { token: refreshToken, jti } = signRefreshToken({ sub: user.id });
+
+  if (snake) {
+    await query(
+      'INSERT INTO sessions (user_id, device_name, ip_address, user_agent, refresh_jti, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
+      [user.id, deviceName || null, req.ip || null, userAgent, jti],
+    );
+  } else {
+    await query(
+      'INSERT INTO sessions (userId, deviceName, ipAddress, userAgent, refreshJti, createdAt) VALUES (?, ?, ?, ?, ?, NOW(3))',
+      [user.id, deviceName || null, req.ip || null, userAgent, jti],
+    );
+  }
+
+  res.cookie('refresh_token', refreshToken, {
+    httpOnly: true,
+    secure: env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: getRefreshCookieMaxAgeMs(),
+  });
+
+  res.json({
+    access_token: access,
+    refresh_token: refreshToken,
+    token_type: 'bearer',
+    expires_in: getAccessExpiresSeconds(),
+    user: { id: user.id, email: user.email, isAdmin },
+  });
 }
 
 router.use(cookieParser());
@@ -302,11 +351,15 @@ router.post('/guest-checkout', guestCheckoutRateLimiter, async (req, res) => {
 
 // Login
 router.post('/login', loginRateLimiter, async (req, res) => {
-  const { email, password, deviceName } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+  const identifier =
+    (typeof req.body?.email === 'string' && req.body.email.trim()) ||
+    (typeof req.body?.identifier === 'string' && req.body.identifier.trim()) ||
+    '';
+  const { password } = req.body;
+  if (!identifier || !password)
+    return res.status(400).json({ error: 'email and password required' });
   try {
-    const [rows]: any = await query('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
-    const user = rows[0];
+    const user = await findUserByLoginIdentifier(identifier);
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
 
     const [authRows]: any = await query(
@@ -320,48 +373,72 @@ router.post('/login', loginRateLimiter, async (req, res) => {
     const ok = await comparePassword(password, auth.password_hash);
     if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
 
-    const ua = req.headers['user-agent'];
-    const userAgent = ua ? String(ua).substring(0, 1000) : null;
-    const snake = await isSessionsSnakeCase();
-    const isAdmin = rowIsAdmin(user);
-    const role = isAdmin ? 'admin' : 'user';
-    const access = signAccessToken({ sub: user.id, role });
-    const { token: refreshToken, jti } = signRefreshToken({ sub: user.id });
-
-    if (snake) {
-      await query(
-        'INSERT INTO sessions (user_id, device_name, ip_address, user_agent, refresh_jti, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-        [user.id, deviceName || null, req.ip || null, userAgent, jti],
-      );
-    } else {
-      await query(
-        'INSERT INTO sessions (userId, deviceName, ipAddress, userAgent, refreshJti, createdAt) VALUES (?, ?, ?, ?, ?, NOW(3))',
-        [user.id, deviceName || null, req.ip || null, userAgent, jti],
-      );
-    }
-
-    // set refresh token cookie (httpOnly)
-    res.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: getRefreshCookieMaxAgeMs(),
-    });
-
-    res.json({
-      access_token: access,
-      refresh_token: refreshToken,
-      token_type: 'bearer',
-      expires_in: getAccessExpiresSeconds(),
-      user: { id: user.id, email: user.email, isAdmin },
-    });
+    await issueAuthTokens(req, res, user);
   } catch (e: any) {
     console.error('Login error:', e);
     res.status(500).json({
       error: 'login_failed',
       details: e?.message || String(e),
     });
+  }
+});
+
+/** Send a one-time login OTP. Does not change the account password. */
+router.post('/login/otp/send', loginOtpRateLimiter, async (req, res) => {
+  const identifier =
+    (typeof req.body?.identifier === 'string' && req.body.identifier.trim()) ||
+    (typeof req.body?.email === 'string' && req.body.email.trim()) ||
+    (typeof req.body?.username === 'string' && req.body.username.trim()) ||
+    '';
+  if (!identifier) {
+    return res.status(400).json({
+      error: 'identifier_required',
+      message: 'Enter your email or username.',
+    });
+  }
+
+  try {
+    const { otp, user } = await createLoginOtp(identifier);
+    if (otp && user?.email) {
+      void sendLoginOtp({ email: user.email, otp, name: user.name }).catch((err) => {
+        console.error('[login-otp] email failed', err);
+      });
+    }
+    res.json({
+      ok: true,
+      message: 'If an account exists, a 6-digit OTP has been sent to the registered email.',
+    });
+  } catch (e: any) {
+    console.error('[login-otp] send', e);
+    res.status(500).json({ error: 'otp_send_failed', message: e?.message });
+  }
+});
+
+/** Verify login OTP and create a session. Password is unchanged. */
+router.post('/login/otp/verify', loginOtpRateLimiter, async (req, res) => {
+  const identifier =
+    (typeof req.body?.identifier === 'string' && req.body.identifier.trim()) ||
+    (typeof req.body?.email === 'string' && req.body.email.trim()) ||
+    (typeof req.body?.username === 'string' && req.body.username.trim()) ||
+    '';
+  const otp = typeof req.body?.otp === 'string' ? req.body.otp.trim() : String(req.body?.otp || '');
+  if (!identifier) {
+    return res.status(400).json({
+      error: 'identifier_required',
+      message: 'Enter your email or username.',
+    });
+  }
+
+  try {
+    const user = await verifyLoginOtp({ identifier, otp });
+    await issueAuthTokens(req, res, user);
+  } catch (e: any) {
+    const code = e?.code || 'otp_verify_failed';
+    if (code === 'invalid_otp' || code === 'invalid_or_expired_otp') {
+      return res.status(401).json({ error: code, message: e.message });
+    }
+    console.error('[login-otp] verify', e);
+    res.status(500).json({ error: 'otp_verify_failed', message: e?.message });
   }
 });
 

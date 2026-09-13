@@ -4,6 +4,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ArrowLeftOutlined,
+  BookOutlined,
   DashboardOutlined,
   UserOutlined,
   ReadOutlined,
@@ -48,6 +49,7 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
     if (!pathname) return 'dashboard';
     if (pathname.includes('/users')) return 'users';
     if (pathname.includes('/magazines')) return 'magazines';
+    if (pathname.includes('/courses')) return 'courses';
     if (pathname.includes('/age-groups')) return 'age-groups';
     if (pathname.includes('/plans')) return 'plans';
     if (pathname.includes('/subscriptions')) return 'subscriptions';
@@ -71,6 +73,11 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       key: 'magazines',
       icon: <ReadOutlined />,
       label: <Link href="/admin/magazines">Magazines</Link>,
+    },
+    {
+      key: 'courses',
+      icon: <BookOutlined />,
+      label: <Link href="/admin/courses">Courses</Link>,
     },
     {
       key: 'age-groups',
