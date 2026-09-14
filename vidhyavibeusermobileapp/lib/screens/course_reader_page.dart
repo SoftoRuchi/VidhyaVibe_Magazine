@@ -392,6 +392,8 @@ class _CourseReaderPageState extends State<CourseReaderPage> {
                         runningHeader: chapter.courseName,
                         chapterTitle: chapter.title,
                         startPage: chapter.startPage ?? 1,
+                        frontCoverUrl: chapter.frontCoverUrl,
+                        backCoverUrl: chapter.backCoverUrl,
                         highlights: [
                           for (final h in _study.highlights)
                             CourseHighlightMark(text: h.text, color: h.color, pageNumber: h.pageNumber),

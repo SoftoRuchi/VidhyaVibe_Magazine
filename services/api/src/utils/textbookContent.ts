@@ -8,6 +8,7 @@ export type TextbookBlockType =
   | 'list'
   | 'image'
   | 'split'
+  | 'toc'
   | 'callout'
   | 'important'
   | 'definition'
@@ -19,7 +20,106 @@ export type TextbookBlockType =
   | 'quick_check'
   | 'mcq'
   | 'formula'
+  | 'table'
   | 'unknown';
+
+const CALLOUT_TYPES: TextbookBlockType[] = [
+  'callout',
+  'important',
+  'definition',
+  'example',
+  'common_mistake',
+  'summary',
+];
+
+export function isCalloutType(type: string): type is TextbookBlockType {
+  return CALLOUT_TYPES.includes(type as TextbookBlockType);
+}
+
+export function calloutTitle(type: TextbookBlockType) {
+  if (type === 'important') return 'Important';
+  if (type === 'definition') return 'Definition';
+  if (type === 'example') return 'Example';
+  if (type === 'common_mistake') return 'Common mistake';
+  if (type === 'summary') return 'Remember';
+  return 'Note';
+}
+
+export function headingTitles(doc: TextbookDoc) {
+  return doc.chapter.blocks
+    .filter((block) => block.type === 'heading')
+    .map((block) => decodeText(block.text || ''))
+    .filter(Boolean);
+}
+
+export function tocItemsOf(block: TextbookBlock, doc: TextbookDoc) {
+  const items = (block.items || []).map((item) => String(item).trim()).filter(Boolean);
+  return items.length ? items : headingTitles(doc);
+}
+
+export function parseTableText(text: string): string[][] {
+  return String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !/^(caption|title)\s*:/i.test(line) && !/^\|?[\s:|-]+\|?$/.test(line))
+    .map((line) => {
+      const cells = line.split(/\t|\s*\|\s*/).map((cell) => cell.trim());
+      if (cells[0] === '') cells.shift();
+      if (cells.length && cells[cells.length - 1] === '') cells.pop();
+      return cells;
+    })
+    .filter((row) => row.some((cell) => cell));
+}
+
+export function tableRowsOf(block: TextbookBlock): string[][] {
+  if (Array.isArray(block.rows) && block.rows.length) {
+    return block.rows.map((row) => (row || []).map((cell) => String(cell ?? '')));
+  }
+  if (block.items?.length) return parseTableText(block.items.join('\n'));
+  if (block.text) return parseTableText(block.text);
+  return [];
+}
+
+export function tableFromHtml(raw: string): TextbookBlock | null {
+  const inner = String(raw || '');
+  const rows: string[][] = [];
+  for (const tr of inner.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const cells = Array.from(tr[1].matchAll(/<(th|td)\b[^>]*>([\s\S]*?)<\/\1>/gi)).map((cell) =>
+      decodeText(cell[2] || ''),
+    );
+    if (cells.length) rows.push(cells);
+  }
+  if (!rows.length) return null;
+  const caption =
+    decodeText(inner.match(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/i)?.[1] || '') ||
+    decodeText(inner.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i)?.[1] || '');
+  return {
+    id: newBlockId('table'),
+    type: 'table',
+    rows,
+    caption: caption || undefined,
+  };
+}
+
+function tableHtml(block: TextbookBlock) {
+  const rows = tableRowsOf(block);
+  if (!rows.length) return '';
+  const width = Math.max(...rows.map((row) => row.length), 1);
+  const padded = rows.map((row) => {
+    const next = [...row];
+    while (next.length < width) next.push('');
+    return next.slice(0, width);
+  });
+  const [head, ...body] = padded;
+  const headRow = `<tr>${head.map((cell) => `<th>${escapeText(cell)}</th>`).join('')}</tr>`;
+  const bodyRows = body
+    .map((row) => `<tr>${row.map((cell) => `<td>${escapeText(cell)}</td>`).join('')}</tr>`)
+    .join('');
+  const table = `<table class="course-table"><thead>${headRow}</thead>${bodyRows ? `<tbody>${bodyRows}</tbody>` : ''}</table>`;
+  return block.caption
+    ? `<figure class="course-table-wrap">${table}<figcaption>${escapeText(block.caption)}</figcaption></figure>`
+    : `<div class="course-table-wrap">${table}</div>`;
+}
 
 export type TextbookBlock = {
   id: string;
@@ -43,6 +143,7 @@ export type TextbookBlock = {
   explanation?: string;
   content?: string;
   original_type?: string;
+  rows?: string[][];
 };
 
 export type TextbookDoc = {
@@ -181,6 +282,8 @@ export function htmlToJson(html: string, meta: { id: string; title: string }): T
       '<figure\\b[^>]*>[\\s\\S]*?<\\/figure>',
       '<details\\b[^>]*>[\\s\\S]*?<\\/details>',
       '<aside\\b[^>]*>[\\s\\S]*?<\\/aside>',
+      '<nav\\b[^>]*>[\\s\\S]*?<\\/nav>',
+      '<table\\b[^>]*>[\\s\\S]*?<\\/table>',
       '<h1[^>]*>[\\s\\S]*?<\\/h1>',
       '<h2[^>]*>[\\s\\S]*?<\\/h2>',
       '<h3[^>]*>[\\s\\S]*?<\\/h3>',
@@ -250,12 +353,40 @@ export function htmlToJson(html: string, meta: { id: string; title: string }): T
       });
       continue;
     }
-    if (/course-callout/i.test(cls)) {
-      const text = decodeText(inner);
-      if (text) doc.chapter.blocks.push({ id: newBlockId('callout'), type: 'callout', text });
+    if (/course-chapter-toc/i.test(cls) || tag === 'nav') {
+      const items = Array.from(inner.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi))
+        .map((item) => decodeText(item[1] || ''))
+        .filter(Boolean);
+      const title = decodeText(inner.match(/course-kicker[^>]*>([\s\S]*?)<\//i)?.[1] || '');
+      if (items.length) {
+        doc.chapter.blocks.push({
+          id: newBlockId('toc'),
+          type: 'toc',
+          title: title || undefined,
+          items,
+        });
+      }
       continue;
     }
-    if (tag === 'img' || tag === 'figure') {
+    if (/course-callout/i.test(cls)) {
+      const kind = attr(raw, 'data-kind');
+      const type = isCalloutType(kind) ? kind : 'callout';
+      const body = inner.replace(/<p[^>]*course-kicker[^>]*>[\s\S]*?<\/p>/i, ' ');
+      const text = decodeText(body);
+      if (text) doc.chapter.blocks.push({ id: newBlockId(type), type, text });
+      continue;
+    }
+    if (/course-formula/i.test(cls)) {
+      const text = decodeText(inner);
+      if (text) doc.chapter.blocks.push({ id: newBlockId('formula'), type: 'formula', text });
+      continue;
+    }
+    if (tag === 'img' || tag === 'figure' || tag === 'table' || /course-table/i.test(cls)) {
+      if (tag === 'table' || /<table\b/i.test(raw) || /course-table/i.test(cls)) {
+        const table = tableFromHtml(raw);
+        if (table) doc.chapter.blocks.push(table);
+        continue;
+      }
       const imgTag = tag === 'img' ? raw : inner.match(/<img\b[^>]*>/i)?.[0] || '';
       const src = attr(imgTag, 'src');
       const caption =
@@ -289,12 +420,16 @@ export function htmlToJson(html: string, meta: { id: string; title: string }): T
         .map((item) => decodeText(item[1] || ''))
         .filter(Boolean);
       if (items.length) {
-        doc.chapter.blocks.push({
-          id: newBlockId('list'),
-          type: 'list',
-          ordered: tag === 'ol',
-          items,
-        });
+        if (/course-chapter-toc/i.test(cls)) {
+          doc.chapter.blocks.push({ id: newBlockId('toc'), type: 'toc', items });
+        } else {
+          doc.chapter.blocks.push({
+            id: newBlockId('list'),
+            type: 'list',
+            ordered: tag === 'ol',
+            items,
+          });
+        }
       }
       continue;
     }
@@ -310,6 +445,11 @@ export function htmlToJson(html: string, meta: { id: string; title: string }): T
     }
     if (tag === 'p') {
       if (/course-kicker/i.test(cls)) continue;
+      if (/course-formula/i.test(cls)) {
+        const text = decodeText(inner);
+        if (text) doc.chapter.blocks.push({ id: newBlockId('formula'), type: 'formula', text });
+        continue;
+      }
       const text = decodeText(inner);
       if (text) doc.chapter.blocks.push({ id: newBlockId('paragraph'), type: 'paragraph', text });
     }
@@ -332,6 +472,14 @@ export function jsonToHtml(doc: TextbookDoc) {
           const items = (block.items || []).map((item) => `<li>${escapeText(item)}</li>`).join('');
           return `<${tag}>${items}</${tag}>`;
         }
+        case 'toc': {
+          const items = tocItemsOf(block, doc);
+          if (!items.length) return '';
+          const lis = items.map((item) => `<li>${escapeText(item)}</li>`).join('');
+          return `<nav class="course-chapter-toc"><p class="course-kicker">${escapeText(block.title || 'Contents')}</p><ol>${lis}</ol></nav>`;
+        }
+        case 'table':
+          return tableHtml(block);
         case 'image': {
           const src = escapeText(block.src || '');
           const alt = escapeText(block.alt_text || block.caption || '');
@@ -353,7 +501,7 @@ export function jsonToHtml(doc: TextbookDoc) {
         case 'example':
         case 'common_mistake':
         case 'summary':
-          return `<div class="course-callout" data-kind="${block.type}"><p>${escapeText(block.text || '')}</p></div>`;
+          return `<div class="course-callout" data-kind="${block.type}"><p class="course-kicker">${escapeText(calloutTitle(block.type))}</p><p>${escapeText(block.text || '')}</p></div>`;
         case 'note':
           return `<details class="course-explain"><summary>In simple words</summary><p>${escapeText(block.text || '')}</p></details>`;
         case 'flashcard':

@@ -1,9 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'auth_widgets.dart';
 import 'course_network_image.dart';
 
-enum CourseHtmlKind { h1, h2, h3, p, li, callout, explain, flashcard, quickCheck, image, split }
+enum CourseHtmlKind { h1, h2, h3, p, li, callout, explain, flashcard, quickCheck, image, split, toc, formula, table }
+
+bool _isNightInk(Color? ink) => ink != null && ink.computeLuminance() > 0.45;
 
 class CourseHtmlBlock {
   const CourseHtmlBlock(
@@ -102,6 +106,25 @@ TextStyle courseHtmlStyle(CourseHtmlKind kind, {Color? ink, Color? muted}) {
         height: 1.45,
         color: body,
       ),
+    CourseHtmlKind.toc => TextStyle(
+        fontFamily: 'serif',
+        fontSize: 14.5,
+        height: 1.45,
+        color: body,
+      ),
+    CourseHtmlKind.formula => TextStyle(
+        fontFamily: 'serif',
+        fontSize: 15.5,
+        height: 1.5,
+        fontStyle: FontStyle.italic,
+        color: body,
+      ),
+    CourseHtmlKind.table => TextStyle(
+        fontFamily: 'serif',
+        fontSize: 13.5,
+        height: 1.35,
+        color: body,
+      ),
     CourseHtmlKind.p => TextStyle(
         fontFamily: 'serif',
         fontSize: 15.5,
@@ -123,6 +146,9 @@ EdgeInsets courseHtmlBlockInsets(CourseHtmlKind kind, {bool firstOnPage = false}
     CourseHtmlKind.li => 3.0,
     CourseHtmlKind.image => 8.0,
     CourseHtmlKind.split => 8.0,
+    CourseHtmlKind.toc => 8.0,
+    CourseHtmlKind.formula => firstOnPage ? 0.0 : 8.0,
+    CourseHtmlKind.table => 8.0,
     CourseHtmlKind.p => firstOnPage ? 0.0 : 8.0,
   };
   final bottom = switch (kind) {
@@ -136,6 +162,9 @@ EdgeInsets courseHtmlBlockInsets(CourseHtmlKind kind, {bool firstOnPage = false}
     CourseHtmlKind.li => 5.0,
     CourseHtmlKind.image => 10.0,
     CourseHtmlKind.split => 10.0,
+    CourseHtmlKind.toc => 10.0,
+    CourseHtmlKind.formula => 10.0,
+    CourseHtmlKind.table => 10.0,
     CourseHtmlKind.p => 10.0,
   };
   return EdgeInsets.only(top: top, bottom: bottom);
@@ -253,14 +282,49 @@ class CourseHtmlBlockView extends StatelessWidget {
       child: text,
     );
 
-    if (block.kind == CourseHtmlKind.callout) {
+    if (block.kind == CourseHtmlKind.toc) {
+      final items = block.text
+          .split('\n')
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
       return Padding(
         padding: courseHtmlBlockInsets(block.kind, firstOnPage: firstOnPage),
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           decoration: BoxDecoration(
-            color: AuthTheme.green.withValues(alpha: 0.07),
+            color: AuthTheme.mutedBrown.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AuthTheme.mutedBrown.withValues(alpha: 0.25)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                ((block.caption ?? '').trim().isEmpty) ? 'Contents' : block.caption!.trim(),
+                style: courseHtmlStyle(CourseHtmlKind.h3, ink: ink, muted: muted),
+              ),
+              const SizedBox(height: 6),
+              for (var i = 0; i < items.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('${i + 1}. ${items[i]}', style: style),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (block.kind == CourseHtmlKind.callout) {
+      final night = _isNightInk(ink);
+      return Padding(
+        padding: courseHtmlBlockInsets(block.kind, firstOnPage: firstOnPage),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: night ? const Color(0xFF2C3A30) : AuthTheme.green.withValues(alpha: 0.07),
             borderRadius: BorderRadius.circular(4),
             border: const Border(
               left: BorderSide(color: AuthTheme.green, width: 3),
@@ -293,7 +357,25 @@ class CourseHtmlBlockView extends StatelessWidget {
       );
     }
     if (block.kind == CourseHtmlKind.quickCheck) {
-      return _InlineQuickCheck(block: block, firstOnPage: firstOnPage);
+      return _InlineQuickCheck(block: block, firstOnPage: firstOnPage, ink: ink, muted: muted);
+    }
+    if (block.kind == CourseHtmlKind.formula) {
+      final night = _isNightInk(ink);
+      return Padding(
+        padding: courseHtmlBlockInsets(block.kind, firstOnPage: firstOnPage),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: night ? const Color(0xFF2A2620) : AuthTheme.brown.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(block.text, textAlign: TextAlign.center, style: style),
+        ),
+      );
+    }
+    if (block.kind == CourseHtmlKind.table) {
+      return _CourseTableView(block: block, firstOnPage: firstOnPage, ink: ink, muted: muted);
     }
     if (block.kind == CourseHtmlKind.li) {
       return Padding(
@@ -311,6 +393,72 @@ class CourseHtmlBlockView extends StatelessWidget {
       );
     }
     return child;
+  }
+}
+
+class _CourseTableView extends StatelessWidget {
+  const _CourseTableView({
+    required this.block,
+    required this.firstOnPage,
+    this.ink,
+    this.muted,
+  });
+
+  final CourseHtmlBlock block;
+  final bool firstOnPage;
+  final Color? ink;
+  final Color? muted;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = block.text
+        .split('\n')
+        .map((line) => line.split('|').map((cell) => cell.trim()).toList())
+        .where((row) => row.any((cell) => cell.isNotEmpty))
+        .toList();
+    if (rows.isEmpty) return const SizedBox.shrink();
+    final width = rows.fold<int>(0, (best, row) => math.max(best, row.length));
+    final padded = rows
+        .map((row) => [...row, ...List<String>.filled(math.max(0, width - row.length), '')])
+        .toList();
+    final caption = (block.caption ?? '').trim();
+    final bodyStyle = courseHtmlStyle(CourseHtmlKind.table, ink: ink, muted: muted);
+    final headStyle = bodyStyle.copyWith(fontWeight: FontWeight.w700, fontSize: 12.5);
+    return Padding(
+      padding: courseHtmlBlockInsets(CourseHtmlKind.table, firstOnPage: firstOnPage),
+      child: Column(
+        children: [
+          Table(
+            border: TableBorder.all(color: (muted ?? AuthTheme.mutedBrown).withValues(alpha: 0.35)),
+            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+            children: [
+              for (var r = 0; r < padded.length; r++)
+                TableRow(
+                  decoration: r == 0
+                      ? BoxDecoration(color: (muted ?? AuthTheme.mutedBrown).withValues(alpha: 0.12))
+                      : null,
+                  children: [
+                    for (final cell in padded[r])
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                        child: Text(cell, style: r == 0 ? headStyle : bodyStyle),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+          if (caption.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                caption,
+                textAlign: TextAlign.center,
+                style: courseHtmlStyle(CourseHtmlKind.image, ink: ink, muted: muted),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 
@@ -419,13 +567,16 @@ class _InlineFlashcardState extends State<_InlineFlashcard> {
   Widget build(BuildContext context) {
     final muted = widget.muted ?? AuthTheme.mutedBrown;
     final ink = widget.ink ?? AuthTheme.brown;
+    final night = _isNightInk(ink);
     return Padding(
       padding: courseHtmlBlockInsets(CourseHtmlKind.flashcard, firstOnPage: widget.firstOnPage),
       child: Material(
-        color: _flipped ? const Color(0xFFFFF6C8) : const Color(0xFFFFFDF6),
+        color: night
+            ? (_flipped ? const Color(0xFF3A3226) : const Color(0xFF2C261E))
+            : (_flipped ? const Color(0xFFFFF6C8) : const Color(0xFFFFFDF6)),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Color(0xFFD8C4A4)),
+          side: BorderSide(color: night ? const Color(0xFF6A5A46) : const Color(0xFFD8C4A4)),
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -459,9 +610,16 @@ class _InlineFlashcardState extends State<_InlineFlashcard> {
 }
 
 class _InlineQuickCheck extends StatefulWidget {
-  const _InlineQuickCheck({required this.block, required this.firstOnPage});
+  const _InlineQuickCheck({
+    required this.block,
+    required this.firstOnPage,
+    this.ink,
+    this.muted,
+  });
   final CourseHtmlBlock block;
   final bool firstOnPage;
+  final Color? ink;
+  final Color? muted;
 
   @override
   State<_InlineQuickCheck> createState() => _InlineQuickCheckState();
@@ -472,6 +630,9 @@ class _InlineQuickCheckState extends State<_InlineQuickCheck> {
 
   @override
   Widget build(BuildContext context) {
+    final ink = widget.ink ?? AuthTheme.brown;
+    final muted = widget.muted ?? AuthTheme.mutedBrown;
+    final night = _isNightInk(ink);
     final options = (widget.block.caption ?? '').split('\u001e').where((item) => item.isNotEmpty).toList();
     final bits = (widget.block.src ?? '0').split('|');
     final answer = int.tryParse(bits.first) ?? 0;
@@ -481,9 +642,11 @@ class _InlineQuickCheckState extends State<_InlineQuickCheck> {
       padding: courseHtmlBlockInsets(CourseHtmlKind.quickCheck, firstOnPage: widget.firstOnPage),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xFFFFFDF6),
+          color: night ? const Color(0xFF2C261E) : const Color(0xFFFFFDF6),
           borderRadius: BorderRadius.circular(12),
-          border: const Border.fromBorderSide(BorderSide(color: Color(0xFFD8C4A4))),
+          border: Border.fromBorderSide(
+            BorderSide(color: night ? const Color(0xFF6A5A46) : const Color(0xFFD8C4A4)),
+          ),
         ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -496,29 +659,29 @@ class _InlineQuickCheckState extends State<_InlineQuickCheck> {
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.8,
-                  color: AuthTheme.mutedBrown,
+                  color: muted,
                 ),
               ),
               const SizedBox(height: 6),
-              Text(widget.block.text, style: courseHtmlStyle(CourseHtmlKind.quickCheck)),
+              Text(widget.block.text, style: courseHtmlStyle(CourseHtmlKind.quickCheck, ink: ink, muted: muted)),
               const SizedBox(height: 8),
               for (var i = 0; i < options.length; i++)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Material(
                     color: checked && i == answer
-                        ? const Color(0xFFE8F4EA)
+                        ? (night ? const Color(0xFF1E3A24) : const Color(0xFFE8F4EA))
                         : checked && i == _picked
-                            ? const Color(0xFFF8E8E4)
-                            : Colors.white,
+                            ? (night ? const Color(0xFF3A1E1A) : const Color(0xFFF8E8E4))
+                            : (night ? const Color(0xFF1B1814) : Colors.white),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                       side: BorderSide(
                         color: checked && i == answer
-                            ? const Color(0xFF2D7A3E)
+                            ? const Color(0xFF5CBF70)
                             : checked && i == _picked
-                                ? const Color(0xFFC4452D)
-                                : const Color(0xFFD8C4A4),
+                                ? const Color(0xFFE07060)
+                                : (night ? const Color(0xFF6A5A46) : const Color(0xFFD8C4A4)),
                       ),
                     ),
                     child: InkWell(
@@ -527,14 +690,17 @@ class _InlineQuickCheckState extends State<_InlineQuickCheck> {
                         padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                         child: Align(
                           alignment: Alignment.centerLeft,
-                          child: Text(options[i], style: courseHtmlStyle(CourseHtmlKind.quickCheck)),
+                          child: Text(
+                            options[i],
+                            style: courseHtmlStyle(CourseHtmlKind.quickCheck, ink: ink, muted: muted),
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
               if (checked && explain.isNotEmpty)
-                Text(explain, style: courseHtmlStyle(CourseHtmlKind.explain)),
+                Text(explain, style: courseHtmlStyle(CourseHtmlKind.explain, ink: ink, muted: muted)),
             ],
           ),
         ),
@@ -766,6 +932,21 @@ String? _attr(String html, String name) {
   return null;
 }
 
+CourseHtmlBlock? _tableBlock(String raw) {
+  final rows = <String>[];
+  for (final tr in RegExp(r'<tr\b[^>]*>([\s\S]*?)</tr>', caseSensitive: false).allMatches(raw)) {
+    final cells = RegExp(r'<(?:th|td)\b[^>]*>([\s\S]*?)</(?:th|td)>', caseSensitive: false)
+        .allMatches(tr.group(1) ?? '')
+        .map((m) => _stripTags(m.group(1) ?? ''))
+        .toList();
+    if (cells.any((cell) => cell.isNotEmpty)) rows.add(cells.join('|'));
+  }
+  if (rows.isEmpty) return null;
+  final cap = RegExp(r'<figcaption[^>]*>([\s\S]*?)</figcaption>', caseSensitive: false).firstMatch(raw);
+  final caption = cap != null ? _stripTags(cap.group(1) ?? '') : '';
+  return CourseHtmlBlock(CourseHtmlKind.table, rows.join('\n'), caption: caption.isEmpty ? null : caption);
+}
+
 CourseHtmlBlock? _imageBlock(String tagOrFigure) {
   final img = RegExp(r'<img\b[^>]*>', caseSensitive: false).firstMatch(tagOrFigure);
   final src = _attr(img?.group(0) ?? tagOrFigure, 'src');
@@ -789,6 +970,8 @@ List<CourseHtmlBlock> parseCourseHtml(String html) {
     r'<figure\b[^>]*>[\s\S]*?</figure>|'
     r'<details\b[^>]*>[\s\S]*?</details>|'
     r'<aside\b[^>]*>[\s\S]*?</aside>|'
+    r'<nav\b[^>]*>[\s\S]*?</nav>|'
+    r'<table\b[^>]*>[\s\S]*?</table>|'
     r'<(h1)[^>]*>[\s\S]*?</h1>|'
     r'<(h2)[^>]*>[\s\S]*?</h2>|'
     r'<(h3)[^>]*>[\s\S]*?</h3>|'
@@ -801,6 +984,11 @@ List<CourseHtmlBlock> parseCourseHtml(String html) {
   for (final m in re.allMatches(cleaned)) {
     final raw = m.group(0) ?? '';
     final lower = raw.toLowerCase();
+    if (lower.contains('<table')) {
+      final table = _tableBlock(raw);
+      if (table != null) out.add(table);
+      continue;
+    }
     if (lower.startsWith('<img') || lower.startsWith('<figure')) {
       final img = _imageBlock(raw);
       if (img != null) out.add(img);
@@ -859,6 +1047,25 @@ List<CourseHtmlBlock> parseCourseHtml(String html) {
       }
       continue;
     }
+    if (tagName == 'nav' || attrs.contains('course-chapter-toc')) {
+      final title = _stripTags(
+        RegExp(r'course-kicker[^>]*>([\s\S]*?)</', caseSensitive: false).firstMatch(inner)?.group(1) ?? '',
+      );
+      final items = RegExp(r'<li\b[^>]*>([\s\S]*?)</li>', caseSensitive: false)
+          .allMatches(inner)
+          .map((m) => _stripTags(m.group(1) ?? ''))
+          .where((item) => item.isNotEmpty)
+          .toList();
+      if (items.isNotEmpty) {
+        out.add(CourseHtmlBlock(CourseHtmlKind.toc, items.join('\n'), caption: title.isEmpty ? 'Contents' : title));
+      }
+      continue;
+    }
+    if (attrs.contains('course-formula')) {
+      final text = _stripTags(inner);
+      if (text.isNotEmpty) out.add(CourseHtmlBlock(CourseHtmlKind.formula, text));
+      continue;
+    }
     if (tagName == 'div') {
       if (attrs.contains('course-split')) {
         final img = _imageBlock(inner);
@@ -889,7 +1096,11 @@ List<CourseHtmlBlock> parseCourseHtml(String html) {
       'h2' => CourseHtmlKind.h2,
       'h3' => CourseHtmlKind.h3,
       'li' => CourseHtmlKind.li,
-      _ => attrs.contains('course-kicker') ? CourseHtmlKind.h3 : CourseHtmlKind.p,
+      _ => attrs.contains('course-kicker')
+          ? CourseHtmlKind.h3
+          : attrs.contains('course-formula')
+              ? CourseHtmlKind.formula
+              : CourseHtmlKind.p,
     };
     final text = _stripTags(inner);
     if (text.isNotEmpty) out.add(CourseHtmlBlock(kind, text));

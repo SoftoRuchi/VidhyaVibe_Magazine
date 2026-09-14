@@ -15,11 +15,15 @@ class CourseNetworkImage extends StatefulWidget {
     required this.src,
     this.height = 180,
     this.fallbackText = '',
+    this.fill = false,
+    this.fit = BoxFit.contain,
   });
 
   final String src;
   final double height;
   final String fallbackText;
+  final bool fill;
+  final BoxFit fit;
 
   @override
   State<CourseNetworkImage> createState() => _CourseNetworkImageState();
@@ -124,6 +128,28 @@ class _CourseNetworkImageState extends State<CourseNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.fill) {
+      if (_failed) return const SizedBox.expand();
+      if (_bytes == null) {
+        return const Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      }
+      return Image.memory(
+        _bytes!,
+        fit: widget.fit,
+        width: double.infinity,
+        height: double.infinity,
+        alignment: Alignment.center,
+        filterQuality: FilterQuality.medium,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    }
     if (_failed) {
       return SizedBox(height: widget.height);
     }

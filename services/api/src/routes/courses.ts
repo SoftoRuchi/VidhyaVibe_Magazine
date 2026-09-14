@@ -3,7 +3,7 @@ import { query } from '../db';
 import type { AuthRequest } from '../middleware/auth';
 import { requireAuth } from '../middleware/auth';
 import { getStorageAdapter } from '../providers/storage';
-import { rewriteCourseAssetUrls } from '../utils/courseAssets';
+import { publicFileUrlForKey, rewriteCourseAssetUrls } from '../utils/courseAssets';
 import { sendStorageBody } from '../utils/sendStorage';
 import { asDoc, jsonToHtml, quickChecksFromDoc } from '../utils/textbookContent';
 
@@ -145,7 +145,7 @@ router.get('/subjects/:id', requireAuth, async (req: AuthRequest, res) => {
   try {
     const [rows]: any = await query(
       `SELECT s.id, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
-              s.cover_key AS coverKey, s.file_key AS fileKey, s.pages, s.sort_order AS sortOrder,
+              s.cover_key AS coverKey, s.back_cover_key AS backCoverKey, s.file_key AS fileKey, s.pages, s.sort_order AS sortOrder,
               sem.id AS semesterId, sem.number AS semesterNumber, sem.title AS semesterTitle,
               c.id AS courseId, c.name AS courseName, c.slug AS courseSlug, c.university
        FROM course_subjects s
@@ -180,6 +180,9 @@ router.get('/subjects/:id', requireAuth, async (req: AuthRequest, res) => {
       description: s.description,
       syllabusCode: s.syllabusCode,
       coverKey: s.coverKey,
+      backCoverKey: s.backCoverKey,
+      frontCoverUrl: s.coverKey ? publicFileUrlForKey(s.coverKey) : null,
+      backCoverUrl: s.backCoverKey ? publicFileUrlForKey(s.backCoverKey) : null,
       pages: s.pages != null ? n(s.pages) : null,
       hasBookPdf: !!s.fileKey,
       pdfUrl: s.fileKey ? `/api/courses/subjects/${id}/pdf` : null,
@@ -257,6 +260,7 @@ router.get('/chapters/:id', requireAuth, async (req, res) => {
       `SELECT ch.id, ch.title, ch.slug, ch.sort_order AS sortOrder, ch.start_page AS startPage,
               ch.end_page AS endPage, ch.content, ch.content_json AS contentJson, ch.content_format AS contentFormat,
               s.id AS subjectId, s.name AS subjectName, s.slug AS subjectSlug, s.file_key AS fileKey,
+              s.cover_key AS coverKey, s.back_cover_key AS backCoverKey,
               sem.number AS semesterNumber, sem.title AS semesterTitle,
               c.name AS courseName, c.slug AS courseSlug
        FROM course_chapters ch
@@ -324,6 +328,8 @@ router.get('/chapters/:id', requireAuth, async (req, res) => {
         slug: ch.subjectSlug,
         hasBookPdf: !!ch.fileKey,
         pdfUrl: ch.fileKey ? `/api/courses/subjects/${n(ch.subjectId)}/pdf` : null,
+        frontCoverUrl: ch.coverKey ? publicFileUrlForKey(ch.coverKey) : null,
+        backCoverUrl: ch.backCoverKey ? publicFileUrlForKey(ch.backCoverKey) : null,
       },
       course: { name: ch.courseName, slug: ch.courseSlug },
       semester: { number: n(ch.semesterNumber), title: ch.semesterTitle },

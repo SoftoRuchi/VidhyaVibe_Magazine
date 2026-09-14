@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/course_study.dart';
 import 'auth_widgets.dart';
 import 'course_html_view.dart';
+import 'course_network_image.dart';
 import 'course_quick_check.dart';
 import 'course_flashcards.dart';
 
@@ -103,6 +104,8 @@ class CourseBookPager extends StatefulWidget {
     this.onDeleteFlashcard,
     this.quickChecks = const [],
     this.flashcards = const [],
+    this.frontCoverUrl,
+    this.backCoverUrl,
   });
 
   final String html;
@@ -127,6 +130,8 @@ class CourseBookPager extends StatefulWidget {
   final Future<void> Function(CourseFlashcard card)? onDeleteFlashcard;
   final List<CourseQuickCheckItem> quickChecks;
   final List<CourseFlashcard> flashcards;
+  final String? frontCoverUrl;
+  final String? backCoverUrl;
 
   @override
   State<CourseBookPager> createState() => CourseBookPagerState();
@@ -194,13 +199,75 @@ class CourseBookPagerState extends State<CourseBookPager> {
   @override
   void didUpdateWidget(covariant CourseBookPager oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.html != widget.html) {
+    if (oldWidget.html != widget.html ||
+        oldWidget.frontCoverUrl != widget.frontCoverUrl ||
+        oldWidget.backCoverUrl != widget.backCoverUrl) {
       _pageSize = null;
       _pages = const [];
       _index = 0;
       _openExplains = {};
       _pendingExplainId = null;
     }
+  }
+
+  bool get _hasFrontCover {
+    final value = widget.frontCoverUrl?.trim();
+    return value != null && value.isNotEmpty;
+  }
+
+  bool get _hasBackCover {
+    final value = widget.backCoverUrl?.trim();
+    return value != null && value.isNotEmpty;
+  }
+
+  int get _coverShift => _hasFrontCover ? 1 : 0;
+
+  bool _isCoverAt(int pageIndex) {
+    if (pageIndex < 0 || pageIndex >= _pages.length) return false;
+    final blocks = _pages[pageIndex];
+    if (blocks.length != 1) return false;
+    final id = blocks.first.id;
+    return id == 'book-front-cover' || id == 'book-back-cover';
+  }
+
+  int _printedFor(int pageIndex) {
+    if (_isCoverAt(pageIndex)) {
+      if (pageIndex == 0 && _hasFrontCover) return widget.startPage;
+      return widget.startPage +
+          math.max(0, _pages.length - 1 - _coverShift - (_hasBackCover ? 1 : 0));
+    }
+    return widget.startPage + pageIndex - _coverShift;
+  }
+
+  List<List<CourseHtmlBlock>> _withCoverPages(List<List<CourseHtmlBlock>> pages) {
+    var next = pages;
+    if (_hasFrontCover) {
+      next = [
+        [
+          CourseHtmlBlock(
+            CourseHtmlKind.image,
+            'Front cover',
+            src: widget.frontCoverUrl!.trim(),
+            id: 'book-front-cover',
+          ),
+        ],
+        ...next,
+      ];
+    }
+    if (_hasBackCover) {
+      next = [
+        ...next,
+        [
+          CourseHtmlBlock(
+            CourseHtmlKind.image,
+            'Back cover',
+            src: widget.backCoverUrl!.trim(),
+            id: 'book-back-cover',
+          ),
+        ],
+      ];
+    }
+    return next.isEmpty ? pages : next;
   }
 
   void _paginate(Size size, TextScaler scaler) {
@@ -215,7 +282,7 @@ class CourseBookPagerState extends State<CourseBookPager> {
       openExplains: _openExplains,
     );
     _pageSize = snapped;
-    _pages = pages.isEmpty ? [<CourseHtmlBlock>[]] : pages;
+    _pages = _withCoverPages(pages.isEmpty ? [<CourseHtmlBlock>[]] : pages);
     _index = _index.clamp(0, math.max(0, _pages.length - 1)).toInt();
     final explainId = _pendingExplainId;
     if (explainId != null && explainId.isNotEmpty) {
@@ -244,7 +311,7 @@ class CourseBookPagerState extends State<CourseBookPager> {
   }
 
   void goToPrintedPage(int printed) {
-    _pendingIndex = printed - widget.startPage;
+    _pendingIndex = printed - widget.startPage + _coverShift;
     _pendingAnchor = null;
     WidgetsBinding.instance.addPostFrameCallback((_) => _tryJumpPending());
   }
@@ -449,8 +516,8 @@ class CourseBookPagerState extends State<CourseBookPager> {
           CourseHtmlKind.h3 => 3,
           _ => 0,
         };
-        if (level == 0 || block.text.trim().isEmpty) continue;
-        out.add((title: block.text.trim(), level: level, page: widget.startPage + i));
+        if (_isCoverAt(i) || level == 0 || block.text.trim().isEmpty) continue;
+        out.add((title: block.text.trim(), level: level, page: _printedFor(i)));
       }
     }
     if (out.isEmpty && widget.chapterTitle.trim().isNotEmpty) {
@@ -468,7 +535,7 @@ class CourseBookPagerState extends State<CourseBookPager> {
         title: widget.chapterTitle,
       );
     }
-    final printed = widget.startPage + _index;
+    final printed = _printedFor(_index);
     var current = 0;
     for (var i = 0; i < items.length; i++) {
       if (items[i].page <= printed) current = i;
@@ -490,10 +557,11 @@ class CourseBookPagerState extends State<CourseBookPager> {
         snippet: title,
         page: item.page,
         anchor: title,
-        index: (item.page - widget.startPage).clamp(0, math.max(0, _pages.length - 1)).toInt(),
+        index: (item.page - widget.startPage + _coverShift).clamp(0, math.max(0, _pages.length - 1)).toInt(),
       ));
     }
     for (var i = 0; i < _pages.length; i++) {
+      if (_isCoverAt(i)) continue;
       if (!needle.contains(' ') && needle.length <= 3) break;
       CourseHtmlBlock? best;
       for (final block in _pages[i]) {
@@ -512,7 +580,7 @@ class CourseBookPagerState extends State<CourseBookPager> {
       if (!seen.add(_foldSearch(anchor))) continue;
       hits.add((
         snippet: _clipSnippet(anchor),
-        page: widget.startPage + i,
+        page: _printedFor(i),
         anchor: anchor,
         index: i,
       ));
@@ -764,7 +832,8 @@ class CourseBookPagerState extends State<CourseBookPager> {
     for (final item in widget.quickChecks) {
       if (item.pageNumber != null && printedPages.contains(item.pageNumber)) return item;
     }
-    final last = widget.startPage + math.max(0, _pages.length - 1);
+    final last = widget.startPage +
+        math.max(0, _pages.length - 1 - _coverShift - (_hasBackCover ? 1 : 0));
     if (printedPages.contains(last)) {
       for (final item in widget.quickChecks) {
         if (item.pageNumber == null) return item;
@@ -774,11 +843,11 @@ class CourseBookPagerState extends State<CourseBookPager> {
   }
 
   List<int> get _visiblePrinted {
-    if (!_spread) return [widget.startPage + _index];
+    if (!_spread) return _isCoverAt(_index) ? const [] : [_printedFor(_index)];
     final pair = _spreads[_controllerIndexFor(_index)];
     return [
-      if (pair.left != null) widget.startPage + pair.left!,
-      if (pair.right != null) widget.startPage + pair.right!,
+      if (pair.left != null && !_isCoverAt(pair.left!)) _printedFor(pair.left!),
+      if (pair.right != null && !_isCoverAt(pair.right!)) _printedFor(pair.right!),
     ];
   }
 
@@ -823,7 +892,7 @@ class CourseBookPagerState extends State<CourseBookPager> {
   void _openProgress() {
     final items = _toc();
     final progress = _readingProgress();
-    final printed = widget.startPage + _index;
+    final printed = _printedFor(_index);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -920,30 +989,33 @@ class CourseBookPagerState extends State<CourseBookPager> {
   }
 
   Widget _buildPaperPage(int pageIndex, {required bool verso}) {
-    final printed = widget.startPage + pageIndex;
+    final printed = _printedFor(pageIndex);
+    final cover = _isCoverAt(pageIndex);
     final blocks = pageIndex < _pages.length ? _pages[pageIndex] : const <CourseHtmlBlock>[];
     return _PaperPage(
-      key: ValueKey('paper-$printed-$verso'),
+      key: ValueKey('paper-$printed-$verso-$cover'),
       header: widget.runningHeader,
       chapterTitle: widget.chapterTitle,
       blocks: blocks,
       printedPage: printed,
       verso: verso,
+      isCover: cover,
+      coverSrc: cover ? blocks.first.src : null,
       highlights: [
         ...widget.highlights,
         ..._searchMarks(),
       ],
       inkColor: _ink,
       palette: CoursePaperPalette.of(_theme),
-      bookmarked: widget.bookmarkTypes.containsKey(printed),
-      markType: widget.bookmarkTypes[printed],
+      bookmarked: !cover && widget.bookmarkTypes.containsKey(printed),
+      markType: cover ? null : widget.bookmarkTypes[printed],
       onPickInk: (color) => setState(() => _ink = color),
-      onHighlight: widget.onHighlight,
-      onRemoveHighlight: widget.onRemoveHighlight,
-      onNote: widget.onNote,
-      onAddFlashcard: widget.onAddFlashcard,
-      onSetBookmark: widget.onSetBookmark == null ? null : (type) => widget.onSetBookmark!(printed, type),
-      onRemoveBookmark: widget.onRemoveBookmark == null ? null : () => widget.onRemoveBookmark!(printed),
+      onHighlight: cover ? null : widget.onHighlight,
+      onRemoveHighlight: cover ? null : widget.onRemoveHighlight,
+      onNote: cover ? null : widget.onNote,
+      onAddFlashcard: cover ? null : widget.onAddFlashcard,
+      onSetBookmark: cover || widget.onSetBookmark == null ? null : (type) => widget.onSetBookmark!(printed, type),
+      onRemoveBookmark: cover || widget.onRemoveBookmark == null ? null : () => widget.onRemoveBookmark!(printed),
       openExplains: _openExplains,
       onToggleExplain: _toggleExplain,
     );
@@ -1036,14 +1108,14 @@ class CourseBookPagerState extends State<CourseBookPager> {
                                 widget.onPageChanged?.call(
                                   pageIndex,
                                   _pages.length,
-                                  widget.startPage + pageIndex,
+                                  _printedFor(pageIndex),
                                 );
                               } else {
                                 setState(() => _index = i);
                                 widget.onPageChanged?.call(
                                   i,
                                   _pages.length,
-                                  widget.startPage + i,
+                                  _printedFor(i),
                                 );
                               }
                             },
@@ -1284,6 +1356,8 @@ class _PaperPage extends StatefulWidget {
     this.onRemoveBookmark,
     this.openExplains = const <String>{},
     this.onToggleExplain,
+    this.isCover = false,
+    this.coverSrc,
   });
 
   final String header;
@@ -1305,6 +1379,8 @@ class _PaperPage extends StatefulWidget {
   final VoidCallback? onRemoveBookmark;
   final Set<String> openExplains;
   final void Function(String id)? onToggleExplain;
+  final bool isCover;
+  final String? coverSrc;
 
   @override
   State<_PaperPage> createState() => _PaperPageState();
@@ -1372,6 +1448,40 @@ class _PaperPageState extends State<_PaperPage> with AutomaticKeepAliveClientMix
     super.build(context);
     final showBar = _selected.trim().length >= 2;
     final palette = widget.palette;
+    final coverSrc = widget.coverSrc;
+    if (widget.isCover && coverSrc != null && coverSrc.trim().isNotEmpty) {
+      return ColoredBox(
+        color: const Color(0xFF1A120C),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: CourseNetworkImage(
+                src: coverSrc,
+                fill: true,
+                fit: BoxFit.cover,
+              ),
+            ),
+            Positioned(
+              left: widget.verso ? null : 0,
+              right: widget.verso ? 0 : null,
+              top: 0,
+              bottom: 0,
+              width: 12,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: widget.verso ? Alignment.centerRight : Alignment.centerLeft,
+                    end: widget.verso ? Alignment.centerLeft : Alignment.centerRight,
+                    colors: [palette.spine, Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return ColoredBox(
       color: palette.paper,
       child: Stack(
@@ -1919,6 +2029,12 @@ double measureCourseBlock(
   )..layout(maxWidth: maxWidth);
   var extra = insets.vertical;
   if (block.kind == CourseHtmlKind.callout) extra += 20;
+  if (block.kind == CourseHtmlKind.toc) extra += 36;
+  if (block.kind == CourseHtmlKind.formula) extra += 16;
+  if (block.kind == CourseHtmlKind.table) {
+    final rows = block.text.split('\n').where((line) => line.trim().isNotEmpty).length;
+    return rows * 28.0 + extra + 12;
+  }
   return tp.height + extra;
 }
 
@@ -1942,6 +2058,9 @@ List<CourseHtmlBlock> _splitToFit(
       block.kind == CourseHtmlKind.quickCheck ||
       _isHeading(block.kind) ||
       block.kind == CourseHtmlKind.callout ||
+      block.kind == CourseHtmlKind.toc ||
+      block.kind == CourseHtmlKind.formula ||
+      block.kind == CourseHtmlKind.table ||
       (block.kind == CourseHtmlKind.explain && !openExplain)) {
     return [block];
   }

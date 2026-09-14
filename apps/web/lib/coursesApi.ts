@@ -29,6 +29,9 @@ export type CourseSubject = {
   description?: string | null;
   syllabusCode?: string | null;
   coverKey?: string | null;
+  backCoverKey?: string | null;
+  frontCoverUrl?: string | null;
+  backCoverUrl?: string | null;
   chapterCount?: number;
 };
 

@@ -117,20 +117,6 @@ export default function CourseReadPage() {
         <span className="course-mode-switch-active">Read</span>
         <Link href={`${base}/quiz?chapter=${chapter.slug}`}>Practice</Link>
       </div>
-      <p className="course-card-kicker">
-        {subject.course.name} · {subject.semester.title}
-      </p>
-      <nav className="course-toc">
-        {chapters.map((c: any) => (
-          <Link
-            key={c.id}
-            href={`${base}/read?chapter=${c.slug}`}
-            className={c.id === chapter.id ? 'is-active' : ''}
-          >
-            {c.title}
-          </Link>
-        ))}
-      </nav>
       <CourseBookReader
         html={chapter.content || ''}
         header={`${subject.course.name} · ${subject.semester.title}`}
@@ -139,6 +125,8 @@ export default function CourseReadPage() {
         chapterId={chapter.id}
         initialPage={Number.isFinite(pageParam) && pageParam > 0 ? pageParam : undefined}
         quickChecks={quickChecks}
+        frontCoverUrl={subject.frontCoverUrl || chapter.subject?.frontCoverUrl}
+        backCoverUrl={subject.backCoverUrl || chapter.subject?.backCoverUrl}
       />
       <div className="course-reader-nav">
         {prev ? (

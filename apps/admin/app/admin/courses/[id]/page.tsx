@@ -40,6 +40,10 @@ type Subject = {
   syllabusCode?: string | null;
   status: string;
   hasBookPdf?: boolean;
+  coverKey?: string | null;
+  backCoverKey?: string | null;
+  frontCoverUrl?: string | null;
+  backCoverUrl?: string | null;
   chapters: Chapter[];
 };
 
@@ -237,6 +241,12 @@ export default function AdminCourseDetailPage() {
       if (values.description) fd.append('description', values.description);
       if (values.syllabusCode) fd.append('syllabusCode', values.syllabusCode);
       fd.append('status', values.published ? 'PUBLISHED' : 'DRAFT');
+      const front: File | undefined =
+        values.frontCover?.file?.originFileObj || values.frontCover?.fileList?.[0]?.originFileObj;
+      const back: File | undefined =
+        values.backCover?.file?.originFileObj || values.backCover?.fileList?.[0]?.originFileObj;
+      if (front instanceof File) fd.append('frontCover', front);
+      if (back instanceof File) fd.append('backCover', back);
       const file: File | undefined = values.bookPdf?.file?.originFileObj || values.bookPdf;
       if (file instanceof File) fd.append('bookPdf', file);
       api
@@ -259,6 +269,12 @@ export default function AdminCourseDetailPage() {
       if (values.description) fd.append('description', values.description);
       if (values.syllabusCode) fd.append('syllabusCode', values.syllabusCode);
       fd.append('status', values.published ? 'PUBLISHED' : 'DRAFT');
+      const front: File | undefined =
+        values.frontCover?.file?.originFileObj || values.frontCover?.fileList?.[0]?.originFileObj;
+      const back: File | undefined =
+        values.backCover?.file?.originFileObj || values.backCover?.fileList?.[0]?.originFileObj;
+      if (front instanceof File) fd.append('frontCover', front);
+      if (back instanceof File) fd.append('backCover', back);
       const file: File | undefined = values.bookPdf?.file?.originFileObj || values.bookPdf;
       if (file instanceof File) fd.append('bookPdf', file);
       api
@@ -531,6 +547,52 @@ export default function AdminCourseDetailPage() {
                           <Form.Item name="description" label="What this subject covers">
                             <Input.TextArea rows={2} />
                           </Form.Item>
+                          <p className="vv-hint">
+                            Upload the front and back of this textbook. Students see them as the
+                            first and last pages of the open book in every chapter.
+                          </p>
+                          <div className="vv-cover-row">
+                            <Form.Item
+                              name="frontCover"
+                              label="Front cover"
+                              extra={
+                                selectedSubject.frontCoverUrl
+                                  ? 'Leave empty to keep the current cover.'
+                                  : 'Shown as the front of the book.'
+                              }
+                            >
+                              {selectedSubject.frontCoverUrl ? (
+                                <img
+                                  src={selectedSubject.frontCoverUrl}
+                                  alt="Front cover"
+                                  className="vv-cover-thumb"
+                                />
+                              ) : null}
+                              <Upload beforeUpload={() => false} maxCount={1} accept="image/*">
+                                <Button>Upload front cover</Button>
+                              </Upload>
+                            </Form.Item>
+                            <Form.Item
+                              name="backCover"
+                              label="Back cover"
+                              extra={
+                                selectedSubject.backCoverUrl
+                                  ? 'Leave empty to keep the current cover.'
+                                  : 'Shown as the back of the book.'
+                              }
+                            >
+                              {selectedSubject.backCoverUrl ? (
+                                <img
+                                  src={selectedSubject.backCoverUrl}
+                                  alt="Back cover"
+                                  className="vv-cover-thumb"
+                                />
+                              ) : null}
+                              <Upload beforeUpload={() => false} maxCount={1} accept="image/*">
+                                <Button>Upload back cover</Button>
+                              </Upload>
+                            </Form.Item>
+                          </div>
                           <Form.Item name="slug" label="Web address">
                             <Input />
                           </Form.Item>
@@ -717,6 +779,16 @@ export default function AdminCourseDetailPage() {
           </Form.Item>
           <Form.Item name="description" label="Short description">
             <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="frontCover" label="Front cover" extra="First page of the open book.">
+            <Upload beforeUpload={() => false} maxCount={1} accept="image/*">
+              <Button>Upload front cover</Button>
+            </Upload>
+          </Form.Item>
+          <Form.Item name="backCover" label="Back cover" extra="Last page of the open book.">
+            <Upload beforeUpload={() => false} maxCount={1} accept="image/*">
+              <Button>Upload back cover</Button>
+            </Upload>
           </Form.Item>
           <Form.Item name="slug" label="Web address (optional)">
             <Input />

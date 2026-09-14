@@ -17,6 +17,8 @@ router.use(requireAdmin);
 const upload = memoryUpload;
 const subjectUpload = upload.fields([
   { name: 'cover', maxCount: 1 },
+  { name: 'frontCover', maxCount: 1 },
+  { name: 'backCover', maxCount: 1 },
   { name: 'bookPdf', maxCount: 1 },
 ]);
 const imageUpload = upload.single('image');
@@ -78,6 +80,34 @@ router.post('/images', imageUpload, async (req: AuthRequest, res) => {
 function filesOf(req: AuthRequest, field: string): Express.Multer.File[] {
   const bag = req.files as Record<string, Express.Multer.File[]> | undefined;
   return bag?.[field] || [];
+}
+
+async function uploadSubjectImage(
+  courseSlug: string,
+  slug: string,
+  kind: 'cover' | 'back',
+  file: Express.Multer.File,
+) {
+  const mime = String(file.mimetype || '').toLowerCase();
+  if (!mime.startsWith('image/')) {
+    const err: any = new Error('not_an_image');
+    err.code = 'not_an_image';
+    throw err;
+  }
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+  const key = `courses/${courseSlug}/${slug}/${kind}-${uuidv4()}.${ext}`;
+  const storage = getStorageAdapter();
+  const up = await storage.upload(key, file.buffer as Buffer, file.mimetype);
+  return up.key;
+}
+
+function coverUrls(coverKey?: string | null, backCoverKey?: string | null) {
+  return {
+    coverKey: coverKey || null,
+    backCoverKey: backCoverKey || null,
+    frontCoverUrl: coverKey ? publicFileUrlForKey(coverKey) : null,
+    backCoverUrl: backCoverKey ? publicFileUrlForKey(backCoverKey) : null,
+  };
 }
 
 /** GET /api/admin/courses */
@@ -155,7 +185,7 @@ router.get('/:id', async (req, res) => {
     for (const sem of sems || []) {
       const [subjects]: any = await query(
         `SELECT id, name, slug, description, syllabus_code AS syllabusCode, cover_key AS coverKey,
-                file_key AS fileKey, pages, sort_order AS sortOrder, status, published_at AS publishedAt
+                back_cover_key AS backCoverKey, file_key AS fileKey, pages, sort_order AS sortOrder, status, published_at AS publishedAt
          FROM course_subjects WHERE semester_id = ? ORDER BY sort_order ASC, id ASC`,
         [sem.id],
       );
@@ -175,6 +205,7 @@ router.get('/:id', async (req, res) => {
           sortOrder: n(s.sortOrder),
           pages: s.pages != null ? n(s.pages) : null,
           hasBookPdf: !!s.fileKey,
+          ...coverUrls(s.coverKey, s.backCoverKey),
           chapters: (chapters || []).map((ch: any) => ({
             id: n(ch.id),
             title: ch.title,
@@ -337,15 +368,15 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
     if (!sem?.[0]) return res.status(404).json({ error: 'semester_not_found' });
 
     let coverKey: string | null = null;
+    let backCoverKey: string | null = null;
     let fileKey: string | null = null;
     const storage = getStorageAdapter();
-    const cover = filesOf(req, 'cover')[0];
+    const cover = filesOf(req, 'frontCover')[0] || filesOf(req, 'cover')[0];
+    const backCover = filesOf(req, 'backCover')[0];
     const pdf = filesOf(req, 'bookPdf')[0];
-    if (cover) {
-      const key = `courses/${sem[0].courseSlug}/${slug}/cover-${uuidv4()}`;
-      const up = await storage.upload(key, cover.buffer as Buffer, cover.mimetype);
-      coverKey = up.key;
-    }
+    if (cover) coverKey = await uploadSubjectImage(sem[0].courseSlug, slug, 'cover', cover);
+    if (backCover)
+      backCoverKey = await uploadSubjectImage(sem[0].courseSlug, slug, 'back', backCover);
     if (pdf) {
       const key = `courses/${sem[0].courseSlug}/${slug}/${uuidv4()}.pdf`;
       const up = await storage.upload(key, pdf.buffer as Buffer, pdf.mimetype || 'application/pdf');
@@ -354,8 +385,8 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
 
     const [r]: any = await conn.query(
       `INSERT INTO course_subjects
-        (semester_id, name, slug, description, syllabus_code, cover_key, file_key, pages, sort_order, status, published_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${published ? 'NOW(3)' : 'NULL'}, NOW(3), NOW(3))`,
+        (semester_id, name, slug, description, syllabus_code, cover_key, back_cover_key, file_key, pages, sort_order, status, published_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${published ? 'NOW(3)' : 'NULL'}, NOW(3), NOW(3))`,
       [
         semesterId,
         name,
@@ -363,6 +394,7 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
         req.body?.description || null,
         req.body?.syllabusCode || null,
         coverKey,
+        backCoverKey,
         fileKey,
         req.body?.pages ? n(req.body.pages) : null,
         n(req.body?.sortOrder ?? 0),
@@ -400,15 +432,15 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
     const slug = req.body?.slug ? slugify(String(req.body.slug)) : rows[0].slug;
 
     let coverKey: string | undefined;
+    let backCoverKey: string | undefined;
     let fileKey: string | undefined;
     const storage = getStorageAdapter();
-    const cover = filesOf(req, 'cover')[0];
+    const cover = filesOf(req, 'frontCover')[0] || filesOf(req, 'cover')[0];
+    const backCover = filesOf(req, 'backCover')[0];
     const pdf = filesOf(req, 'bookPdf')[0];
-    if (cover) {
-      const key = `courses/${rows[0].courseSlug}/${slug}/cover-${uuidv4()}`;
-      const up = await storage.upload(key, cover.buffer as Buffer, cover.mimetype);
-      coverKey = up.key;
-    }
+    if (cover) coverKey = await uploadSubjectImage(rows[0].courseSlug, slug, 'cover', cover);
+    if (backCover)
+      backCoverKey = await uploadSubjectImage(rows[0].courseSlug, slug, 'back', backCover);
     if (pdf) {
       const key = `courses/${rows[0].courseSlug}/${slug}/${uuidv4()}.pdf`;
       const up = await storage.upload(key, pdf.buffer as Buffer, pdf.mimetype || 'application/pdf');
@@ -424,6 +456,7 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
            WHEN ? = 0 THEN NULL
            ELSE published_at END,
          cover_key = COALESCE(?, cover_key),
+         back_cover_key = COALESCE(?, back_cover_key),
          file_key = COALESCE(?, file_key),
          updated_at = NOW(3)
        WHERE id = ?`,
@@ -438,6 +471,7 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
         published ? 1 : 0,
         published ? 1 : 0,
         coverKey ?? null,
+        backCoverKey ?? null,
         fileKey ?? null,
         id,
       ],
@@ -501,7 +535,7 @@ router.get('/chapters/:id', async (req, res) => {
     const [rows]: any = await query(
       `SELECT ch.id, ch.title, ch.slug, ch.sort_order AS sortOrder, ch.start_page AS startPage,
               ch.end_page AS endPage, ch.content, ch.content_json AS contentJson, ch.content_format AS contentFormat,
-              s.id AS subjectId, s.name AS subjectName,
+              s.id AS subjectId, s.name AS subjectName, s.cover_key AS coverKey, s.back_cover_key AS backCoverKey,
               sem.id AS semesterId, sem.number AS semesterNumber, sem.title AS semesterTitle,
               c.id AS courseId, c.name AS courseName
        FROM course_chapters ch
@@ -531,6 +565,7 @@ router.get('/chapters/:id', async (req, res) => {
       semesterTitle: r.semesterTitle,
       courseId: n(r.courseId),
       courseName: r.courseName,
+      ...coverUrls(r.coverKey, r.backCoverKey),
     });
   } catch (e: any) {
     console.error(e);

@@ -4,12 +4,15 @@ import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   DeleteOutlined,
+  EyeOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import { Button, Dropdown, Input, Modal, Popconfirm, Radio, Select, Space, message } from 'antd';
 import React from 'react';
 import {
+  CHAPTER_PASTE_CONTINUE,
   CHAPTER_PASTE_EXAMPLE,
+  CHAPTER_PASTE_LABELS,
   describeDetected,
   parseChapterPaste,
   retargetBlock,
@@ -17,35 +20,86 @@ import {
 import {
   TEXTBOOK_SCHEMA_VERSION,
   asDoc,
+  headingTitles,
   newBlockId,
+  parseTableText,
+  tableRowsOf,
   type TextbookBlock,
   type TextbookBlockType,
   type TextbookDoc,
 } from '../lib/textbookContent';
 import { apiUpload } from '../lib/upload';
 import { saveAdminChapter, type AdminChapter } from '../lib/useAdminChapter';
+import ChapterBookPreview from './ChapterBookPreview';
 
-const ADD_ITEMS: { type: TextbookBlockType; label: string }[] = [
+const BLOCK_TYPES: { type: TextbookBlockType; label: string }[] = [
+  { type: 'toc', label: 'Table of contents' },
   { type: 'heading', label: 'Section title' },
   { type: 'paragraph', label: 'Paragraph' },
   { type: 'list', label: 'List' },
+  { type: 'table', label: 'Table' },
   { type: 'image', label: 'Picture' },
+  { type: 'split', label: 'Text and picture' },
+  { type: 'formula', label: 'Formula' },
   { type: 'note', label: 'Simple words' },
+  { type: 'definition', label: 'Definition' },
+  { type: 'example', label: 'Example' },
+  { type: 'important', label: 'Important' },
+  { type: 'common_mistake', label: 'Common mistake' },
+  { type: 'callout', label: 'Highlight' },
+  { type: 'summary', label: 'Summary' },
   { type: 'flashcard', label: 'Flashcard' },
   { type: 'quick_check', label: 'Quick check' },
   { type: 'mcq', label: 'Quiz' },
-  { type: 'summary', label: 'Summary' },
 ];
 
-function makeBlock(type: TextbookBlockType): TextbookBlock {
+const ADD_ITEMS: { type: TextbookBlockType; label: string; extra?: Partial<TextbookBlock> }[] = [
+  { type: 'toc', label: 'Table of contents' },
+  { type: 'heading', label: 'Chapter title', extra: { level: 1 } },
+  { type: 'heading', label: 'Section title' },
+  { type: 'heading', label: 'Sub-section', extra: { level: 3 } },
+  { type: 'paragraph', label: 'Paragraph' },
+  { type: 'list', label: 'List' },
+  { type: 'list', label: 'Numbered list', extra: { ordered: true } },
+  { type: 'table', label: 'Table' },
+  { type: 'image', label: 'Picture' },
+  { type: 'split', label: 'Text and picture' },
+  { type: 'formula', label: 'Formula' },
+  { type: 'note', label: 'Simple words' },
+  { type: 'definition', label: 'Definition' },
+  { type: 'example', label: 'Example' },
+  { type: 'important', label: 'Important' },
+  { type: 'common_mistake', label: 'Common mistake' },
+  { type: 'callout', label: 'Highlight' },
+  { type: 'summary', label: 'Summary' },
+  { type: 'flashcard', label: 'Flashcard' },
+  { type: 'quick_check', label: 'Quick check' },
+  { type: 'mcq', label: 'Quiz' },
+];
+
+function makeBlock(type: TextbookBlockType, extra?: Partial<TextbookBlock>): TextbookBlock {
   const id = newBlockId(type);
-  if (type === 'heading') return { id, type, level: 2, text: '' };
-  if (type === 'list') return { id, type, items: [''] };
+  if (type === 'heading')
+    return { id, type, level: extra?.level === 1 ? 1 : extra?.level === 3 ? 3 : 2, text: '' };
+  if (type === 'list') return { id, type, ordered: extra?.ordered === true, items: [''] };
+  if (type === 'toc') return { id, type, items: extra?.items || [] };
+  if (type === 'table')
+    return {
+      id,
+      type,
+      rows: extra?.rows || [
+        ['', ''],
+        ['', ''],
+      ],
+    };
   if (type === 'flashcard') return { id, type, front: '', back: '' };
   if (type === 'quick_check' || type === 'mcq') {
     return { id, type, question: '', options: ['', '', '', ''], answer: 0, explanation: '' };
   }
   if (type === 'image') return { id, type, src: '', caption: '', alt_text: '' };
+  if (type === 'split') {
+    return { id, type, text: '', src: '', caption: '', alt_text: '', image_right: false };
+  }
   return { id, type, text: '' };
 }
 
@@ -67,6 +121,7 @@ export default function ChapterBlockEditor({
   const [paste, setPaste] = React.useState('');
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [previewOpen, setPreviewOpen] = React.useState(false);
 
   React.useEffect(() => {
     const doc = asDoc(chapter.contentJson, {
@@ -93,8 +148,14 @@ export default function ChapterBlockEditor({
     mark(blocks.map((block, i) => (i === index ? { ...block, ...partial } : block)));
   };
 
-  const addBlock = (type: TextbookBlockType, after?: number) => {
-    const block = makeBlock(type);
+  const addBlock = (type: TextbookBlockType, after?: number, extra?: Partial<TextbookBlock>) => {
+    const block = makeBlock(type, extra);
+    if (type === 'toc' && !(block.items || []).some((item) => item.trim())) {
+      block.items = headingTitles({
+        schema_version: TEXTBOOK_SCHEMA_VERSION,
+        chapter: { id: String(chapter.id), title, blocks },
+      });
+    }
     const next = [...blocks];
     if (after == null || after < 0 || after >= next.length) next.push(block);
     else next.splice(after + 1, 0, block);
@@ -110,7 +171,7 @@ export default function ChapterBlockEditor({
     mark(next);
   };
 
-  const applyPaste = () => {
+  const applyPaste = (mode: 'append' | 'replace') => {
     const found = parseChapterPaste(paste);
     if (!found.length) {
       message.warning(
@@ -119,20 +180,57 @@ export default function ChapterBlockEditor({
       return;
     }
     const apply = () => {
-      mark(found);
+      mark(mode === 'append' && blocks.length ? [...blocks, ...found] : found);
+      setPaste('');
       message.success(
-        `Detected ${describeDetected(found)}. Check the type on each box if one is wrong, then save.`,
+        mode === 'append' && blocks.length
+          ? `Added ${describeDetected(found)} after the existing content. Save when you are done.`
+          : `Detected ${describeDetected(found)}. Check the type on each box if one is wrong, then save.`,
       );
     };
-    if (blocks.length) {
+    if (mode === 'replace' && blocks.length) {
       Modal.confirm({
-        title: 'Replace this chapter with the pasted content?',
-        content: `This will load ${found.length} detected pieces.`,
+        title: 'Replace the existing chapter?',
+        content: `This removes the ${blocks.length} pieces already in this chapter and loads ${found.length} new ones.`,
         okText: 'Replace',
+        okButtonProps: { danger: true },
         onOk: apply,
       });
-    } else apply();
+      return;
+    }
+    apply();
   };
+
+  const cleanedBlocks = () =>
+    blocks.map((block) => {
+      if (block.type === 'table') {
+        const rows = tableRowsOf(block)
+          .map((row) => row.map((cell) => cell.trim()))
+          .filter((row) => row.some(Boolean));
+        return { ...block, rows };
+      }
+      if (block.type === 'list' || block.type === 'toc') {
+        return { ...block, items: (block.items || []).map((item) => item.trim()).filter(Boolean) };
+      }
+      if (block.type === 'quick_check' || block.type === 'mcq') {
+        const options = (block.options || []).map((item) => item.trim()).filter(Boolean);
+        return {
+          ...block,
+          options,
+          answer: Math.min(Number(block.answer) || 0, Math.max(0, options.length - 1)),
+        };
+      }
+      return block;
+    });
+
+  const currentDoc = (): TextbookDoc => ({
+    schema_version: TEXTBOOK_SCHEMA_VERSION,
+    chapter: {
+      id: String(chapter.id),
+      title: title.trim() || chapter.title,
+      blocks: cleanedBlocks(),
+    },
+  });
 
   const pickPicture = (index: number) => {
     const input = document.createElement('input');
@@ -164,24 +262,8 @@ export default function ChapterBlockEditor({
   };
 
   const save = () => {
-    const cleaned = blocks.map((block) => {
-      if (block.type === 'list') {
-        return { ...block, items: (block.items || []).map((item) => item.trim()).filter(Boolean) };
-      }
-      if (block.type === 'quick_check' || block.type === 'mcq') {
-        const options = (block.options || []).map((item) => item.trim()).filter(Boolean);
-        return {
-          ...block,
-          options,
-          answer: Math.min(Number(block.answer) || 0, Math.max(0, options.length - 1)),
-        };
-      }
-      return block;
-    });
-    const doc: TextbookDoc = {
-      schema_version: TEXTBOOK_SCHEMA_VERSION,
-      chapter: { id: String(chapter.id), title: title.trim() || chapter.title, blocks: cleaned },
-    };
+    const doc = currentDoc();
+    if (!doc.chapter.blocks.length) return;
     setSaving(true);
     saveAdminChapter(chapter, { title: doc.chapter.title, contentJson: doc })
       .then(() => {
@@ -195,9 +277,9 @@ export default function ChapterBlockEditor({
 
   const addMenu = (after?: number) => ({
     items: ADD_ITEMS.map((item) => ({
-      key: item.type,
+      key: `${item.type}-${item.label}`,
       label: item.label,
-      onClick: () => addBlock(item.type, after),
+      onClick: () => addBlock(item.type, after, item.extra),
     })),
   });
 
@@ -217,12 +299,35 @@ export default function ChapterBlockEditor({
       />
 
       <label htmlFor="chapter-paste" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
-        Paste the whole chapter
+        {blocks.length ? 'Paste the next part of the chapter' : 'Paste the chapter'}
       </label>
       <p className="vv-hint">
-        Paste everything in one go. Start each piece with a label so the system can tell them apart.
+        {blocks.length
+          ? 'Paste only the new part. Detect and add keeps what is already here and puts the new pieces at the end.'
+          : 'Paste everything in one go. Start each piece with a label so the system can tell them apart.'}{' '}
         Put a <strong>*</strong> after the correct quiz choice.
       </p>
+      <details className="vv-label-help">
+        <summary>Labels you can paste</summary>
+        <table>
+          <thead>
+            <tr>
+              <th>Label</th>
+              <th>What it becomes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {CHAPTER_PASTE_LABELS.map((item) => (
+              <tr key={item.label}>
+                <td>
+                  <code>{item.label}</code>
+                </td>
+                <td>{item.becomes}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
       <Input.TextArea
         id="chapter-paste"
         rows={12}
@@ -231,10 +336,18 @@ export default function ChapterBlockEditor({
         onChange={(e) => setPaste(e.target.value)}
       />
       <Space style={{ margin: '10px 0 18px' }} wrap>
-        <Button type="primary" onClick={applyPaste}>
-          Detect and fill
+        <Button type="primary" onClick={() => applyPaste('append')}>
+          {blocks.length ? 'Detect and add' : 'Detect and fill'}
         </Button>
+        {blocks.length ? (
+          <Button danger onClick={() => applyPaste('replace')}>
+            Replace chapter
+          </Button>
+        ) : null}
         <Button onClick={() => setPaste(CHAPTER_PASTE_EXAMPLE)}>Load example</Button>
+        {blocks.length ? (
+          <Button onClick={() => setPaste(CHAPTER_PASTE_CONTINUE)}>Load next part</Button>
+        ) : null}
       </Space>
 
       <p className="vv-hint">
@@ -243,22 +356,23 @@ export default function ChapterBlockEditor({
       </p>
 
       {blocks.length === 0 ? (
-        <div className="vv-empty-box">Paste the chapter above, then click Detect and fill.</div>
+        <div className="vv-empty-box">
+          Paste the chapter above, then click Detect and fill.
+          <div style={{ marginTop: 12 }}>
+            <Dropdown menu={addMenu()} trigger={['click']}>
+              <Button icon={<PlusOutlined />}>Add a piece</Button>
+            </Dropdown>
+          </div>
+        </div>
       ) : (
         blocks.map((block, index) => (
           <article key={block.id} className={`vv-block-card is-${block.type}`}>
             <header className="vv-block-head">
               <Select
                 size="small"
-                value={
-                  ['callout', 'important', 'definition', 'example', 'common_mistake'].includes(
-                    block.type,
-                  )
-                    ? 'summary'
-                    : block.type
-                }
-                style={{ minWidth: 150 }}
-                options={ADD_ITEMS.map((item) => ({ value: item.type, label: item.label }))}
+                value={block.type}
+                style={{ minWidth: 180 }}
+                options={BLOCK_TYPES.map((item) => ({ value: item.type, label: item.label }))}
                 onChange={(type) =>
                   mark(
                     blocks.map((item, i) =>
@@ -295,6 +409,10 @@ export default function ChapterBlockEditor({
             </header>
             <BlockFields
               block={block}
+              headings={blocks
+                .filter((item) => item.type === 'heading')
+                .map((item) => item.text || '')
+                .filter(Boolean)}
               onChange={(partial) => patch(index, partial)}
               onPicture={() => pickPicture(index)}
             />
@@ -302,7 +420,17 @@ export default function ChapterBlockEditor({
         ))
       )}
 
-      <Space style={{ marginTop: 16 }}>
+      <Space style={{ marginTop: 16 }} wrap>
+        <Dropdown menu={addMenu()} trigger={['click']}>
+          <Button icon={<PlusOutlined />}>Add a piece</Button>
+        </Dropdown>
+        <Button
+          icon={<EyeOutlined />}
+          onClick={() => setPreviewOpen(true)}
+          disabled={!blocks.length}
+        >
+          Preview book
+        </Button>
         <Button type="primary" onClick={save} loading={saving} disabled={!blocks.length}>
           Save chapter
         </Button>
@@ -312,16 +440,41 @@ export default function ChapterBlockEditor({
           </span>
         ) : null}
       </Space>
+      <Modal
+        title="Book preview"
+        open={previewOpen}
+        onCancel={() => setPreviewOpen(false)}
+        footer={null}
+        width="96vw"
+        style={{ top: 12, maxWidth: 1400 }}
+        wrapClassName="vv-book-preview-modal"
+        destroyOnClose
+      >
+        <p className="vv-hint">
+          This is the current chapter, including unsaved changes. Students see this after you save.
+        </p>
+        <ChapterBookPreview
+          doc={currentDoc()}
+          header={`${chapter.courseName} · ${chapter.semesterTitle || `Semester ${chapter.semesterNumber}`}`}
+          chapterTitle={title.trim() || chapter.title}
+          startPage={chapter.startPage || 1}
+          frontCoverUrl={chapter.frontCoverUrl}
+          backCoverUrl={chapter.backCoverUrl}
+          fit="modal"
+        />
+      </Modal>
     </>
   );
 }
 
 function BlockFields({
   block,
+  headings,
   onChange,
   onPicture,
 }: {
   block: TextbookBlock;
+  headings: string[];
   onChange: (partial: Partial<TextbookBlock>) => void;
   onPicture: () => void;
 }) {
@@ -329,10 +482,11 @@ function BlockFields({
     return (
       <>
         <Radio.Group
-          value={block.level === 3 ? 3 : 2}
+          value={block.level === 1 ? 1 : block.level === 3 ? 3 : 2}
           onChange={(e) => onChange({ level: e.target.value })}
           style={{ marginBottom: 8 }}
         >
+          <Radio value={1}>Chapter title</Radio>
           <Radio value={2}>Section</Radio>
           <Radio value={3}>Sub-section</Radio>
         </Radio.Group>
@@ -345,17 +499,65 @@ function BlockFields({
     );
   }
 
-  if (
-    block.type === 'paragraph' ||
-    block.type === 'split' ||
-    block.type === 'formula' ||
-    block.type === 'unknown'
-  ) {
+  if (block.type === 'toc') {
+    return (
+      <>
+        <p className="vv-hint" style={{ marginBottom: 6 }}>
+          One topic per line. Leave empty to use section titles automatically.
+        </p>
+        <Input.TextArea
+          rows={5}
+          value={(block.items || []).join('\n')}
+          placeholder={headings.join('\n') || 'What is a cell?\nParts of a cell'}
+          onChange={(e) => onChange({ items: e.target.value.split('\n') })}
+        />
+        <Button
+          size="small"
+          style={{ marginTop: 8 }}
+          onClick={() => onChange({ items: headings })}
+          disabled={!headings.length}
+        >
+          Fill from section titles
+        </Button>
+      </>
+    );
+  }
+
+  if (block.type === 'table') {
+    const rows = tableRowsOf(block);
+    return (
+      <>
+        <p className="vv-hint" style={{ marginBottom: 6 }}>
+          One row per line. Separate cells with <strong>|</strong>. The first row is the header.
+        </p>
+        <Input.TextArea
+          rows={6}
+          value={rows.map((row) => row.join(' | ')).join('\n')}
+          placeholder={
+            'Set | Meaning | Example\nUnion | In A or in B | A ∪ B\nIntersection | In A and B | A ∩ B'
+          }
+          onChange={(e) => onChange({ rows: parseTableText(e.target.value) })}
+        />
+        <Input
+          style={{ marginTop: 8 }}
+          value={block.caption || ''}
+          placeholder="Optional caption (what the table shows)"
+          onChange={(e) => onChange({ caption: e.target.value })}
+        />
+      </>
+    );
+  }
+
+  if (block.type === 'paragraph' || block.type === 'formula' || block.type === 'unknown') {
     return (
       <Input.TextArea
-        rows={4}
+        rows={block.type === 'formula' ? 2 : 4}
         value={block.text || block.content || ''}
-        placeholder="Write the lesson in plain language."
+        placeholder={
+          block.type === 'formula'
+            ? 'e.g. Area = length × width'
+            : 'Write the lesson in plain language.'
+        }
         onChange={(e) => onChange({ text: e.target.value, content: e.target.value })}
       />
     );
@@ -370,15 +572,25 @@ function BlockFields({
     block.type === 'example' ||
     block.type === 'common_mistake'
   ) {
+    const placeholder =
+      block.type === 'note'
+        ? 'Explain this in easy words.'
+        : block.type === 'definition'
+          ? 'Write the definition in one or two sentences.'
+          : block.type === 'example'
+            ? 'Give a short example from the lesson.'
+            : block.type === 'important'
+              ? 'The point students must not miss.'
+              : block.type === 'common_mistake'
+                ? 'The mistake students often make, and the right idea.'
+                : block.type === 'callout'
+                  ? 'A short highlight box in the book.'
+                  : 'A short remember-this box in the book.';
     return (
       <Input.TextArea
         rows={4}
         value={block.text || ''}
-        placeholder={
-          block.type === 'note'
-            ? 'Explain this in easy words.'
-            : 'A short remember-this box in the book.'
-        }
+        placeholder={placeholder}
         onChange={(e) => onChange({ text: e.target.value })}
       />
     );
@@ -386,12 +598,22 @@ function BlockFields({
 
   if (block.type === 'list') {
     return (
-      <Input.TextArea
-        rows={5}
-        value={(block.items || []).join('\n')}
-        placeholder="One point per line"
-        onChange={(e) => onChange({ items: e.target.value.split('\n') })}
-      />
+      <>
+        <Radio.Group
+          value={block.ordered ? 'numbered' : 'bullets'}
+          onChange={(e) => onChange({ ordered: e.target.value === 'numbered' })}
+          style={{ marginBottom: 8 }}
+        >
+          <Radio value="bullets">Bullets</Radio>
+          <Radio value="numbered">Numbered</Radio>
+        </Radio.Group>
+        <Input.TextArea
+          rows={5}
+          value={(block.items || []).join('\n')}
+          placeholder="One point per line"
+          onChange={(e) => onChange({ items: e.target.value.split('\n') })}
+        />
+      </>
     );
   }
 
@@ -452,9 +674,18 @@ function BlockFields({
     );
   }
 
-  if (block.type === 'image') {
+  if (block.type === 'image' || block.type === 'split') {
     return (
       <>
+        {block.type === 'split' ? (
+          <Input.TextArea
+            rows={3}
+            value={block.text || ''}
+            placeholder="Write the text that sits beside the picture."
+            style={{ marginBottom: 8 }}
+            onChange={(e) => onChange({ text: e.target.value })}
+          />
+        ) : null}
         {block.src ? (
           <img
             src={block.src}
@@ -467,6 +698,16 @@ function BlockFields({
         <Button onClick={onPicture} style={{ marginBottom: 8 }}>
           {block.src ? 'Change picture' : 'Choose picture'}
         </Button>
+        {block.type === 'split' ? (
+          <Radio.Group
+            value={block.image_right ? 'right' : 'left'}
+            onChange={(e) => onChange({ image_right: e.target.value === 'right' })}
+            style={{ display: 'block', marginBottom: 8 }}
+          >
+            <Radio value="left">Picture on the left</Radio>
+            <Radio value="right">Picture on the right</Radio>
+          </Radio.Group>
+        ) : null}
         <Input
           value={block.caption || ''}
           placeholder="Caption (what the picture shows)"

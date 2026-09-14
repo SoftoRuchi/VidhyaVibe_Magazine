@@ -19,12 +19,14 @@ export type AdminChapter = {
   semesterTitle: string;
   courseId: number;
   courseName: string;
+  frontCoverUrl?: string | null;
+  backCoverUrl?: string | null;
 };
 
 export function chapterStudioPath(
   courseId: number,
   chapterId: number,
-  page: 'text' | 'simple-words' | 'flashcards' | 'quizzes' = 'text',
+  page: 'text' | 'preview' | 'simple-words' | 'flashcards' | 'quizzes' = 'text',
 ) {
   const base = `/admin/courses/${courseId}/chapters/${chapterId}`;
   if (page === 'text') return base;
@@ -54,7 +56,7 @@ export function useAdminChapter() {
     load();
   }, [load]);
 
-  const page: 'text' | 'simple-words' | 'flashcards' | 'quizzes' = pathname?.includes(
+  const page: 'text' | 'preview' | 'simple-words' | 'flashcards' | 'quizzes' = pathname?.includes(
     '/simple-words',
   )
     ? 'simple-words'
@@ -62,7 +64,9 @@ export function useAdminChapter() {
       ? 'flashcards'
       : pathname?.includes('/quizzes')
         ? 'quizzes'
-        : 'text';
+        : pathname?.includes('/preview')
+          ? 'preview'
+          : 'text';
 
   return { courseId, chapterId, chapter, error, load, page, pathname };
 }

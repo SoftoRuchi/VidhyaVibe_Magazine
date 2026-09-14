@@ -70,7 +70,7 @@ function blocksFromHtml(html: string): { id: string; kind: string; text: string;
   wrap.innerHTML = rewriteImages(html || '');
   const nodes = Array.from(
     wrap.querySelectorAll(
-      'h1,h2,h3,p,li,div.course-callout,div.course-split,div.course-flash,figure,img,details.course-explain,aside.course-explain,div.course-explain,aside.course-quick-block',
+      'h1,h2,h3,p,ul,ol,li,nav.course-chapter-toc,div.course-callout,div.course-split,div.course-flash,figure,img,details.course-explain,aside.course-explain,div.course-explain,aside.course-quick-block,div.course-table-wrap,table.course-table',
     ),
   ).filter((el) => {
     if (el.closest('.course-flash') && !el.classList.contains('course-flash')) return false;
@@ -78,8 +78,20 @@ function blocksFromHtml(html: string): { id: string; kind: string; text: string;
     if (el.closest('.course-quick-block') && !el.classList.contains('course-quick-block'))
       return false;
     if (el.closest('div.course-split') && !el.classList.contains('course-split')) return false;
+    if (el.closest('div.course-callout') && !el.classList.contains('course-callout')) return false;
+    if (el.closest('nav.course-chapter-toc') && el.tagName.toLowerCase() !== 'nav') return false;
+    if (el.closest('.course-table-wrap') && !el.classList.contains('course-table-wrap'))
+      return false;
+    if (el.tagName.toLowerCase() === 'table' && el.closest('figure, div.course-table-wrap'))
+      return false;
+    if (el.tagName.toLowerCase() === 'li' && el.closest('ul, ol')) return false;
+    if (
+      el.tagName.toLowerCase() === 'p' &&
+      el.closest('ul, ol, li, figure, table, .course-table-wrap')
+    )
+      return false;
     if (el.tagName.toLowerCase() !== 'img') return true;
-    return !el.closest('figure, p, li, h1, h2, h3, details, aside');
+    return !el.closest('figure, p, li, h1, h2, h3, details, aside, ul, ol, table');
   });
   return nodes
     .map((el, i) => {
@@ -94,15 +106,30 @@ function blocksFromHtml(html: string): { id: string; kind: string; text: string;
               ? 'explain'
               : el.classList.contains('course-callout')
                 ? 'callout'
-                : tag === 'p' && el.classList.contains('course-kicker')
-                  ? 'kicker'
-                  : tag;
+                : el.classList.contains('course-chapter-toc')
+                  ? 'toc'
+                  : el.classList.contains('course-table-wrap') ||
+                      el.classList.contains('course-table')
+                    ? 'table'
+                    : tag === 'p' && el.classList.contains('course-formula')
+                      ? 'formula'
+                      : tag === 'p' && el.classList.contains('course-kicker')
+                        ? 'kicker'
+                        : tag;
       const id = `b-${i}`;
       if (kind === 'explain') el.setAttribute('data-explain-id', id);
       return { id, kind, text: (el.textContent || '').trim(), html: el.outerHTML };
     })
     .filter(
-      (b) => b.text.length > 0 || b.kind === 'img' || b.kind === 'figure' || b.kind === 'split',
+      (b) =>
+        b.text.length > 0 ||
+        b.kind === 'img' ||
+        b.kind === 'figure' ||
+        b.kind === 'split' ||
+        b.kind === 'toc' ||
+        b.kind === 'table' ||
+        b.kind === 'ul' ||
+        b.kind === 'ol',
     );
 }
 
@@ -123,9 +150,29 @@ function escapeHtml(value: string) {
     .replace(/"/g, '&quot;');
 }
 
+function coverPageHtml(src: string, label: string) {
+  return `<figure class="course-book-cover"><img src="${escapeHtml(src)}" alt="${escapeHtml(label)}" /></figure>`;
+}
+
+function withCoverPages(pages: string[][], front?: string | null, back?: string | null) {
+  let next = pages;
+  if (front) next = [[coverPageHtml(front, 'Front cover')], ...next];
+  if (back) next = [...next, [coverPageHtml(back, 'Back cover')]];
+  return next.length ? next : pages;
+}
+
+function isCoverHtml(html: string) {
+  return /course-book-cover/.test(html);
+}
+
 function canSplitBlock(kind: string) {
   return (
-    kind === 'p' || kind === 'li' || kind === 'callout' || kind === 'explain' || kind === 'kicker'
+    kind === 'p' ||
+    kind === 'li' ||
+    kind === 'callout' ||
+    kind === 'explain' ||
+    kind === 'kicker' ||
+    kind === 'formula'
   );
 }
 
@@ -191,14 +238,14 @@ async function paginateByMeasure(
   const sheetStyle = opts.a4
     ? 'width:100%;height:100%;font-size:' + opts.font + '%;min-height:0;box-sizing:border-box'
     : `width:${opts.width}px;height:${opts.height}px;font-size:${opts.font}%;min-height:0;box-sizing:border-box`;
-  const inner = `<div class="course-book-sheet is-${opts.theme}" style="${sheetStyle}">
+  const inner = `<div class="course-book-sheet is-${opts.theme} is-verso" style="${sheetStyle}">
     <div class="course-book-running">${escapeHtml(opts.header || 'Chapter')}</div>
     <div class="course-book-running-title">${escapeHtml(opts.chapterTitle || ' ')}</div>
     <div class="course-chapter course-book-body"></div>
     <div class="course-book-folio">0</div>
   </div>`;
   host.innerHTML = opts.a4
-    ? `<div class="course-book is-a4" style="width:${opts.width}px"><div class="course-book-solo" style="width:${opts.width}px;height:${opts.height}px">${inner}</div></div>`
+    ? `<div class="course-book is-a4 is-spread" style="width:${opts.width}px"><div class="course-book-solo" style="width:${opts.width}px;height:${opts.height}px">${inner}</div></div>`
     : `<div class="course-book" style="width:${opts.width}px">${inner}</div>`;
   document.body.appendChild(host);
   const sheet = host.querySelector('.course-book-sheet') as HTMLElement;
@@ -504,10 +551,11 @@ function highlightSame(a: string, b: string) {
   return left.length >= 2 && left === right;
 }
 
-function tocFromPages(pages: string[][], startPage: number) {
+function tocFromPages(pages: string[][], startPage: number, coverShift = 0) {
   const items: { title: string; level: number; page: number }[] = [];
   pages.forEach((htmls, i) => {
     htmls.forEach((html) => {
+      if (isCoverHtml(html)) return;
       const match = html.match(/<h([123])[^>]*>([\s\S]*?)<\/h\1>/i);
       if (!match) return;
       const title = match[2]
@@ -515,18 +563,18 @@ function tocFromPages(pages: string[][], startPage: number) {
         .replace(/\s+/g, ' ')
         .trim();
       if (!title) return;
-      items.push({ title, level: Number(match[1]), page: startPage + i });
+      items.push({ title, level: Number(match[1]), page: startPage + i - coverShift });
     });
   });
   return items;
 }
 
-function searchPages(pages: string[][], startPage: number, query: string) {
+function searchPages(pages: string[][], startPage: number, query: string, coverShift = 0) {
   const needle = foldSearch(query);
   if (needle.length < 2) return [] as { snippet: string; page: number; anchor: string }[];
   const hits: { snippet: string; page: number; anchor: string }[] = [];
   const seen = new Set<string>();
-  tocFromPages(pages, startPage).forEach((item) => {
+  tocFromPages(pages, startPage, coverShift).forEach((item) => {
     const title = item.title.trim();
     const key = foldSearch(title);
     if (!title || seen.has(key) || !phraseMatchesSearch(key, needle)) return;
@@ -542,7 +590,11 @@ function searchPages(pages: string[][], startPage: number, query: string) {
       const key = foldSearch(text);
       if (seen.has(key)) continue;
       seen.add(key);
-      hits.push({ snippet: clipSearchSnippet(text), page: startPage + i, anchor: text });
+      hits.push({
+        snippet: clipSearchSnippet(text),
+        page: startPage + i - coverShift,
+        anchor: text,
+      });
       break;
     }
   });
@@ -581,12 +633,15 @@ function spreadIndexFor(spreads: CourseSpread[], pageIndex: number) {
   return found < 0 ? 0 : found;
 }
 
-function useA4PageSize(leaves: 1 | 2) {
+function useA4PageSize(slot: React.RefObject<HTMLElement | null>, leaves: 1 | 2) {
   const [size, setSize] = React.useState({ w: 420, h: 594 });
   React.useEffect(() => {
     const update = () => {
-      const maxH = Math.min(window.innerHeight * 0.78, 900);
-      const maxW = Math.min(window.innerWidth - 40, 1360);
+      const maxH = Math.min(Math.max(280, window.innerHeight - 170), 820);
+      const maxW = Math.max(
+        240,
+        Math.min(slot.current?.clientWidth || window.innerWidth - 200, 1360),
+      );
       const ratio = 297 / 210;
       const gutter = leaves === 2 ? 14 : 0;
       let height = maxH;
@@ -598,9 +653,15 @@ function useA4PageSize(leaves: 1 | 2) {
       setSize({ w: Math.round(width), h: Math.round(height) });
     };
     update();
+    const el = slot.current;
+    const ro = el ? new ResizeObserver(update) : null;
+    if (el && ro) ro.observe(el);
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [leaves]);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [leaves, slot]);
   return size;
 }
 
@@ -625,6 +686,8 @@ export default function CourseBookReader({
   chapterId,
   initialPage,
   quickChecks = [],
+  frontCoverUrl,
+  backCoverUrl,
 }: {
   html: string;
   header: string;
@@ -633,6 +696,8 @@ export default function CourseBookReader({
   chapterId?: number;
   initialPage?: number;
   quickChecks?: CourseQuickCheckItem[];
+  frontCoverUrl?: string | null;
+  backCoverUrl?: string | null;
 }) {
   const [index, setIndex] = React.useState(0);
   const [pages, setPages] = React.useState<string[][]>([['<p>Loading…</p>']]);
@@ -722,6 +787,7 @@ export default function CourseBookReader({
   const htmlRef = React.useRef<string | null>(null);
   const explainAnchor = React.useRef<string | null>(null);
   const bookRef = React.useRef<HTMLDivElement | null>(null);
+  const slotRef = React.useRef<HTMLDivElement | null>(null);
   const spread = wide && wantSpread;
   const spreads = React.useMemo(
     () => courseSpreads(pages.length, startPage),
@@ -732,7 +798,7 @@ export default function CourseBookReader({
     ? spreads[spreadAt] || { left: index, right: null }
     : { left: index, right: null };
   const soloLeaf = !spread || openSpread.left == null || openSpread.right == null;
-  const a4 = useA4PageSize(spread && !soloLeaf ? 2 : 1);
+  const a4 = useA4PageSize(slotRef, spread ? 2 : 1);
   const imgMax = Math.max(120, Math.round(a4.h * 0.28));
   const goSpread = React.useCallback(
     (delta: number) => {
@@ -767,20 +833,30 @@ export default function CourseBookReader({
       imgMax,
     }).then((pagesHtml) => {
       if (cancelled) return;
-      setPages(pagesHtml);
+      const next = withCoverPages(
+        pagesHtml,
+        frontCoverUrl ? resolveSrc(frontCoverUrl) : null,
+        backCoverUrl ? resolveSrc(backCoverUrl) : null,
+      );
+      setPages(next);
       const anchor = explainAnchor.current;
       explainAnchor.current = null;
+      const coverShift = frontCoverUrl ? 1 : 0;
       setIndex((i) => {
         if (anchor) {
-          const found = pagesHtml.findIndex((page) =>
+          const found = next.findIndex((page) =>
             page.some((item) => item.includes(`data-explain-id="${anchor}"`)),
           );
           if (found >= 0) return found;
         }
-        const raw = htmlChanged ? (initialPage ? Math.max(0, initialPage - startPage) : 0) : i;
-        return Math.min(Math.max(0, raw), Math.max(0, pagesHtml.length - 1));
+        const raw = htmlChanged
+          ? initialPage
+            ? Math.max(0, initialPage - startPage) + coverShift
+            : 0
+          : i;
+        return Math.min(Math.max(0, raw), Math.max(0, next.length - 1));
       });
-      setToolIndex((i) => Math.min(Math.max(0, i), Math.max(0, pagesHtml.length - 1)));
+      setToolIndex((i) => Math.min(Math.max(0, i), Math.max(0, next.length - 1)));
     });
     return () => {
       cancelled = true;
@@ -798,6 +874,8 @@ export default function CourseBookReader({
     header,
     chapterTitle,
     imgMax,
+    frontCoverUrl,
+    backCoverUrl,
   ]);
 
   React.useEffect(() => {
@@ -907,11 +985,19 @@ export default function CourseBookReader({
     return () => document.removeEventListener('selectionchange', onSel);
   }, []);
 
+  const coverShift = frontCoverUrl ? 1 : 0;
   const toolPage = Math.min(Math.max(0, toolIndex), Math.max(0, pages.length - 1));
-  const printed = startPage + toolPage;
+  const pageCaption = (pageIndex: number) => {
+    const pageHtml = pages[pageIndex]?.join('') || '';
+    if (isCoverHtml(pageHtml)) return frontCoverUrl && pageIndex === 0 ? 'Cover' : 'Back';
+    return String(startPage + pageIndex - coverShift);
+  };
+  const printedFor = (pageIndex: number) => startPage + pageIndex - coverShift;
+  const indexFromPrinted = (page: number) => Math.max(0, page - startPage + coverShift);
+  const printed = printedFor(toolPage);
   const visiblePages = [openSpread.left, openSpread.right].filter((v): v is number => v != null);
   const bookmarkFor = (pageIndex: number) =>
-    study.bookmarks.find((b) => b.pageNumber === startPage + pageIndex);
+    study.bookmarks.find((b) => b.pageNumber === printedFor(pageIndex));
   const searchMarks =
     activeSearch.trim().length >= 2
       ? [{ text: activeSearch.trim(), color: '#9EE7FF', wholeWord: true }]
@@ -928,16 +1014,22 @@ export default function CourseBookReader({
     ]);
   const canRemove =
     picked.length >= 2 && study.highlights.some((h) => highlightOverlaps(h.text, picked));
-  const toc = tocFromPages(pages, startPage);
-  const searchHits = searchPages(pages, startPage, submittedQuery);
+  const toc = tocFromPages(pages, startPage, coverShift);
+  const searchHits = searchPages(pages, startPage, submittedQuery, coverShift);
 
   const runSearch = () => {
     setSubmittedQuery(query.trim());
   };
   const topicIndex = toc.reduce((best, item, i) => (item.page <= printed ? i : best), 0);
   const topicLabel = toc.length ? `Topic ${topicIndex + 1} of ${toc.length}` : '';
-  const lastPrinted = startPage + Math.max(0, pages.length - 1);
-  const visiblePrinted = visiblePages.map((p) => startPage + p);
+  const lastContentIndex = pages.reduce(
+    (last, page, i) => (isCoverHtml(page.join('')) ? last : i),
+    -1,
+  );
+  const lastPrinted = lastContentIndex >= 0 ? printedFor(lastContentIndex) : startPage;
+  const visiblePrinted = visiblePages
+    .filter((p) => !isCoverHtml(pages[p]?.join('') || ''))
+    .map((p) => printedFor(p));
   const pageCheck =
     quickChecks.find(
       (item) => item.pageNumber != null && visiblePrinted.includes(item.pageNumber),
@@ -960,7 +1052,7 @@ export default function CourseBookReader({
   const setBookmark = async (markType: CourseBookmarkType, pageIndex = toolPage) => {
     if (!chapterId) return;
     try {
-      await addCourseBookmark(chapterId, startPage + pageIndex, markType);
+      await addCourseBookmark(chapterId, printedFor(pageIndex), markType);
       setRibbonPage(null);
       loadStudy();
     } catch {
@@ -1092,15 +1184,17 @@ export default function CourseBookReader({
         </div>
       );
     }
-    const pagePrinted = startPage + pageIndex;
-    const bookmark = bookmarkFor(pageIndex);
+    const html = markedPage(pageIndex);
+    const cover = isCoverHtml(html);
+    const pagePrinted = printedFor(pageIndex);
+    const bookmark = cover ? undefined : bookmarkFor(pageIndex);
     return (
       <div
-        className={`course-book-sheet is-${theme}${sideClass}`}
+        className={`course-book-sheet is-${theme}${sideClass}${cover ? ' is-cover' : ''}`}
         style={{ fontSize: `${font}%` }}
         data-course-page={pageIndex}
       >
-        {chapterId ? (
+        {chapterId && !cover ? (
           <div className="course-book-ribbon-wrap">
             <button
               type="button"
@@ -1139,135 +1233,155 @@ export default function CourseBookReader({
         <div
           className="course-chapter course-book-body"
           data-course-page={pageIndex}
-          dangerouslySetInnerHTML={{ __html: markedPage(pageIndex) }}
+          dangerouslySetInnerHTML={{ __html: html }}
         />
         <div className="course-book-folio">{pagePrinted}</div>
       </div>
     );
   };
 
+  const captions = visiblePages.map(pageCaption);
   const pageMeta = spread
-    ? visiblePrinted.length > 1
-      ? `${visiblePrinted[0]}–${visiblePrinted[visiblePrinted.length - 1]}`
-      : String(visiblePrinted[0] || startPage)
-    : String(printed);
+    ? captions.length > 1
+      ? `${captions[0]}–${captions[captions.length - 1]}`
+      : captions[0] || 'Cover'
+    : pageCaption(toolPage);
+
+  const atStart = spread ? spreadAt <= 0 : index <= 0;
+  const atEnd = spread ? spreadAt >= spreads.length - 1 : index >= pages.length - 1;
 
   return (
     <div className={`course-reader-with-notes${spread ? ' is-spread' : ''}`}>
-      <div
-        ref={bookRef}
-        className={`course-book${spread ? ' is-spread is-a4' : ''}${spread && soloLeaf ? ' is-solo' : ''}`}
-        style={{ ['--course-img-max' as string]: `${imgMax}px` } as React.CSSProperties}
-      >
-        {spread && soloLeaf ? (
-          <div className="course-book-solo" style={{ width: a4.w, height: a4.h }}>
-            {renderSheet(openSpread.left ?? openSpread.right ?? index)}
-          </div>
-        ) : spread ? (
-          <div className="course-book-open" style={{ width: a4.w * 2 + 14, height: a4.h }}>
-            {renderSheet(openSpread.left, 'verso')}
-            <div className="course-book-gutter" aria-hidden />
-            {renderSheet(openSpread.right, 'recto')}
-          </div>
-        ) : (
-          renderSheet(index)
-        )}
-        {chapterId ? (
-          <div className="course-selection-bar">
-            <div className="course-ink-row">
-              {HIGHLIGHTER_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  className={`course-ink-dot${ink === color ? ' is-on' : ''}`}
-                  style={{ background: color }}
-                  aria-label={`Highlight ${color}`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    setInk(color);
-                    if (picked.length >= 2) highlightSelection(color);
-                  }}
-                />
-              ))}
-            </div>
-            {picked.length >= 2 ? (
-              <>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => highlightSelection()}
-                >
-                  Highlight
-                </button>
-                {canRemove ? (
+      <div className="course-book-stage">
+        <button
+          type="button"
+          className="course-book-side-btn is-prev"
+          disabled={atStart}
+          aria-label="Previous pages"
+          onClick={() => goSpread(-1)}
+        >
+          <span>←</span>
+          Previous
+        </button>
+        <div className="course-book-slot" ref={slotRef}>
+          <div
+            ref={bookRef}
+            className={`course-book${spread ? ' is-spread is-a4' : ''}${spread && soloLeaf ? ' is-solo' : ''}`}
+            style={{ ['--course-img-max' as string]: `${imgMax}px` } as React.CSSProperties}
+          >
+            {spread && soloLeaf ? (
+              <div className="course-book-solo" style={{ width: a4.w, height: a4.h }}>
+                {renderSheet(openSpread.left ?? openSpread.right ?? index)}
+              </div>
+            ) : spread ? (
+              <div className="course-book-open" style={{ width: a4.w * 2 + 14, height: a4.h }}>
+                {renderSheet(openSpread.left, 'verso')}
+                <div className="course-book-gutter" aria-hidden />
+                {renderSheet(openSpread.right, 'recto')}
+              </div>
+            ) : (
+              renderSheet(index)
+            )}
+            <div className="course-selection-bar">
+              <div className="course-ink-row">
+                {HIGHLIGHTER_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`course-ink-dot${ink === color ? ' is-on' : ''}`}
+                    style={{ background: color }}
+                    aria-label={`Highlight ${color}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setInk(color);
+                      if (picked.length >= 2) highlightSelection(color);
+                    }}
+                  />
+                ))}
+              </div>
+              {picked.length >= 2 ? (
+                <>
                   <button
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={removeHighlights}
+                    onClick={() => highlightSelection()}
                   >
-                    Remove
+                    Highlight
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={addNoteFromSelection}
-                >
-                  Add to notes
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={addFlashcardFromSelection}
-                >
-                  Flashcard
-                </button>
-              </>
-            ) : (
-              <p className="course-highlight-hint">Select text, then tap a color.</p>
-            )}
+                  {canRemove ? (
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={removeHighlights}
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                  {chapterId ? (
+                    <>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={addNoteFromSelection}
+                      >
+                        Add to notes
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={addFlashcardFromSelection}
+                      >
+                        Flashcard
+                      </button>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <p className="course-highlight-hint">Select text, then tap a color.</p>
+              )}
+              <div className="course-book-page-meta">
+                <span>
+                  {spread
+                    ? `${pageMeta} · ${pages.length} pages`
+                    : `${index + 1} / ${pages.length}`}
+                </span>
+                {topicLabel ? <small>{topicLabel}</small> : null}
+              </div>
+            </div>
+            {pageCheck ? (
+              <button
+                type="button"
+                className="course-quick-launch"
+                onClick={() => setPanel('check')}
+              >
+                <strong>Quick check</strong>
+                <span>{pageCheck.title}</span>
+              </button>
+            ) : null}
+            {cards.length ? (
+              <button
+                type="button"
+                className="course-quick-launch course-flash-launch"
+                onClick={() => setPanel('cards')}
+              >
+                <strong>Flashcards</strong>
+                <span>
+                  {cards.length} card{cards.length === 1 ? '' : 's'} from this chapter
+                </span>
+              </button>
+            ) : null}
           </div>
-        ) : null}
-        <div className="course-book-nav">
-          <button
-            type="button"
-            disabled={spread ? spreadAt <= 0 : index <= 0}
-            onClick={() => goSpread(-1)}
-          >
-            ← Previous
-          </button>
-          <div className="course-book-page-meta">
-            <span>
-              {spread ? `${pageMeta} · ${pages.length} pages` : `${index + 1} / ${pages.length}`}
-            </span>
-            {topicLabel ? <small>{topicLabel}</small> : null}
-          </div>
-          <button
-            type="button"
-            disabled={spread ? spreadAt >= spreads.length - 1 : index >= pages.length - 1}
-            onClick={() => goSpread(1)}
-          >
-            Next →
-          </button>
         </div>
-        {pageCheck ? (
-          <button type="button" className="course-quick-launch" onClick={() => setPanel('check')}>
-            <strong>Quick check</strong>
-            <span>{pageCheck.title}</span>
-          </button>
-        ) : null}
-        {cards.length ? (
-          <button
-            type="button"
-            className="course-quick-launch course-flash-launch"
-            onClick={() => setPanel('cards')}
-          >
-            <strong>Flashcards</strong>
-            <span>
-              {cards.length} card{cards.length === 1 ? '' : 's'} from this chapter
-            </span>
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="course-book-side-btn is-next"
+          disabled={atEnd}
+          aria-label="Next pages"
+          onClick={() => goSpread(1)}
+        >
+          <span>→</span>
+          Next
+        </button>
       </div>
       {chapterId ? (
         <aside className="course-notes-section" id="course-notes">
@@ -1326,7 +1440,7 @@ export default function CourseBookReader({
                   type="button"
                   className="course-toc-item"
                   style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
-                  onClick={() => setIndex(Math.max(0, item.page - startPage))}
+                  onClick={() => setIndex(indexFromPrinted(item.page))}
                 >
                   <span>{item.title}</span>
                   <span>p.{item.page}</span>
@@ -1428,7 +1542,7 @@ export default function CourseBookReader({
                     <button
                       type="button"
                       className="course-note-page"
-                      onClick={() => setIndex(Math.max(0, h.pageNumber! - startPage))}
+                      onClick={() => setIndex(indexFromPrinted(h.pageNumber!))}
                     >
                       Page {h.pageNumber}
                     </button>
@@ -1463,7 +1577,7 @@ export default function CourseBookReader({
                       type="button"
                       className="course-note-page"
                       onClick={() => {
-                        setIndex(Math.max(0, n.pageNumber! - startPage));
+                        setIndex(indexFromPrinted(n.pageNumber!));
                         setQuoteMark(n.quote || '');
                       }}
                     >
@@ -1602,7 +1716,7 @@ export default function CourseBookReader({
                     <button
                       type="button"
                       className="course-note-page"
-                      onClick={() => setIndex(Math.max(0, b.pageNumber - startPage))}
+                      onClick={() => setIndex(indexFromPrinted(b.pageNumber))}
                     >
                       Page {b.pageNumber}
                     </button>
@@ -1643,7 +1757,7 @@ export default function CourseBookReader({
                   type="button"
                   className={`course-toc-item${i === topicIndex ? ' is-on' : ''}`}
                   style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
-                  onClick={() => setIndex(Math.max(0, item.page - startPage))}
+                  onClick={() => setIndex(indexFromPrinted(item.page))}
                 >
                   <span>
                     {item.page <= printed ? '✓ ' : ''}

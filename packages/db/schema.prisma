@@ -769,6 +769,7 @@ model CourseSubject {
   description String?   @db.Text
   syllabusCode String?  @map("syllabus_code") @db.VarChar(80)
   coverKey    String?   @map("cover_key") @db.VarChar(1024)
+  backCoverKey String?  @map("back_cover_key") @db.VarChar(1024)
   fileKey     String?   @map("file_key") @db.VarChar(1024)
   sampleKey   String?   @map("sample_key") @db.VarChar(1024)
   pages       Int?

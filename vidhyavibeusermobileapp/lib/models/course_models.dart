@@ -271,6 +271,8 @@ class CourseChapterDetail {
     required this.courseName,
     this.startPage,
     this.endPage,
+    this.frontCoverUrl,
+    this.backCoverUrl,
     this.activities = const [],
   });
 
@@ -284,6 +286,8 @@ class CourseChapterDetail {
   final String courseName;
   final int? startPage;
   final int? endPage;
+  final String? frontCoverUrl;
+  final String? backCoverUrl;
   final List<CourseChapterActivity> activities;
 
   factory CourseChapterDetail.fromJson(Map<String, dynamic> json) {
@@ -301,6 +305,8 @@ class CourseChapterDetail {
       courseName: course['name']?.toString() ?? '',
       startPage: _asInt(json['startPage']),
       endPage: _asInt(json['endPage']),
+      frontCoverUrl: subject['frontCoverUrl']?.toString(),
+      backCoverUrl: subject['backCoverUrl']?.toString(),
       activities: raw is List
           ? raw
               .whereType<Map>()
