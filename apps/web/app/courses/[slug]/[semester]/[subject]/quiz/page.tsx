@@ -4,9 +4,11 @@ import { Button, Empty, Radio, Spin, message } from 'antd';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import React from 'react';
+import { CourseAccessBlocked } from '../../../../../../components/CourseBrowse';
 import { useAuth } from '../../../../../../lib/authContext';
 import {
   completeLearnActivity,
+  courseAccessMessage,
   courseLoginHref,
   fetchChapter,
   fetchSemester,
@@ -40,6 +42,8 @@ export default function CourseQuizPage() {
   const [activity, setActivity] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(true);
   const [needLogin, setNeedLogin] = React.useState(false);
+  const [accessError, setAccessError] = React.useState('');
+  const [blockedSubjectId, setBlockedSubjectId] = React.useState<number | null>(null);
   const [answers, setAnswers] = React.useState<number[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [result, setResult] = React.useState<any>(null);
@@ -60,38 +64,44 @@ export default function CourseQuizPage() {
         const sem = await fetchSemester(slug, number);
         const match = (sem.subjects || []).find((s: any) => s.slug === subjectSlug);
         if (!match) return;
-        const sub = await fetchSubject(match.id);
-        const chapters = sub.chapters || [];
-        const chMeta = chapters.find((c: any) => c.slug === chapterSlug) || chapters[0];
-        if (!chMeta) {
-          if (!cancelled) setSubject(sub);
-          return;
-        }
-        const ch = await fetchChapter(chMeta.id);
-        const acts = ch.activities || [];
-        const quiz =
-          acts.find((a: any) => a.activityType === 'QUIZ' && a.placement === 'PRACTICE') ||
-          acts.find((a: any) => a.activityType === 'QUIZ') ||
-          acts.find((a: any) => a.placement === 'PRACTICE') ||
-          acts[0];
-        if (cancelled) return;
-        setSubject(sub);
-        setChapter(ch);
-        setActivity(quiz || null);
-        const questions: Question[] = Array.isArray(quiz?.config?.questions)
-          ? quiz.config.questions
-          : [];
-        setAnswers(Array(questions.length).fill(-1));
-        startedAt.current = Date.now();
-        if (quiz?.id) {
-          try {
-            await startLearnActivity(quiz.id);
-          } catch (e: any) {
-            if (e?.response?.status === 409) setPracticeOnly(true);
+        try {
+          const sub = await fetchSubject(match.id);
+          const chapters = sub.chapters || [];
+          const chMeta = chapters.find((c: any) => c.slug === chapterSlug) || chapters[0];
+          if (!chMeta) {
+            if (!cancelled) setSubject(sub);
+            return;
+          }
+          const ch = await fetchChapter(chMeta.id);
+          const acts = ch.activities || [];
+          const quiz =
+            acts.find((a: any) => a.activityType === 'QUIZ' && a.placement === 'PRACTICE') ||
+            acts.find((a: any) => a.activityType === 'QUIZ') ||
+            acts.find((a: any) => a.placement === 'PRACTICE') ||
+            acts[0];
+          if (cancelled) return;
+          setSubject(sub);
+          setChapter(ch);
+          setActivity(quiz || null);
+          const questions: Question[] = Array.isArray(quiz?.config?.questions)
+            ? quiz.config.questions
+            : [];
+          setAnswers(Array(questions.length).fill(-1));
+          startedAt.current = Date.now();
+          if (quiz?.id) {
+            try {
+              await startLearnActivity(quiz.id);
+            } catch (e: any) {
+              if (e?.response?.status === 409) setPracticeOnly(true);
+            }
+          }
+        } catch (e: any) {
+          if (e?.response?.status === 401) setNeedLogin(true);
+          else if (e?.response?.status === 403) {
+            setBlockedSubjectId(match.id);
+            setAccessError(courseAccessMessage(e) || 'You do not have access to this book.');
           }
         }
-      } catch (e: any) {
-        if (e?.response?.status === 401) setNeedLogin(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -175,6 +185,15 @@ export default function CourseQuizPage() {
           <Button type="primary">Login to take the quiz</Button>
         </Link>
       </main>
+    );
+  }
+  if (accessError) {
+    return (
+      <CourseAccessBlocked
+        message={accessError}
+        backHref={`/courses/${slug}`}
+        subjectId={blockedSubjectId}
+      />
     );
   }
   if (!subject || !chapter) {

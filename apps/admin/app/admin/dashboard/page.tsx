@@ -9,6 +9,7 @@ import {
   ShoppingCartOutlined,
   DollarOutlined,
   FilePdfOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons';
 import { Card, Col, List, Row, Tag, Button, Spin } from 'antd';
 import Link from 'next/link';
@@ -31,6 +32,7 @@ export default function DashboardIndex() {
   const activeMagazines = summary?.totalMagazines ?? 0;
   const totalSubscriptions = summary?.totalSubscriptions ?? 0;
   const monthlyRevenue = (summary?.totalRevenueCents ?? 0) / 100;
+  const liveBookReaders = summary?.liveBookReaders ?? 0;
 
   const kpis = [
     {
@@ -56,6 +58,13 @@ export default function DashboardIndex() {
       value: monthlyRevenue.toFixed(2),
       gradient: 'linear-gradient(135deg, rgba(139,92,246,0.85) 0%, rgba(124,58,237,0.70) 100%)',
       icon: <RiseOutlined />,
+    },
+    {
+      label: 'LIVE BOOK READERS',
+      value: liveBookReaders,
+      href: '/admin/live-seats',
+      gradient: 'linear-gradient(135deg, rgba(14,165,233,0.85) 0%, rgba(2,132,199,0.70) 100%)',
+      icon: <DesktopOutlined />,
     },
   ];
 
@@ -197,6 +206,12 @@ export default function DashboardIndex() {
       icon: <ShoppingCartOutlined />,
       bg: '#ef4444',
     },
+    {
+      href: '/admin/live-seats',
+      label: 'Live seats',
+      icon: <DesktopOutlined />,
+      bg: '#0ea5e9',
+    },
   ];
 
   return (
@@ -235,54 +250,66 @@ export default function DashboardIndex() {
           <>
             <Row gutter={[16, 16]}>
               {kpis.map((k) => (
-                <Col key={k.label} xs={24} sm={12} lg={6}>
-                  <Card
-                    bordered={false}
+                <Col key={k.label} xs={24} sm={12} lg={8} xl={k.href ? 8 : 4}>
+                  <Link
+                    href={k.href || '#'}
                     style={{
-                      borderRadius: 16,
-                      background: k.gradient,
-                      boxShadow: '0 10px 22px rgba(0,0,0,0.08)',
-                      color: '#fff',
+                      textDecoration: 'none',
+                      display: 'block',
+                      pointerEvents: k.href ? 'auto' : 'none',
                     }}
-                    bodyStyle={{ padding: 16 }}
                   >
-                    <div
+                    <Card
+                      bordered={false}
+                      hoverable={!!k.href}
                       style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: 12,
+                        borderRadius: 16,
+                        background: k.gradient,
+                        boxShadow: '0 10px 22px rgba(0,0,0,0.08)',
+                        color: '#fff',
                       }}
+                      bodyStyle={{ padding: 16 }}
                     >
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 800,
-                            letterSpacing: 0.4,
-                            opacity: 0.92,
-                          }}
-                        >
-                          {k.label}
-                        </div>
-                        <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>{k.value}</div>
-                      </div>
                       <div
                         style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: 14,
-                          background: 'rgba(255,255,255,0.18)',
                           display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: 18,
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: 12,
                         }}
                       >
-                        {k.icon}
+                        <div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 800,
+                              letterSpacing: 0.4,
+                              opacity: 0.92,
+                            }}
+                          >
+                            {k.label}
+                          </div>
+                          <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6 }}>
+                            {k.value}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 14,
+                            background: 'rgba(255,255,255,0.18)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 18,
+                          }}
+                        >
+                          {k.icon}
+                        </div>
                       </div>
-                    </div>
-                  </Card>
+                    </Card>
+                  </Link>
                 </Col>
               ))}
             </Row>

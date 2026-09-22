@@ -4,11 +4,11 @@ import { Empty, Spin } from 'antd';
 import React from 'react';
 import {
   CourseContinueCard,
+  CourseGrid,
   CourseHero,
-  CourseNavCard,
+  CourseProgramCard,
   CourseSection,
 } from '../../components/CourseBrowse';
-import { courseCountLabel } from '../../lib/courseLabels';
 import {
   fetchCourses,
   fetchCourseContinue,
@@ -39,7 +39,7 @@ export default function CoursesPage() {
       <CourseHero
         kicker="VidhyaVibe courses"
         title="Read. Practise. Revise."
-        subtitle="University textbooks you can read like a book, then practise with quizzes."
+        subtitle="Open a programme, or subscribe to a textbook for individual access."
       />
       {cont?.href ? (
         <CourseContinueCard
@@ -62,19 +62,11 @@ export default function CoursesPage() {
       ) : (
         <>
           <CourseSection title="Your programmes" />
-          <div className="course-nav-list">
+          <CourseGrid>
             {courses.map((c) => (
-              <CourseNavCard
-                key={c.id}
-                href={`/courses/${c.slug}`}
-                badge="▣"
-                title={c.name}
-                subtitle={[c.university, courseCountLabel(c.semesterCount || 0, 'semester')]
-                  .filter(Boolean)
-                  .join(' · ')}
-              />
+              <CourseProgramCard key={c.id} course={c} />
             ))}
-          </div>
+          </CourseGrid>
         </>
       )}
     </main>

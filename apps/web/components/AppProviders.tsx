@@ -7,6 +7,7 @@ import React, { useEffect } from 'react';
 import StyledComponentsRegistry from '../lib/AntdRegistry';
 import api from '../lib/api';
 import { AuthProvider } from '../lib/authContext';
+import { ProductModeProvider, useProductMode } from '../lib/productMode';
 import { prefetchCommonData } from '../lib/routePrefetch';
 import Footer from './Footer';
 import Navbar from './Navbar';
@@ -16,12 +17,6 @@ const PostLoginChildSetupModal = dynamic(() => import('./PostLoginChildSetupModa
 });
 
 export default function AppProviders({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-
-  useEffect(() => {
-    document.querySelector<HTMLElement>('.vv-main-scroll')?.scrollTo({ top: 0 });
-  }, [pathname]);
-
   useEffect(() => {
     const warm = () => prefetchCommonData(api);
     if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
@@ -43,15 +38,33 @@ export default function AppProviders({ children }: { children: React.ReactNode }
       >
         <App>
           <AuthProvider>
-            <div className="vv-app-frame">
-              <Navbar />
-              <main className="vv-main-scroll">{children}</main>
-              <Footer />
-              <PostLoginChildSetupModal />
-            </div>
+            <ProductModeProvider>
+              <AppFrame>{children}</AppFrame>
+            </ProductModeProvider>
           </AuthProvider>
         </App>
       </ConfigProvider>
     </StyledComponentsRegistry>
+  );
+}
+
+function AppFrame({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const { mode } = useProductMode();
+  const isCourseReader = /\/courses\/.+\/(read|notes|explain)\/?$/.test(pathname || '');
+
+  useEffect(() => {
+    document.querySelector<HTMLElement>('.vv-main-scroll')?.scrollTo({ top: 0 });
+  }, [pathname]);
+
+  return (
+    <div
+      className={`vv-app-frame${isCourseReader ? ' is-course-reader' : ''}${mode === 'course' ? ' is-course-mode' : ''}`}
+    >
+      <Navbar />
+      <main className="vv-main-scroll">{children}</main>
+      {isCourseReader ? null : <Footer />}
+      <PostLoginChildSetupModal />
+    </div>
   );
 }

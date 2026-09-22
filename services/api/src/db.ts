@@ -23,8 +23,31 @@ export function getPool(): mysql.Pool {
       enableKeepAlive: true,
       keepAliveInitialDelay: 10_000,
       connectTimeout: 60_000,
+      // DATETIME/NOW() are UTC. mysql2 otherwise treats them as the Windows local zone
+      // (IST), so JSON becomes 5.5 hours behind and the UI shows 10:04 instead of 15:34.
+      timezone: 'Z',
+      typeCast(field: any, next: () => unknown) {
+        const type = String(field.type || '').toUpperCase();
+        const isDateTime =
+          type === 'DATETIME' ||
+          type === 'TIMESTAMP' ||
+          field.type === 7 ||
+          field.type === 12 ||
+          field.type === 17 ||
+          field.type === 18;
+        if (isDateTime) {
+          const raw = field.string();
+          if (raw == null || raw === '') return null;
+          const normalized = String(raw).includes('T')
+            ? String(raw)
+            : String(raw).replace(' ', 'T');
+          return /[zZ]|[+-]\d{2}:\d{2}$/.test(normalized) ? normalized : `${normalized}Z`;
+        }
+        return next();
+      },
     });
     pool.on('connection', (connection) => {
+      connection.query("SET time_zone = '+00:00'");
       connection.on('error', (err) => {
         console.error('MySQL pool connection error:', err.message);
       });

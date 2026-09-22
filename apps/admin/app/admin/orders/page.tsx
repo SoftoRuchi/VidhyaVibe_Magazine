@@ -65,25 +65,35 @@ function formatDateTime(d: any) {
 }
 
 export default function OrdersPage() {
-  const [data, setData] = React.useState<{ subscriptionOrders: any[]; editionOrders: any[] }>({
+  const [data, setData] = React.useState<{
+    subscriptionOrders: any[];
+    editionOrders: any[];
+    bookOrders: any[];
+  }>({
     subscriptionOrders: [],
     editionOrders: [],
+    bookOrders: [],
   });
   const [subscriptionProofs, setSubscriptionProofs] = React.useState<any[]>([]);
   const [editionProofs, setEditionProofs] = React.useState<any[]>([]);
+  const [bookProofs, setBookProofs] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(true);
   const PAGE_SIZE = 10;
   const [subscriptionOrdersPage, setSubscriptionOrdersPage] = React.useState(1);
   const [editionOrdersPage, setEditionOrdersPage] = React.useState(1);
+  const [bookOrdersPage, setBookOrdersPage] = React.useState(1);
 
   const load = () => {
     setLoading(true);
     Promise.all([
       api
         .get('/admin/payments/orders')
-        .then((r) => setData(r.data || { subscriptionOrders: [], editionOrders: [] })),
+        .then((r) =>
+          setData(r.data || { subscriptionOrders: [], editionOrders: [], bookOrders: [] }),
+        ),
       api.get('/admin/payments/proofs/pending').then((r) => setSubscriptionProofs(r.data || [])),
       api.get('/admin/payments/edition-proofs/pending').then((r) => setEditionProofs(r.data || [])),
+      api.get('/admin/payments/book-proofs/pending').then((r) => setBookProofs(r.data || [])),
     ])
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -108,6 +118,16 @@ export default function OrdersPage() {
       .post(`/admin/payments/edition-proofs/${id}/verify`)
       .then(() => {
         message.success('Edition order verified');
+        load();
+      })
+      .catch((e: any) => message.error(e.response?.data?.message || 'Verify failed'));
+  };
+
+  const verifyBookProof = (id: number) => {
+    api
+      .post(`/admin/payments/book-proofs/${id}/verify`)
+      .then(() => {
+        message.success('Book purchase verified');
         load();
       })
       .catch((e: any) => message.error(e.response?.data?.message || 'Verify failed'));
@@ -217,6 +237,50 @@ export default function OrdersPage() {
                   />
                 ) : (
                   <p style={{ color: '#888', margin: 0 }}>No pending edition purchase proofs.</p>
+                ),
+            },
+            {
+              key: 'book',
+              label: 'Textbook Purchase Proofs',
+              children:
+                bookProofs.length > 0 ? (
+                  <Table
+                    rowKey="id"
+                    dataSource={bookProofs}
+                    size="small"
+                    pagination={false}
+                    columns={[
+                      {
+                        title: 'S/N',
+                        key: 'serial',
+                        width: 70,
+                        render: (_: any, __: any, index: number) => index + 1,
+                      },
+                      { title: 'Order ID', dataIndex: 'order_id', width: 90 },
+                      { title: 'Book', dataIndex: 'subjectName' },
+                      { title: 'Buyer', dataIndex: 'email' },
+                      {
+                        title: 'Amount',
+                        dataIndex: 'amount',
+                        render: (a: number) => formatAmount(a, 'INR'),
+                      },
+                      {
+                        title: 'Created',
+                        dataIndex: 'created_at',
+                        render: (d: any) => formatDateTime(d),
+                      },
+                      {
+                        title: 'Action',
+                        render: (_: any, r: any) => (
+                          <Button type="primary" size="small" onClick={() => verifyBookProof(r.id)}>
+                            Verify
+                          </Button>
+                        ),
+                      },
+                    ]}
+                  />
+                ) : (
+                  <p style={{ color: '#888', margin: 0 }}>No pending textbook purchase proofs.</p>
                 ),
             },
           ]}
@@ -385,6 +449,80 @@ export default function OrdersPage() {
                         r.amountCents != null
                           ? formatAmount(Number(r.amountCents) / 100, r.currency)
                           : '—',
+                    },
+                    {
+                      title: 'Status',
+                      dataIndex: 'status',
+                      width: 100,
+                      render: (s: any) => (
+                        <Tag
+                          color={s === 'PAID' ? 'green' : s === 'PENDING' ? 'orange' : 'default'}
+                        >
+                          {s}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: 'Purchase Date & Time',
+                      dataIndex: 'createdAt',
+                      width: 170,
+                      render: (d: any) => formatDateTime(d),
+                    },
+                  ]}
+                />
+              ),
+            },
+            {
+              key: 'bookOrders',
+              label: 'Textbook Purchases',
+              children: (
+                <Table
+                  rowKey="id"
+                  dataSource={data.bookOrders || []}
+                  size="small"
+                  scroll={{ x: 1000 }}
+                  pagination={{
+                    pageSize: PAGE_SIZE,
+                    current: bookOrdersPage,
+                  }}
+                  onChange={(pagination) => setBookOrdersPage(pagination.current || 1)}
+                  columns={[
+                    {
+                      title: 'S/N',
+                      key: 'serial',
+                      width: 60,
+                      render: (_: any, __: any, index: number) =>
+                        (bookOrdersPage - 1) * PAGE_SIZE + index + 1,
+                    },
+                    {
+                      title: 'Buyer Name',
+                      key: 'buyerName',
+                      width: 160,
+                      render: (_: any, r: any) => buyerName(r),
+                    },
+                    {
+                      title: 'Email',
+                      key: 'buyerEmail',
+                      width: 200,
+                      render: (_: any, r: any) => buyerEmail(r),
+                    },
+                    {
+                      title: 'Course',
+                      dataIndex: 'courseName',
+                      width: 140,
+                      render: (t: string) => t || '—',
+                    },
+                    {
+                      title: 'Book',
+                      dataIndex: 'subjectName',
+                      width: 220,
+                      render: (t: string) => t || '—',
+                    },
+                    {
+                      title: 'Amount',
+                      key: 'amt',
+                      width: 110,
+                      render: (_: any, r: any) => formatAmount(r.amount, r.currency),
                     },
                     {
                       title: 'Status',

@@ -9,17 +9,36 @@ import { usePathname } from 'next/navigation';
 import React from 'react';
 import api from '../lib/api';
 import { useAuth } from '../lib/authContext';
+import { fetchInstituteCampuses } from '../lib/coursesApi';
+import { useProductMode } from '../lib/productMode';
 import { prefetchRouteData } from '../lib/routePrefetch';
 import { clearViewingContext, getSelectedReaderName, isChildAudience } from '../lib/viewingContext';
 import brandLogo from './images/logo_rmbg.png';
 
 const Navbar = () => {
   const { loggedIn, welcomeName: authWelcomeName, clearAuth } = useAuth();
+  const { mode, canUseCourses } = useProductMode();
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [collegeAdmin, setCollegeAdmin] = React.useState(false);
   const pathname = usePathname();
 
   const hideOnAuthPages = pathname === '/login' || pathname === '/signup';
   const welcomeName = isChildAudience() ? getSelectedReaderName() || 'Reader' : authWelcomeName;
+  const childMode = isChildAudience();
+
+  React.useEffect(() => {
+    if (!loggedIn || childMode) {
+      setCollegeAdmin(false);
+      return;
+    }
+    let cancelled = false;
+    fetchInstituteCampuses().then((rows) => {
+      if (!cancelled) setCollegeAdmin(rows.length > 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loggedIn, childMode]);
 
   if (hideOnAuthPages) return null;
 
@@ -37,16 +56,23 @@ const Navbar = () => {
     window.location.href = '/login';
   };
 
-  const childMode = isChildAudience();
-  const navLinks = [
-    { href: '/', label: 'Home' },
-    { href: '/magazines', label: 'Browse' },
-    ...(!childMode ? [{ href: '/courses', label: 'Courses' }] : []),
-    { href: '/posts', label: 'Posts' },
-    // { href: '/sales', label: 'Sales' },
-    { href: '/dashboard', label: 'My Library', requiresAuth: true },
-    { href: '/profile', label: 'Profile', requiresAuth: true },
-  ];
+  const navLinks =
+    mode === 'course' && canUseCourses
+      ? [
+          { href: '/', label: 'Home' },
+          { href: '/courses', label: 'Courses' },
+          { href: '/notes', label: 'Notes', requiresAuth: true },
+          { href: '/books', label: 'My books', requiresAuth: true },
+          ...(collegeAdmin ? [{ href: '/institute', label: 'College', requiresAuth: true }] : []),
+          { href: '/profile', label: 'Profile', requiresAuth: true },
+        ]
+      : [
+          { href: '/', label: 'Home' },
+          { href: '/magazines', label: 'Browse' },
+          { href: '/posts', label: 'Posts' },
+          { href: '/dashboard', label: 'My Library', requiresAuth: true },
+          { href: '/profile', label: 'Profile', requiresAuth: true },
+        ];
 
   const resolveHref = (tab: { href: string; requiresAuth?: boolean }) => {
     if (tab.requiresAuth && !loggedIn) {
@@ -62,7 +88,11 @@ const Navbar = () => {
   return (
     <header className="vv-app-header">
       <nav className="vv-navbar">
-        <Link href="/" className="vv-navbar-brand" aria-label="VidhyaVibe Magazine">
+        <Link
+          href="/"
+          className="vv-navbar-brand"
+          aria-label={mode === 'course' ? 'VidhyaVibe Courses' : 'VidhyaVibe Magazine'}
+        >
           <Image
             src={brandLogo}
             alt=""
@@ -75,7 +105,9 @@ const Navbar = () => {
             <span className="vv-navbar-titleIcon" style={{ color: '#facc15' }} aria-hidden>
               ★
             </span>
-            <span className="vv-navbar-brandText">VidhyaVibe Magazine</span>
+            <span className="vv-navbar-brandText">
+              {mode === 'course' ? 'VidhyaVibe Courses' : 'VidhyaVibe Magazine'}
+            </span>
             <span
               className="vv-navbar-titleIcon"
               style={{ color: '#6b4423', opacity: 0.9 }}

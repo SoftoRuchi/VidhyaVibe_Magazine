@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { getPool } from '../../db';
+import { getPool, query } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
 import { requireAuth } from '../../middleware/auth';
-import { verifyProof, verifyEditionProof } from '../../services/payments';
+import { verifyBookOrderProof } from '../../services/bookAccess';
+import { verifyEditionProof, verifyProof } from '../../services/payments';
 
 const router = Router();
 router.use(requireAuth);
@@ -99,9 +100,29 @@ router.get('/orders', async (req, res) => {
       ORDER BY eo.created_at DESC
     `);
 
+    let bookOrders: any[] = [];
+    try {
+      const [rows]: any = await conn.query(`
+        SELECT bo.id, bo.user_id as userId, bo.subject_id as subjectId, bo.amount, bo.currency, bo.status,
+               bo.provider, bo.purchase_code as purchaseCode, bo.created_at as createdAt, bo.paid_at as paidAt,
+               u.email as userEmail, u.name as userName, u.phone as userPhone,
+               s.name as subjectName, c.name as courseName
+        FROM book_orders bo
+        LEFT JOIN users u ON u.id = bo.user_id
+        LEFT JOIN course_subjects s ON s.id = bo.subject_id
+        LEFT JOIN course_semesters sem ON sem.id = s.semester_id
+        LEFT JOIN courses c ON c.id = sem.course_id
+        ORDER BY bo.created_at DESC
+      `);
+      bookOrders = rows || [];
+    } catch {
+      bookOrders = [];
+    }
+
     res.json({
       subscriptionOrders: subOrders || [],
       editionOrders: edOrders || [],
+      bookOrders,
     });
   } catch (e: any) {
     console.error(e);
@@ -194,6 +215,37 @@ router.post('/edition-proofs/:id/verify', async (req, res) => {
   const adminId = Number((req as any).user?.id);
   try {
     const result = await verifyEditionProof(proofId, adminId);
+    res.json({ ok: true, result });
+  } catch (e: any) {
+    console.error(e);
+    res.status(400).json({ error: 'verify_failed', message: e.message });
+  }
+});
+
+router.get('/book-proofs/pending', async (_req, res) => {
+  try {
+    const [rows]: any = await query(
+      `SELECT p.id, p.order_id, p.created_at, o.amount, o.subject_id, s.name AS subjectName, u.email, u.name
+       FROM book_order_proofs p
+       INNER JOIN book_orders o ON o.id = p.order_id
+       LEFT JOIN course_subjects s ON s.id = o.subject_id
+       LEFT JOIN users u ON u.id = p.user_id
+       WHERE p.verified = 0
+       ORDER BY p.created_at DESC`,
+    );
+    res.json(rows || []);
+  } catch (e: any) {
+    if (String(e?.code || '').startsWith('ER_NO_SUCH')) return res.json([]);
+    console.error(e);
+    res.status(500).json({ error: 'list_failed' });
+  }
+});
+
+router.post('/book-proofs/:id/verify', async (req, res) => {
+  const proofId = Number(req.params.id);
+  const adminId = Number((req as any).user?.id);
+  try {
+    const result = await verifyBookOrderProof(proofId, adminId);
     res.json({ ok: true, result });
   } catch (e: any) {
     console.error(e);

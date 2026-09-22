@@ -19,6 +19,9 @@ import {
   MailOutlined,
   PercentageOutlined,
   ExperimentOutlined,
+  BankOutlined,
+  LineChartOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons';
 import { Layout, Menu, theme, Button } from 'antd';
 import axios from 'axios';
@@ -47,6 +50,9 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
 
   const getSelectedKey = () => {
     if (!pathname) return 'dashboard';
+    if (pathname.includes('/live-seats')) return 'live-seats';
+    if (pathname.includes('/book-activity')) return 'book-activity';
+    if (pathname.includes('/institutes')) return 'institutes';
     if (pathname.includes('/users')) return 'users';
     if (pathname.includes('/magazines')) return 'magazines';
     if (pathname.includes('/courses')) return 'courses';
@@ -78,6 +84,21 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       key: 'courses',
       icon: <BookOutlined />,
       label: <Link href="/admin/courses">Courses</Link>,
+    },
+    {
+      key: 'institutes',
+      icon: <BankOutlined />,
+      label: <Link href="/admin/institutes">Book access</Link>,
+    },
+    {
+      key: 'book-activity',
+      icon: <LineChartOutlined />,
+      label: <Link href="/admin/book-activity">Book activity</Link>,
+    },
+    {
+      key: 'live-seats',
+      icon: <DesktopOutlined />,
+      label: <Link href="/admin/live-seats">Live seats</Link>,
     },
     {
       key: 'age-groups',

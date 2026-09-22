@@ -5,7 +5,12 @@ import Image from 'next/image';
 import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
 import AgeGroupSection from '../components/AgeGroupSection';
-import { CourseContinueCard, CourseHomeCard } from '../components/CourseBrowse';
+import {
+  CourseContinueCard,
+  CourseGrid,
+  CourseHomeCard,
+  CourseProgramCard,
+} from '../components/CourseBrowse';
 import childImg from '../components/images/child.png';
 import MagazineCard from '../components/MagazineCard';
 import PostCard, { type SitePostItem } from '../components/PostCard';
@@ -18,8 +23,8 @@ import {
   type CourseContinue,
   type CourseSummary,
 } from '../lib/coursesApi';
+import { useProductMode } from '../lib/productMode';
 import { cachedGet } from '../lib/requestCache';
-import { isChildAudience } from '../lib/viewingContext';
 
 const PostMediaCarousel = dynamic(() => import('../components/PostMediaCarousel'), {
   loading: () => <div style={{ textAlign: 'center', padding: '3rem 0' }}>Loading…</div>,
@@ -69,7 +74,8 @@ export default function Page() {
   const [continueReading, setContinueReading] = useState<CourseContinue | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
-  const showCourses = !isChildAudience();
+  const { mode, canUseCourses } = useProductMode();
+  const showCourses = mode === 'course' && canUseCourses;
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +83,7 @@ export default function Page() {
     async function loadHomeData() {
       try {
         const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-        const hideCourses = isChildAudience();
+        const hideCourses = !showCourses;
         const [postsRes, magazinesRes, ageGroupsRes, coursesRes, continueRes] = await Promise.all([
           cachedGet<{ carouselSlides?: unknown[]; posts?: SitePost[] }>(
             api,
@@ -132,10 +138,104 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showCourses]);
 
   const featuredMagazines = recentMagazines.slice(0, 3);
   const newReleases = recentMagazines.slice(3, 6);
+
+  if (showCourses) {
+    return (
+      <main style={{ padding: '1.25rem 0 2.25rem' }}>
+        <section>
+          <div className="container">
+            <div
+              className="vv-home-heroCard"
+              style={{
+                padding: '1.8rem 2rem',
+                borderRadius: 22,
+                backgroundColor: 'rgba(255, 255, 255, 0.78)',
+                border: '1px solid rgba(61,41,20,0.18)',
+                boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 12px',
+                  borderRadius: 999,
+                  background: 'rgba(255,255,255,0.85)',
+                  border: '1px solid rgba(61,41,20,0.18)',
+                  fontSize: 12,
+                  color: '#5c4a3a',
+                  marginBottom: 10,
+                }}
+              >
+                University textbooks
+              </div>
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: '2.05rem',
+                  fontWeight: 800,
+                  color: '#3d2914',
+                  fontFamily: 'Georgia, serif',
+                }}
+              >
+                VidhyaVibe Courses
+              </h1>
+              <p className="vv-home-heroLead">
+                Read your course books, take notes, and practise with quizzes. College seats and
+                individual purchases stay in this section.
+              </p>
+              <div className="vv-home-ctaRow">
+                <a href="/courses" className="vv-home-cta vv-home-cta--browse">
+                  Browse courses
+                </a>
+                <a
+                  href={courses.length === 1 ? `/courses/${courses[0].slug}/subscribe` : '/courses'}
+                  className="vv-home-cta vv-home-cta--subscribe"
+                >
+                  Subscribe
+                </a>
+                <a href="/books" className="vv-home-cta vv-home-cta--browse">
+                  My books
+                </a>
+                <a href="/notes" className="vv-home-cta vv-home-cta--deals">
+                  Notes
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section style={{ padding: '1.25rem 0 2rem' }}>
+          <div className="container">
+            {continueReading?.href ? (
+              <CourseContinueCard
+                href={continueReading.href}
+                chapterTitle={continueReading.chapterTitle}
+                courseName={continueReading.courseName}
+                subjectName={continueReading.subjectName}
+                percent={continueReading.percent}
+              />
+            ) : null}
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>Loading…</div>
+            ) : courses.length ? (
+              <CourseGrid>
+                {courses.map((course) => (
+                  <CourseProgramCard key={course.id} course={course} />
+                ))}
+              </CourseGrid>
+            ) : (
+              <CourseHomeCard subtitle="BCA, BBA and university textbooks" />
+            )}
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main style={{ padding: '1.25rem 0 2.25rem' }}>
@@ -251,11 +351,6 @@ export default function Page() {
                   <a href="/magazines" className="vv-home-cta vv-home-cta--browse">
                     Browse Magazines
                   </a>
-                  {showCourses ? (
-                    <a href="/courses" className="vv-home-cta vv-home-cta--browse">
-                      Courses
-                    </a>
-                  ) : null}
                   <a href="/sales" className="vv-home-cta vv-home-cta--deals">
                     View Deals
                   </a>
@@ -447,34 +542,6 @@ export default function Page() {
           </div>
         </div>
       </section>
-
-      {showCourses ? (
-        <section style={{ padding: '0 0 1.25rem' }}>
-          <div className="container">
-            <div className="course-home-stack">
-              {continueReading?.href ? (
-                <CourseContinueCard
-                  href={continueReading.href}
-                  chapterTitle={continueReading.chapterTitle}
-                  courseName={continueReading.courseName}
-                  subjectName={continueReading.subjectName}
-                  percent={continueReading.percent}
-                />
-              ) : null}
-              <CourseHomeCard
-                subtitle={
-                  courses.length
-                    ? `${courses
-                        .slice(0, 2)
-                        .map((c) => c.name)
-                        .join(', ')}${courses.length > 2 ? ' and more' : ''}`
-                    : 'BCA, BBA and university textbooks'
-                }
-              />
-            </div>
-          </div>
-        </section>
-      ) : null}
 
       {/* FEATURED MAGAZINES */}
       <section style={{ padding: '1.5rem 0 1.25rem' }}>

@@ -10,8 +10,10 @@ import {
   DollarOutlined,
   FilePdfOutlined,
   TagOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons';
 import { Card, Col, List, Row, Spin, Tag, Button, Alert } from 'antd';
+import Link from 'next/link';
 import React, { useEffect, useState } from 'react';
 import api from '../../lib/api';
 
@@ -167,6 +169,7 @@ export default function DashboardPage() {
   const activeMagazines = summary?.totalMagazines ?? 0;
   const totalSubscriptions = summary?.totalSubscriptions ?? 0;
   const monthlyRevenue = (summary?.totalRevenueCents ?? 0) / 100;
+  const liveBookReaders = summary?.liveBookReaders ?? 0;
 
   const kpis = [
     {
@@ -201,6 +204,15 @@ export default function DashboardPage() {
       iconColor: '#e0a800',
       iconBg: 'rgba(224,168,0,0.16)',
     },
+    {
+      label: 'LIVE BOOK READERS',
+      value: liveBookReaders,
+      href: '/admin/live-seats',
+      gradient: 'linear-gradient(135deg, rgba(14,165,233,0.85) 0%, rgba(2,132,199,0.70) 100%)',
+      icon: <DesktopOutlined />,
+      iconColor: '#0ea5e9',
+      iconBg: 'rgba(14,165,233,0.16)',
+    },
   ];
 
   const quickActions = [
@@ -230,6 +242,12 @@ export default function DashboardPage() {
       label: 'View Orders & Payments',
       icon: <ShoppingCartOutlined />,
       bg: '#ef4444',
+    },
+    {
+      href: '/admin/live-seats',
+      label: 'Live seats',
+      icon: <DesktopOutlined />,
+      bg: '#0ea5e9',
     },
   ];
 
@@ -262,58 +280,72 @@ export default function DashboardPage() {
 
         <Row gutter={[16, 16]}>
           {kpis.map((k) => (
-            <Col key={k.label} xs={24} sm={12} lg={6}>
-              <Card
-                bordered={false}
+            <Col key={k.label} xs={24} sm={12} lg={8} xl={k.href ? 8 : 4}>
+              <Link
+                href={k.href || '#'}
                 style={{
-                  borderRadius: 16,
-                  background: '#ffffff',
-                  border: '1px solid rgba(15, 23, 42, 0.06)',
-                  boxShadow: '0 8px 18px rgba(15, 23, 42, 0.06)',
-                  color: '#0f172a',
+                  textDecoration: 'none',
+                  display: 'block',
+                  pointerEvents: k.href ? 'auto' : 'none',
                 }}
-                bodyStyle={{ padding: 16 }}
               >
-                <div
+                <Card
+                  bordered={false}
+                  hoverable={!!k.href}
                   style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
-                    gap: 12,
+                    borderRadius: 16,
+                    background: '#ffffff',
+                    border: k.href
+                      ? '1px solid rgba(14, 165, 233, 0.28)'
+                      : '1px solid rgba(15, 23, 42, 0.06)',
+                    boxShadow: '0 8px 18px rgba(15, 23, 42, 0.06)',
+                    color: '#0f172a',
                   }}
+                  bodyStyle={{ padding: 16 }}
                 >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 800,
-                        letterSpacing: 0.4,
-                        color: '#6b7280',
-                      }}
-                    >
-                      {k.label}
-                    </div>
-                    <div style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: '#0f172a' }}>
-                      {k.value}
-                    </div>
-                  </div>
                   <div
                     style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 14,
-                      background: k.iconBg,
                       display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 18,
-                      color: k.iconColor,
+                      alignItems: 'flex-start',
+                      justifyContent: 'space-between',
+                      gap: 12,
                     }}
                   >
-                    {k.icon}
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          letterSpacing: 0.4,
+                          color: '#6b7280',
+                        }}
+                      >
+                        {k.label}
+                      </div>
+                      <div
+                        style={{ fontSize: 26, fontWeight: 900, marginTop: 6, color: '#0f172a' }}
+                      >
+                        {k.value}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 14,
+                        background: k.iconBg,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 18,
+                        color: k.iconColor,
+                      }}
+                    >
+                      {k.icon}
+                    </div>
                   </div>
-                </div>
-              </Card>
+                </Card>
+              </Link>
             </Col>
           ))}
         </Row>

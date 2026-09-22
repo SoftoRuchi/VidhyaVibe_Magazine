@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db';
-import type { AuthRequest } from '../middleware/auth';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, type AuthRequest } from '../middleware/auth';
+import { requireChapterAccess } from '../middleware/courseAccess';
 import { flashcardsFromChapterHtml } from '../utils/courseFlashcards';
 import { asDoc, flashcardsFromDoc } from '../utils/textbookContent';
 
@@ -56,7 +56,7 @@ function mapHighlight(r: any) {
 }
 
 /** GET /api/courses/chapters/:id/study */
-router.get('/chapters/:id/study', requireAuth, async (req: AuthRequest, res) => {
+router.get('/chapters/:id/study', requireChapterAccess, async (req: AuthRequest, res) => {
   const chapterId = n(req.params.id);
   const userId = n(req.user?.id);
   if (!chapterId) return res.status(400).json({ error: 'invalid_id' });
@@ -90,7 +90,7 @@ router.get('/chapters/:id/study', requireAuth, async (req: AuthRequest, res) => 
 });
 
 /** POST /api/courses/chapters/:id/bookmarks { pageNumber, markType } */
-router.post('/chapters/:id/bookmarks', requireAuth, async (req: AuthRequest, res) => {
+router.post('/chapters/:id/bookmarks', requireChapterAccess, async (req: AuthRequest, res) => {
   const chapterId = n(req.params.id);
   const userId = n(req.user?.id);
   const pageNumber = n(req.body?.pageNumber);
@@ -133,7 +133,7 @@ router.delete('/bookmarks/:id', requireAuth, async (req: AuthRequest, res) => {
 });
 
 /** POST /api/courses/chapters/:id/notes { pageNumber, content, quote } */
-router.post('/chapters/:id/notes', requireAuth, async (req: AuthRequest, res) => {
+router.post('/chapters/:id/notes', requireChapterAccess, async (req: AuthRequest, res) => {
   const chapterId = n(req.params.id);
   const userId = n(req.user?.id);
   const content = String(req.body?.content || '').trim();
@@ -198,7 +198,7 @@ router.delete('/notes/:id', requireAuth, async (req: AuthRequest, res) => {
 });
 
 /** POST /api/courses/chapters/:id/highlights { pageNumber, text, color } */
-router.post('/chapters/:id/highlights', requireAuth, async (req: AuthRequest, res) => {
+router.post('/chapters/:id/highlights', requireChapterAccess, async (req: AuthRequest, res) => {
   const chapterId = n(req.params.id);
   const userId = n(req.user?.id);
   const text = String(req.body?.text || '').trim();
@@ -255,7 +255,7 @@ function mapFlashcard(r: any, userId: number) {
 }
 
 /** GET /api/courses/chapters/:id/flashcards */
-router.get('/chapters/:id/flashcards', requireAuth, async (req: AuthRequest, res) => {
+router.get('/chapters/:id/flashcards', requireChapterAccess, async (req: AuthRequest, res) => {
   const chapterId = n(req.params.id);
   const userId = n(req.user?.id);
   if (!chapterId) return res.status(400).json({ error: 'invalid_id' });
@@ -307,7 +307,7 @@ router.get('/chapters/:id/flashcards', requireAuth, async (req: AuthRequest, res
 });
 
 /** POST /api/courses/chapters/:id/flashcards { front, back, pageNumber } */
-router.post('/chapters/:id/flashcards', requireAuth, async (req: AuthRequest, res) => {
+router.post('/chapters/:id/flashcards', requireChapterAccess, async (req: AuthRequest, res) => {
   const chapterId = n(req.params.id);
   const userId = n(req.user?.id);
   const front = String(req.body?.front || '')

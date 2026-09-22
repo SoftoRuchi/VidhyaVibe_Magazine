@@ -44,6 +44,7 @@ type Subject = {
   backCoverKey?: string | null;
   frontCoverUrl?: string | null;
   backCoverUrl?: string | null;
+  price?: number | null;
   chapters: Chapter[];
 };
 
@@ -156,6 +157,7 @@ export default function AdminCourseDetailPage() {
       slug: selectedSubject.slug,
       syllabusCode: selectedSubject.syllabusCode,
       description: selectedSubject.description,
+      price: selectedSubject.price ?? null,
       published: selectedSubject.status === 'PUBLISHED',
     });
   }, [selectedSubject?.id]);
@@ -240,6 +242,7 @@ export default function AdminCourseDetailPage() {
       if (values.slug) fd.append('slug', values.slug);
       if (values.description) fd.append('description', values.description);
       if (values.syllabusCode) fd.append('syllabusCode', values.syllabusCode);
+      if (values.price != null && values.price !== '') fd.append('price', String(values.price));
       fd.append('status', values.published ? 'PUBLISHED' : 'DRAFT');
       const front: File | undefined =
         values.frontCover?.file?.originFileObj || values.frontCover?.fileList?.[0]?.originFileObj;
@@ -268,6 +271,7 @@ export default function AdminCourseDetailPage() {
       if (values.slug) fd.append('slug', values.slug);
       if (values.description) fd.append('description', values.description);
       if (values.syllabusCode) fd.append('syllabusCode', values.syllabusCode);
+      fd.append('price', values.price != null && values.price !== '' ? String(values.price) : '');
       fd.append('status', values.published ? 'PUBLISHED' : 'DRAFT');
       const front: File | undefined =
         values.frontCover?.file?.originFileObj || values.frontCover?.fileList?.[0]?.originFileObj;
@@ -547,6 +551,18 @@ export default function AdminCourseDetailPage() {
                           <Form.Item name="description" label="What this subject covers">
                             <Input.TextArea rows={2} />
                           </Form.Item>
+                          <Form.Item
+                            name="price"
+                            label="Individual price (₹)"
+                            extra="Students without a college seat can buy this book for one device. Leave empty if it is not sold individually."
+                          >
+                            <InputNumber
+                              min={0}
+                              step={50}
+                              style={{ width: '100%' }}
+                              placeholder="499"
+                            />
+                          </Form.Item>
                           <p className="vv-hint">
                             Upload the front and back of this textbook. Students see them as the
                             first and last pages of the open book in every chapter.
@@ -779,6 +795,13 @@ export default function AdminCourseDetailPage() {
           </Form.Item>
           <Form.Item name="description" label="Short description">
             <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item
+            name="price"
+            label="Individual price (₹)"
+            extra="Optional. Shown to students who do not have a college license."
+          >
+            <InputNumber min={0} step={50} style={{ width: '100%' }} placeholder="499" />
           </Form.Item>
           <Form.Item name="frontCover" label="Front cover" extra="First page of the open book.">
             <Upload beforeUpload={() => false} maxCount={1} accept="image/*">

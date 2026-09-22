@@ -378,6 +378,49 @@ export async function sendLoginOtp(params: { name?: string | null; email: string
   return sendEmail(params.email, 'VidhyaVibe — login OTP', text);
 }
 
+export async function sendStudentLoginCredentials(params: {
+  email: string;
+  name?: string | null;
+  password?: string | null;
+  accountCreated?: boolean;
+  bookName?: string | null;
+  collegeName?: string | null;
+}) {
+  const firstName = (params.name || '').trim().split(/\s+/)[0] || 'there';
+  const loginUrl =
+    process.env.READER_BASE_URL ||
+    process.env.NEXT_PUBLIC_READER_URL ||
+    'https://reader.vidhyavibe.in';
+  const bookLine = params.bookName ? `Book: ${params.bookName}\n` : '';
+  const collegeLine = params.collegeName ? `College: ${params.collegeName}\n` : '';
+  if (params.password) {
+    const text =
+      `Hi ${firstName},\n\n` +
+      `Your VidhyaVibe course login is ready.\n` +
+      collegeLine +
+      bookLine +
+      `\n` +
+      `----------------------------------------\n` +
+      `Email: ${params.email}\n` +
+      `Password: ${params.password}\n` +
+      `----------------------------------------\n\n` +
+      `Log in here: ${loginUrl}/login\n\n` +
+      `Please change your password after you sign in (Profile → Change password).\n\n` +
+      `— VidhyaVibe`;
+    return sendEmail(params.email, 'VidhyaVibe — your course login', text);
+  }
+  const text =
+    `Hi ${firstName},\n\n` +
+    `You now have access to your VidhyaVibe course book.\n` +
+    collegeLine +
+    bookLine +
+    `\nLog in with this email and your existing password:\n${params.email}\n\n` +
+    `Login: ${loginUrl}/login\n\n` +
+    `If you forgot your password, use Forgot password on the login page.\n\n` +
+    `— VidhyaVibe`;
+  return sendEmail(params.email, 'VidhyaVibe — your course access', text);
+}
+
 export async function sendPurchaseConfirmation(params: {
   name: string;
   email: string;

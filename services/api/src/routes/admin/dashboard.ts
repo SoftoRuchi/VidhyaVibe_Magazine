@@ -1,7 +1,5 @@
 import { Router } from 'express';
 import { getPool } from '../../db';
-import { requireAdmin } from '../../middleware/admin';
-import { requireAuth } from '../../middleware/auth';
 
 const router = Router();
 // TEMPORARILY DISABLED FOR DEVELOPMENT - TODO: Re-enable auth
@@ -28,6 +26,13 @@ router.get('/summary', async (req, res) => {
     const [[pendingEdProofs]]: any = await conn
       .query('SELECT COUNT(*) as count FROM edition_order_proofs WHERE verified = 0')
       .catch(() => [[{ count: 0 }]]);
+    const [[liveBookReaders]]: any = await conn
+      .query(
+        `SELECT COUNT(*) as count FROM book_reading_sessions
+         WHERE ended_at IS NULL
+           AND last_heartbeat_at >= DATE_SUB(NOW(3), INTERVAL 120 SECOND)`,
+      )
+      .catch(() => [[{ count: 0 }]]);
 
     res.json({
       totalUsers: userCount?.count || 0,
@@ -36,6 +41,7 @@ router.get('/summary', async (req, res) => {
       totalReaders: readerCount?.count || 0,
       totalRevenueCents: revRows[0]?.total_cents || 0,
       pendingProofs: (pendingSubProofs?.count || 0) + (pendingEdProofs?.count || 0),
+      liveBookReaders: liveBookReaders?.count || 0,
     });
   } catch (e: any) {
     console.error(e);

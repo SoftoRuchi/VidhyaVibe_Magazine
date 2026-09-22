@@ -6,10 +6,12 @@ import { useParams } from 'next/navigation';
 import React from 'react';
 import {
   CourseEmpty,
+  CourseGrid,
   CourseHero,
-  CourseNavCard,
   CourseSection,
+  CourseSemesterCard,
 } from '../../../components/CourseBrowse';
+import { assetUrl } from '../../../lib/apiBase';
 import { courseCountLabel } from '../../../lib/courseLabels';
 import { fetchCourse } from '../../../lib/coursesApi';
 
@@ -54,21 +56,27 @@ export default function CourseDetailPage() {
         kicker={data.university}
         title={data.name}
         subtitle={data.description}
+        coverSrc={data.coverKey ? assetUrl(data.coverKey) : null}
         chips={[
           courseCountLabel(semesters.length, 'semester'),
           courseCountLabel(subjectTotal, 'subject'),
         ]}
+        actions={
+          <Link href={`/courses/${slug}/subscribe`} className="vv-course-btn is-subscribe">
+            Subscribe
+          </Link>
+        }
       />
       <CourseSection title={semesters.length ? 'Choose a semester' : 'Semesters'} />
       {semesters.length === 0 ? (
         <CourseEmpty message="No semesters in this course yet." />
       ) : (
-        <div className="course-nav-list">
+        <CourseGrid variant="semester">
           {semesters.map((s: any) => (
-            <CourseNavCard
+            <CourseSemesterCard
               key={s.id}
               href={`/courses/${slug}/sem-${s.number}`}
-              badge={String(s.number)}
+              number={s.number}
               title={s.title}
               subtitle={
                 s.subjectCount ? courseCountLabel(s.subjectCount, 'subject') : 'No subjects yet'
@@ -76,7 +84,7 @@ export default function CourseDetailPage() {
               muted={!s.subjectCount}
             />
           ))}
-        </div>
+        </CourseGrid>
       )}
     </main>
   );

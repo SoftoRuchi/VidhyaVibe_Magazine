@@ -33,7 +33,91 @@ export type CourseSubject = {
   frontCoverUrl?: string | null;
   backCoverUrl?: string | null;
   chapterCount?: number;
+  price?: number | null;
+  canRead?: boolean;
+  purchasable?: boolean;
+  accessModel?: string | null;
 };
+
+export function formatBookPrice(price?: number | null) {
+  if (price == null || !Number.isFinite(Number(price))) return '';
+  const n = Number(price);
+  return `₹${n % 1 === 0 ? n.toFixed(0) : n.toFixed(2)}`;
+}
+
+export type BookOffer = {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string | null;
+  syllabusCode?: string | null;
+  frontCoverUrl?: string | null;
+  price: number | null;
+  currency: string;
+  canRead: boolean;
+  alreadyOwned: boolean;
+  purchasable: boolean;
+  accessModel?: string | null;
+  href: string;
+  buyHref: string;
+  course: { name: string; slug: string };
+  semester: { number: number; title: string };
+};
+
+export async function fetchBookOffer(subjectId: number) {
+  const res = await api.get<BookOffer>(`/api/courses/subjects/${subjectId}/offer`, {
+    headers: courseAuthHeaders(),
+  });
+  return res.data;
+}
+
+export type BookCheckout = {
+  needsPayment: true;
+  orderId: number;
+  amount: number;
+  currency: string;
+  provider: 'razorpay' | 'upi';
+  status: string;
+  rpOrderId?: string | null;
+  razorpayKeyId?: string | null;
+  upi?: string | null;
+  href: string;
+};
+
+export async function purchaseBook(subjectId: number) {
+  const res = await api.post(
+    `/api/courses/subjects/${subjectId}/purchase`,
+    {},
+    {
+      headers: courseAuthHeaders(),
+    },
+  );
+  return res.data as BookCheckout;
+}
+
+export async function confirmBookPurchase(
+  subjectId: number,
+  body: {
+    orderId: number;
+    razorpay_payment_id: string;
+    razorpay_order_id: string;
+    razorpay_signature: string;
+  },
+) {
+  const res = await api.post(`/api/courses/subjects/${subjectId}/purchase/confirm`, body, {
+    headers: courseAuthHeaders(),
+  });
+  return res.data as { ok: boolean; href: string; purchaseCode?: string };
+}
+
+export async function uploadBookPurchaseProof(subjectId: number, orderId: number, file: File) {
+  const fd = new FormData();
+  fd.append('proof', file);
+  const res = await api.post(`/api/courses/subjects/${subjectId}/purchase/${orderId}/proof`, fd, {
+    headers: courseAuthHeaders(),
+  });
+  return res.data as { proofId: number; message?: string };
+}
 
 export async function fetchCourses() {
   const res = await api.get<CourseSummary[]>('/api/courses');
@@ -48,12 +132,50 @@ export async function fetchCourse(slug: string) {
     slug: string;
     university?: string | null;
     description?: string | null;
+    coverKey?: string | null;
     semesters: CourseSemester[];
   };
 }
 
+export type CourseCatalogBook = {
+  id: number;
+  name: string;
+  slug: string;
+  syllabusCode?: string | null;
+  coverKey?: string | null;
+  frontCoverUrl?: string | null;
+  price: number | null;
+  chapterCount: number;
+  semesterNumber: number;
+  semesterTitle: string;
+  href: string;
+  buyHref: string;
+  canRead?: boolean;
+  purchasable?: boolean;
+  accessModel?: string | null;
+};
+
+export type CourseCatalog = {
+  id: number;
+  name: string;
+  slug: string;
+  university?: string | null;
+  description?: string | null;
+  coverKey?: string | null;
+  books: CourseCatalogBook[];
+};
+
+export async function fetchCourseCatalog(slug: string) {
+  const res = await api.get<CourseCatalog>(`/api/courses/${encodeURIComponent(slug)}/catalog`, {
+    headers: courseAuthHeaders(),
+  });
+  return res.data;
+}
+
 export async function fetchSemester(slug: string, n: number) {
-  const res = await api.get(`/api/courses/${slug}/semesters/${n}`);
+  const res = await api.get(`/api/courses/${slug}/semesters/${n}`, {
+    headers: courseAuthHeaders(),
+  });
   return res.data as {
     course: { id: number; name: string; slug: string; university?: string | null };
     semester: { id: number; number: number; title: string };
@@ -216,15 +338,235 @@ export async function fetchCourseContinue() {
   }
 }
 
+export type EntitledBook = {
+  id: number;
+  name: string;
+  slug: string;
+  coverKey?: string | null;
+  courseName: string;
+  courseSlug: string;
+  semesterNumber: number;
+  accessModel: 'BOOK_BANK' | 'LIBRARY' | 'INDIVIDUAL' | 'ADMIN' | 'OPEN';
+  instituteName?: string | null;
+  purchaseCode?: string | null;
+  href: string;
+  lastChapterTitle?: string | null;
+  lastPageNumber?: number | null;
+  lastReadAt?: string | null;
+};
+
+export function bookAccessLabel(model?: string | null) {
+  if (model === 'BOOK_BANK') return 'Book bank';
+  if (model === 'LIBRARY') return 'Library';
+  if (model === 'INDIVIDUAL') return 'Purchased';
+  if (model === 'ADMIN') return 'Admin';
+  return '';
+}
+
+export async function fetchMyBooks() {
+  const res = await api.get<{ books?: EntitledBook[] }>('/api/courses/my-books', {
+    headers: courseAuthHeaders(),
+  });
+  return (res.data?.books || []) as EntitledBook[];
+}
+
+export type InstituteAdminCampus = {
+  id: number;
+  name: string;
+  code: string;
+  city?: string | null;
+  status: string;
+};
+
+export type InstitutePortalLot = {
+  id: number;
+  subjectName: string;
+  courseName: string;
+  accessModel: string;
+  seatCount: number;
+  assignedSeats: number;
+  liveReaders: number;
+  remaining?: number;
+  full?: boolean;
+  purchaseCode: string;
+  status: string;
+};
+
+export type InstitutePortalMember = {
+  id: number;
+  userId: number;
+  name: string;
+  email: string;
+  role: string;
+  className?: string | null;
+  rollNumber?: string | null;
+};
+
+export type InstitutePortalLive = {
+  id: number;
+  name: string;
+  email: string;
+  subjectName: string;
+  courseName?: string;
+  chapterTitle?: string | null;
+  pageNumber?: number | null;
+  deviceName?: string | null;
+  ipAddress?: string | null;
+  secondsActive?: number;
+  lastHeartbeatAt?: string;
+  openCount?: number;
+  accessModel?: string;
+};
+
+export type InstitutePortalData = InstituteAdminCampus & {
+  stats: {
+    students: number;
+    licenses: number;
+    liveCount: number;
+    todayOpens: number;
+    todayReaders: number;
+  };
+  live: InstitutePortalLive[];
+  members: InstitutePortalMember[];
+  lots: InstitutePortalLot[];
+};
+
+export async function fetchInstituteCampuses() {
+  try {
+    const res = await api.get<{ institutes?: InstituteAdminCampus[] }>('/api/institute', {
+      headers: courseAuthHeaders(),
+    });
+    return res.data?.institutes || [];
+  } catch {
+    return [] as InstituteAdminCampus[];
+  }
+}
+
+export async function fetchInstitutePortal(instituteId: number) {
+  const res = await api.get<InstitutePortalData>(`/api/institute/${instituteId}`, {
+    headers: courseAuthHeaders(),
+  });
+  return res.data;
+}
+
+export async function fetchInstituteActivity(instituteId: number) {
+  const res = await api.get<{ reading?: any[]; logins?: any[] }>(
+    `/api/institute/${instituteId}/activity`,
+    {
+      headers: courseAuthHeaders(),
+    },
+  );
+  return res.data;
+}
+
+export async function addInstituteStudent(
+  instituteId: number,
+  body: {
+    email: string;
+    name?: string;
+    className?: string;
+    rollNumber?: string;
+    password?: string;
+  },
+) {
+  const res = await api.post(`/api/institute/${instituteId}/members`, body, {
+    headers: courseAuthHeaders(),
+  });
+  return res.data as { email: string; created?: boolean; emailed?: boolean };
+}
+
+export async function importInstituteLotStudents(
+  instituteId: number,
+  lotId: number,
+  students: Array<{
+    email: string;
+    name?: string;
+    className?: string;
+    rollNumber?: string;
+    password?: string;
+  }>,
+) {
+  const res = await api.post(
+    `/api/institute/${instituteId}/lots/${lotId}/students`,
+    { students },
+    { headers: courseAuthHeaders() },
+  );
+  return res.data as {
+    assigned: number;
+    emailed?: number;
+    students: Array<{ email: string; created?: boolean }>;
+  };
+}
+
+export async function endInstituteReadingSession(instituteId: number, sessionId: number) {
+  const res = await api.post(
+    `/api/institute/${instituteId}/live/${sessionId}/end`,
+    {},
+    { headers: courseAuthHeaders() },
+  );
+  return res.data as { ok: boolean; alreadyEnded?: boolean };
+}
+
+function saveBlob(data: Blob, filename: string) {
+  const url = URL.createObjectURL(data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function exportInstituteActivity(instituteId: number, kind: 'reading' | 'logins') {
+  const res = await api.get(`/api/institute/${instituteId}/activity`, {
+    params: { format: 'csv', kind },
+    headers: courseAuthHeaders(),
+    responseType: 'blob',
+  });
+  const header = String(res.headers?.['content-disposition'] || '');
+  const match = header.match(/filename="?([^"]+)"?/i);
+  saveBlob(res.data, match?.[1] || `college-${kind}.csv`);
+}
+
+export type CourseNoteItem = {
+  id: number;
+  pageNumber?: number | null;
+  content: string;
+  quote?: string | null;
+};
+
+export type CourseNoteRecord = CourseNoteItem & {
+  chapterId: number;
+  createdAt?: string;
+  updatedAt?: string;
+  chapterTitle: string;
+  chapterSlug: string;
+  subjectName: string;
+  subjectSlug: string;
+  courseName: string;
+  courseSlug: string;
+  semesterNumber: number;
+  href: string;
+  notesHref: string;
+};
+
 export async function fetchChapterStudy(chapterId: number) {
   const res = await api.get(`/api/courses/chapters/${chapterId}/study`, {
     headers: courseAuthHeaders(),
   });
   return res.data as {
     bookmarks: { id: number; pageNumber: number; markType?: CourseBookmarkType }[];
-    notes: { id: number; pageNumber?: number | null; content: string; quote?: string | null }[];
+    notes: CourseNoteItem[];
     highlights: { id: number; pageNumber?: number | null; text: string; color?: string }[];
   };
+}
+
+export async function fetchAllCourseNotes() {
+  const res = await api.get('/api/courses/notes', {
+    headers: courseAuthHeaders(),
+  });
+  return ((res.data as { notes?: CourseNoteRecord[] })?.notes || []) as CourseNoteRecord[];
 }
 
 export async function addCourseBookmark(
@@ -307,6 +649,73 @@ export async function addCourseFlashcard(
 
 export async function deleteCourseFlashcard(id: number) {
   await api.delete(`/api/courses/flashcards/${id}`, { headers: courseAuthHeaders() });
+}
+
+export function courseDeviceKey() {
+  if (typeof window === 'undefined') return 'server';
+  try {
+    let key = window.localStorage.getItem('vv_device_key');
+    if (!key) {
+      key =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `dev-${Date.now()}`;
+      window.localStorage.setItem('vv_device_key', key);
+    }
+    return key;
+  } catch {
+    return 'unknown';
+  }
+}
+
+export function courseAccessMessage(err: any) {
+  return (
+    err?.response?.data?.message ||
+    (err?.response?.data?.error === 'no_license'
+      ? 'You do not have a license for this book.'
+      : err?.response?.data?.error === 'library_full'
+        ? 'All library copies of this book are in use.'
+        : err?.response?.data?.error === 'session_replaced'
+          ? 'This book was opened on another device.'
+          : '')
+  );
+}
+
+export async function acquireBookSession(
+  subjectId: number,
+  opts?: { chapterId?: number; pageNumber?: number },
+) {
+  const res = await api.post(
+    `/api/courses/subjects/${subjectId}/session`,
+    {
+      deviceKey: courseDeviceKey(),
+      deviceName: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 80) : null,
+      chapterId: opts?.chapterId,
+      pageNumber: opts?.pageNumber,
+    },
+    { headers: courseAuthHeaders() },
+  );
+  return res.data as { sessionId: number; accessModel: string; resumed?: boolean };
+}
+
+export async function heartbeatBookSession(
+  subjectId: number,
+  sessionId: number,
+  opts?: { chapterId?: number; pageNumber?: number },
+) {
+  await api.post(
+    `/api/courses/subjects/${subjectId}/session/heartbeat`,
+    { sessionId, chapterId: opts?.chapterId, pageNumber: opts?.pageNumber },
+    { headers: courseAuthHeaders() },
+  );
+}
+
+export async function releaseBookSession(subjectId: number, sessionId: number) {
+  await api.post(
+    `/api/courses/subjects/${subjectId}/session/release`,
+    { sessionId },
+    { headers: courseAuthHeaders() },
+  );
 }
 
 export async function startLearnActivity(activityId: number) {

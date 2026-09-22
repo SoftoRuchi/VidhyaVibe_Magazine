@@ -16,14 +16,10 @@ import {
 } from 'antd';
 import axios from 'axios';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  clearViewingContext,
-  getAudience,
-  setChildAudience,
-  setParentAudience,
-} from '../lib/viewingContext';
+import { useProductMode } from '../lib/productMode';
+import { clearViewingContext, setChildAudience, setParentAudience } from '../lib/viewingContext';
 
 const { Option } = Select;
 
@@ -36,6 +32,8 @@ function getAuthHeader() {
 
 export default function PostLoginChildSetupModal() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { setMode } = useProductMode();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [me, setMe] = useState<{
@@ -48,7 +46,7 @@ export default function PostLoginChildSetupModal() {
     guardians?: { id: number; name: string; phone?: string; relation?: string }[];
   } | null>(null);
   const [readers, setReaders] = useState<{ id: number; name: string; age?: number }[]>([]);
-  const [step, setStep] = useState<'chooser' | 'setup'>('chooser');
+  const [step, setStep] = useState<'product' | 'chooser' | 'setup'>('product');
   const [parentForm] = Form.useForm();
   const [childForm] = Form.useForm();
 
@@ -68,11 +66,6 @@ export default function PostLoginChildSetupModal() {
         axios.get('/api/readers', { headers }),
       ]);
       const m = meRes.data;
-      if (m?.isAdmin) {
-        sessionStorage.removeItem(STORAGE_KEY);
-        setOpen(false);
-        return;
-      }
       setMe(m);
       setReaders(readersRes.data || []);
       parentForm.setFieldsValue({
@@ -80,13 +73,6 @@ export default function PostLoginChildSetupModal() {
         phone: m?.phone || m?.guardians?.[0]?.phone || '',
         deliveryAddress: m?.deliveryAddress || '',
       });
-
-      const hasChildren = (readersRes.data || []).length > 0;
-      if (hasChildren) {
-        setStep('chooser');
-      } else {
-        setStep('setup');
-      }
     } catch {
       sessionStorage.removeItem(STORAGE_KEY);
       setOpen(false);
@@ -100,13 +86,36 @@ export default function PostLoginChildSetupModal() {
     const flag = sessionStorage.getItem(STORAGE_KEY);
     const token = localStorage.getItem('access_token');
     if (flag !== '1' || !token) return;
+    setStep('product');
     setOpen(true);
     loadData();
   }, [shouldRunOnPath, loadData, pathname]);
 
+  useEffect(() => {
+    if (!open) {
+      document.body.classList.remove('vv-post-login-open');
+      return;
+    }
+    document.body.classList.add('vv-post-login-open');
+    return () => document.body.classList.remove('vv-post-login-open');
+  }, [open]);
+
   const closeAndClearFlag = () => {
     sessionStorage.removeItem(STORAGE_KEY);
+    document.body.classList.remove('vv-post-login-open');
     setOpen(false);
+  };
+
+  const chooseProduct = (next: 'magazine' | 'course') => {
+    if (loading) return;
+    setMode(next);
+    if (next === 'course') {
+      clearViewingContext();
+      closeAndClearFlag();
+      router.push('/');
+      return;
+    }
+    setStep('chooser');
   };
 
   const saveParent = async () => {
@@ -150,35 +159,55 @@ export default function PostLoginChildSetupModal() {
   const chooseParent = () => {
     setParentAudience();
     closeAndClearFlag();
+    router.push('/');
   };
 
   const chooseChild = (readerId: number, readerName: string) => {
     setChildAudience(readerId, readerName);
     closeAndClearFlag();
+    router.push('/');
   };
+
+  const title =
+    step === 'product'
+      ? 'What would you like to open?'
+      : step === 'chooser'
+        ? 'Who is this login for?'
+        : 'Welcome — set up your family';
 
   return (
     <Modal
-      title={step === 'chooser' ? 'Who is this login for?' : 'Welcome — set up your family'}
+      title={title}
       open={open}
-      onCancel={() => {
-        if (step === 'chooser' && readers.length > 0) {
-          const audience = getAudience();
-          if (audience === 'child' || audience === 'parent') {
-            closeAndClearFlag();
-            return;
-          }
-        }
-        closeAndClearFlag();
-      }}
+      centered
+      maskClosable={false}
+      closable={false}
+      keyboard={false}
+      rootClassName="vv-post-login-modal"
+      styles={{ mask: { background: 'var(--nav-oval-bg)', opacity: 1 } }}
+      maskStyle={{ background: 'var(--nav-oval-bg)', opacity: 1 }}
+      onCancel={() => undefined}
       footer={
-        step === 'chooser'
+        step === 'product' || step === 'chooser'
           ? null
           : [
-              <Button key="later" onClick={closeAndClearFlag}>
+              <Button
+                key="later"
+                onClick={() => {
+                  setParentAudience();
+                  closeAndClearFlag();
+                }}
+              >
                 Skip for now
               </Button>,
-              <Button key="done" type="primary" onClick={closeAndClearFlag}>
+              <Button
+                key="done"
+                type="primary"
+                onClick={() => {
+                  setParentAudience();
+                  closeAndClearFlag();
+                }}
+              >
                 Done
               </Button>,
             ]
@@ -188,6 +217,35 @@ export default function PostLoginChildSetupModal() {
       destroyOnClose={false}
     >
       <Spin spinning={loading}>
+        {step === 'product' ? (
+          <>
+            <p style={{ color: '#666', marginBottom: 24, textAlign: 'center' }}>
+              Choose one. Magazines are for families. Courses are for college textbooks.
+            </p>
+            <div className="vv-product-chooser">
+              <button
+                type="button"
+                className="vv-product-circle"
+                disabled={loading}
+                onClick={() => chooseProduct('magazine')}
+              >
+                <span className="vv-product-circle-face is-magazine">M</span>
+                <strong>Magazine</strong>
+                <span>Stories and issues</span>
+              </button>
+              <button
+                type="button"
+                className="vv-product-circle"
+                disabled={loading}
+                onClick={() => chooseProduct('course')}
+              >
+                <span className="vv-product-circle-face is-course">C</span>
+                <strong>Course</strong>
+                <span>Books and notes</span>
+              </button>
+            </div>
+          </>
+        ) : null}
         {step === 'chooser' ? (
           <>
             <p style={{ color: '#666', marginBottom: 20 }}>
@@ -236,8 +294,29 @@ export default function PostLoginChildSetupModal() {
                   <span style={{ color: '#888', fontSize: 12 }}>Child</span>
                 </button>
               ))}
+              {readers.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setStep('setup')}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Avatar size={72} style={{ background: '#16a34a', fontWeight: 700 }}>
+                    +
+                  </Avatar>
+                  <strong>Child</strong>
+                  <span style={{ color: '#888', fontSize: 12 }}>Add a child</span>
+                </button>
+              ) : null}
             </div>
-            <div style={{ marginTop: 18 }}>
+            <div style={{ marginTop: 18, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Button
                 onClick={() => {
                   clearViewingContext();
@@ -246,9 +325,10 @@ export default function PostLoginChildSetupModal() {
               >
                 Continue as parent
               </Button>
+              <Button onClick={() => setStep('setup')}>Add a child</Button>
             </div>
           </>
-        ) : (
+        ) : step === 'setup' ? (
           <>
             <p style={{ color: '#666', marginBottom: 16 }}>
               Confirm your guardian details (we&apos;ve filled in what we already have). Then add
@@ -328,7 +408,7 @@ export default function PostLoginChildSetupModal() {
               </Button>
             </Form>
           </>
-        )}
+        ) : null}
       </Spin>
     </Modal>
   );

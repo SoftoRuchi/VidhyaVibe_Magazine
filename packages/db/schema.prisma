@@ -59,6 +59,12 @@ model User {
   sessions           Session[]
   editionOrders      EditionOrder[]
   editionOrderProofs EditionOrderProof[]
+  instituteMembers   InstituteMember[]
+  bookLicenseLots    BookLicenseLot[]
+  bookLicenseSeats   BookLicenseSeat[]
+  bookReadingSessions BookReadingSession[]
+  bookOrders         BookOrder[]
+  bookOrderProofs    BookOrderProof[]
 
   @@index([email])
   @@map("users")
@@ -456,7 +462,9 @@ model Session {
   ipAddress  String?
   userAgent  String?
   refreshJti String?   @unique
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
+  loggedOutAt DateTime? @map("logged_out_at")
+  lastSeenAt  DateTime? @map("last_seen_at")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -773,6 +781,7 @@ model CourseSubject {
   fileKey     String?   @map("file_key") @db.VarChar(1024)
   sampleKey   String?   @map("sample_key") @db.VarChar(1024)
   pages       Int?
+  price       Decimal?  @db.Decimal(10, 2)
   sortOrder   Int       @default(0) @map("sort_order")
   status      String    @default("DRAFT") @db.VarChar(32)
   publishedAt DateTime? @map("published_at")
@@ -782,6 +791,9 @@ model CourseSubject {
   semester CourseSemester  @relation(fields: [semesterId], references: [id], onDelete: Cascade)
   chapters CourseChapter[]
   progress CourseProgress[]
+  licenseLots BookLicenseLot[]
+  readingSessions BookReadingSession[]
+  bookOrders BookOrder[]
 
   @@unique([semesterId, slug])
   @@index([semesterId])
@@ -915,4 +927,159 @@ model CourseFlashcard {
   @@index([userId])
   @@map("course_flashcards")
 }
+
+model Institute {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @db.VarChar(255)
+  code      String   @unique @db.VarChar(32)
+  email     String?  @db.VarChar(255)
+  phone     String?  @db.VarChar(32)
+  city      String?  @db.VarChar(120)
+  status    String   @default("ACTIVE") @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members  InstituteMember[]
+  lots     BookLicenseLot[]
+  sessions BookReadingSession[]
+
+  @@index([status])
+  @@map("institutes")
+}
+
+model InstituteMember {
+  id          BigInt   @id @default(autoincrement())
+  instituteId BigInt   @map("institute_id")
+  userId      BigInt   @map("user_id")
+  role        String   @default("STUDENT") @db.VarChar(32)
+  className   String?  @map("class_name") @db.VarChar(80)
+  rollNumber  String?  @map("roll_number") @db.VarChar(40)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  institute Institute         @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  seats     BookLicenseSeat[]
+
+  @@unique([instituteId, userId])
+  @@index([userId])
+  @@map("institute_members")
+}
+
+model BookLicenseLot {
+  id           BigInt    @id @default(autoincrement())
+  subjectId    BigInt    @map("subject_id")
+  accessModel  String    @map("access_model") @db.VarChar(24)
+  instituteId  BigInt?   @map("institute_id")
+  userId       BigInt?   @map("user_id")
+  seatCount    Int       @default(1) @map("seat_count")
+  purchaseCode String    @unique @map("purchase_code") @db.VarChar(64)
+  status       String    @default("ACTIVE") @db.VarChar(16)
+  startsAt     DateTime? @map("starts_at")
+  endsAt       DateTime? @map("ends_at")
+  notes        String?   @db.VarChar(500)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  subject   CourseSubject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  institute Institute?            @relation(fields: [instituteId], references: [id], onDelete: SetNull)
+  user      User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  seats     BookLicenseSeat[]
+  sessions  BookReadingSession[]
+
+  @@index([subjectId, status])
+  @@index([instituteId])
+  @@index([userId])
+  @@map("book_license_lots")
+}
+
+model BookLicenseSeat {
+  id        BigInt   @id @default(autoincrement())
+  lotId     BigInt   @map("lot_id")
+  userId    BigInt   @map("user_id")
+  memberId  BigInt?  @map("member_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  lot    BookLicenseLot   @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  member InstituteMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@unique([lotId, userId])
+  @@index([userId])
+  @@map("book_license_seats")
+}
+
+model BookReadingSession {
+  id              BigInt    @id @default(autoincrement())
+  userId          BigInt    @map("user_id")
+  subjectId       BigInt    @map("subject_id")
+  lotId           BigInt?   @map("lot_id")
+  instituteId     BigInt?   @map("institute_id")
+  accessModel     String    @map("access_model") @db.VarChar(24)
+  authJti         String?   @map("auth_jti") @db.VarChar(255)
+  deviceKey       String    @map("device_key") @db.VarChar(64)
+  deviceName      String?   @map("device_name") @db.VarChar(255)
+  ipAddress       String?   @map("ip_address") @db.VarChar(100)
+  userAgent       String?   @map("user_agent") @db.VarChar(1000)
+  chapterId       BigInt?   @map("chapter_id")
+  pageNumber      Int?      @map("page_number")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  lastHeartbeatAt DateTime  @default(now()) @map("last_heartbeat_at")
+  endedAt         DateTime? @map("ended_at")
+  endReason       String?   @map("end_reason") @db.VarChar(32)
+  secondsActive   Int       @default(0) @map("seconds_active")
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject   CourseSubject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  lot       BookLicenseLot? @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  institute Institute?      @relation(fields: [instituteId], references: [id], onDelete: SetNull)
+
+  @@index([userId, subjectId])
+  @@index([subjectId, endedAt])
+  @@index([instituteId, endedAt])
+  @@index([authJti])
+  @@map("book_reading_sessions")
+}
+
+model BookOrder {
+  id            BigInt    @id @default(autoincrement())
+  userId        BigInt    @map("user_id")
+  subjectId     BigInt    @map("subject_id")
+  amount        Decimal   @db.Decimal(10, 2)
+  currency      String    @default("INR") @db.VarChar(8)
+  status        String    @default("PENDING") @db.VarChar(16)
+  provider      String?   @db.VarChar(16)
+  rpOrderId     String?   @map("rp_order_id") @db.VarChar(64)
+  rpPaymentId   String?   @map("rp_payment_id") @db.VarChar(64)
+  lotId         BigInt?   @map("lot_id")
+  purchaseCode  String?   @map("purchase_code") @db.VarChar(64)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  paidAt        DateTime? @map("paid_at")
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject CourseSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  proofs  BookOrderProof[]
+
+  @@index([userId, subjectId, status])
+  @@index([rpOrderId])
+  @@map("book_orders")
+}
+
+model BookOrderProof {
+  id         BigInt    @id @default(autoincrement())
+  orderId    BigInt    @map("order_id")
+  userId     BigInt    @map("user_id")
+  fileKey    String?   @map("file_key") @db.VarChar(1024)
+  verified   Boolean   @default(false)
+  verifiedBy BigInt?   @map("verified_by")
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  order BookOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([verified])
+  @@map("book_order_proofs")
+}
+
 

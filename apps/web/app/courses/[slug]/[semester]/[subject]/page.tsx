@@ -4,10 +4,20 @@ import { Button, Empty, Spin } from 'antd';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import React from 'react';
-import { CourseEmpty, CourseHero, CourseSection } from '../../../../../components/CourseBrowse';
+import {
+  CourseAccessBlocked,
+  CourseEmpty,
+  CourseHero,
+  CourseSection,
+} from '../../../../../components/CourseBrowse';
 import { useAuth } from '../../../../../lib/authContext';
 import { courseCountLabel } from '../../../../../lib/courseLabels';
-import { courseLoginHref, fetchSemester, fetchSubject } from '../../../../../lib/coursesApi';
+import {
+  courseAccessMessage,
+  courseLoginHref,
+  fetchSemester,
+  fetchSubject,
+} from '../../../../../lib/coursesApi';
 
 export default function SubjectPage() {
   const params = useParams();
@@ -19,6 +29,8 @@ export default function SubjectPage() {
   const [data, setData] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(true);
   const [needLogin, setNeedLogin] = React.useState(false);
+  const [accessError, setAccessError] = React.useState('');
+  const [blockedSubjectId, setBlockedSubjectId] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     if (authLoading) return;
@@ -37,11 +49,20 @@ export default function SubjectPage() {
           if (!cancelled) setData(null);
           return;
         }
-        const subject = await fetchSubject(match.id);
-        if (!cancelled) setData(subject);
-      } catch (e: any) {
-        if (e?.response?.status === 401) setNeedLogin(true);
-        else if (!cancelled) setData(null);
+        try {
+          const subject = await fetchSubject(match.id);
+          if (!cancelled) setData(subject);
+        } catch (e: any) {
+          if (e?.response?.status === 401) setNeedLogin(true);
+          else if (e?.response?.status === 403) {
+            if (!cancelled) {
+              setBlockedSubjectId(match.id);
+              setAccessError(courseAccessMessage(e) || 'You do not have access to this book.');
+            }
+          } else if (!cancelled) setData(null);
+        }
+      } catch {
+        if (!cancelled) setData(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -71,6 +92,15 @@ export default function SubjectPage() {
     );
   }
 
+  if (accessError) {
+    return (
+      <CourseAccessBlocked
+        message={accessError}
+        backHref={`/courses/${slug}${number ? `/sem-${number}` : ''}`}
+        subjectId={blockedSubjectId}
+      />
+    );
+  }
   if (!data) {
     return (
       <main className="container" style={{ padding: 48 }}>

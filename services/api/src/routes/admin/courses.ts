@@ -2,10 +2,10 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getPool, query } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
-import type { AuthRequest } from '../../middleware/auth';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, type AuthRequest } from '../../middleware/auth';
 import { memoryUpload } from '../../middleware/upload';
 import { getStorageAdapter } from '../../providers/storage';
+import { ensureBookAccessTables, parseBookPrice } from '../../services/bookAccess';
 import { publicFileUrlForKey } from '../../utils/courseAssets';
 import { slugify } from '../../utils/slugify';
 import { asDoc, htmlToJson, jsonToHtml } from '../../utils/textbookContent';
@@ -25,6 +25,21 @@ const imageUpload = upload.single('image');
 
 function n(v: unknown): number {
   return Number(v);
+}
+
+function hasNumeric(v: unknown): boolean {
+  if (v == null || v === '') return false;
+  const num = Number(v);
+  return Number.isFinite(num);
+}
+
+async function nextChapterSortOrder(subjectId: number): Promise<number> {
+  const [rows]: any = await query(
+    'SELECT COALESCE(MAX(sort_order), 0) + 10 AS nextSort FROM course_chapters WHERE subject_id = ?',
+    [subjectId],
+  );
+  const next = n(rows?.[0]?.nextSort);
+  return Number.isFinite(next) && next > 0 ? next : 10;
 }
 
 function chapterDoc(row: {
@@ -166,6 +181,7 @@ router.post('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const id = n(req.params.id);
   try {
+    await ensureBookAccessTables();
     const [rows]: any = await query(
       `SELECT id, name, slug, university, description, cover_key AS coverKey,
               sort_order AS sortOrder, status, published_at AS publishedAt
@@ -185,7 +201,7 @@ router.get('/:id', async (req, res) => {
     for (const sem of sems || []) {
       const [subjects]: any = await query(
         `SELECT id, name, slug, description, syllabus_code AS syllabusCode, cover_key AS coverKey,
-                back_cover_key AS backCoverKey, file_key AS fileKey, pages, sort_order AS sortOrder, status, published_at AS publishedAt
+                back_cover_key AS backCoverKey, file_key AS fileKey, pages, price, sort_order AS sortOrder, status, published_at AS publishedAt
          FROM course_subjects WHERE semester_id = ? ORDER BY sort_order ASC, id ASC`,
         [sem.id],
       );
@@ -204,6 +220,7 @@ router.get('/:id', async (req, res) => {
           id: n(s.id),
           sortOrder: n(s.sortOrder),
           pages: s.pages != null ? n(s.pages) : null,
+          price: s.price != null ? Number(s.price) : null,
           hasBookPdf: !!s.fileKey,
           ...coverUrls(s.coverKey, s.backCoverKey),
           chapters: (chapters || []).map((ch: any) => ({
@@ -360,6 +377,7 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    await ensureBookAccessTables();
     const [sem]: any = await conn.query(
       `SELECT sem.id, c.slug AS courseSlug FROM course_semesters sem
        JOIN courses c ON c.id = sem.course_id WHERE sem.id = ? LIMIT 1`,
@@ -385,7 +403,7 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
 
     const [r]: any = await conn.query(
       `INSERT INTO course_subjects
-        (semester_id, name, slug, description, syllabus_code, cover_key, back_cover_key, file_key, pages, sort_order, status, published_at, created_at, updated_at)
+        (semester_id, name, slug, description, syllabus_code, cover_key, back_cover_key, file_key, pages, price, sort_order, status, published_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${published ? 'NOW(3)' : 'NULL'}, NOW(3), NOW(3))`,
       [
         semesterId,
@@ -397,6 +415,7 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
         backCoverKey,
         fileKey,
         req.body?.pages ? n(req.body.pages) : null,
+        parseBookPrice(req.body?.price),
         n(req.body?.sortOrder ?? 0),
         published ? 'PUBLISHED' : 'DRAFT',
       ],
@@ -420,6 +439,7 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
   const pool = getPool();
   const conn = await pool.getConnection();
   try {
+    await ensureBookAccessTables();
     const [rows]: any = await conn.query(
       `SELECT s.id, s.slug, c.slug AS courseSlug
        FROM course_subjects s
@@ -449,7 +469,7 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
 
     await conn.query(
       `UPDATE course_subjects SET
-         name = ?, slug = ?, description = ?, syllabus_code = ?, pages = ?, sort_order = ?,
+         name = ?, slug = ?, description = ?, syllabus_code = ?, pages = ?, price = ?, sort_order = ?,
          status = ?,
          published_at = CASE
            WHEN ? = 1 AND published_at IS NULL THEN NOW(3)
@@ -466,6 +486,7 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
         req.body?.description || null,
         req.body?.syllabusCode || null,
         req.body?.pages ? n(req.body.pages) : null,
+        parseBookPrice(req.body?.price),
         n(req.body?.sortOrder ?? 0),
         published ? 'PUBLISHED' : 'DRAFT',
         published ? 1 : 0,
@@ -514,7 +535,9 @@ router.post('/subjects/:id/chapters', async (req, res) => {
         subjectId,
         title,
         slug,
-        n(req.body?.sortOrder ?? 0),
+        hasNumeric(req.body?.sortOrder)
+          ? n(req.body.sortOrder)
+          : await nextChapterSortOrder(subjectId),
         req.body?.startPage ? n(req.body.startPage) : null,
         req.body?.endPage ? n(req.body.endPage) : null,
         req.body?.content || null,
@@ -580,11 +603,14 @@ router.put('/chapters/:id', async (req, res) => {
   if (!title) return res.status(400).json({ error: 'title_required' });
   try {
     const [existing]: any = await query(
-      'SELECT id, slug, title, content, content_json AS contentJson FROM course_chapters WHERE id = ? LIMIT 1',
+      'SELECT id, slug, title, content, content_json AS contentJson, sort_order AS sortOrder FROM course_chapters WHERE id = ? LIMIT 1',
       [id],
     );
     if (!existing?.[0]) return res.status(404).json({ error: 'not_found' });
     const slug = req.body?.slug ? slugify(String(req.body.slug)) : existing[0].slug;
+    const sortOrder = hasNumeric(req.body?.sortOrder)
+      ? n(req.body.sortOrder)
+      : n(existing[0].sortOrder);
     const doc = req.body?.contentJson
       ? asDoc(req.body.contentJson, { id: String(id), title, html: existing[0].content || '' })
       : req.body?.content != null
@@ -600,7 +626,7 @@ router.put('/chapters/:id', async (req, res) => {
       [
         title,
         slug,
-        n(req.body?.sortOrder ?? 0),
+        Number.isFinite(sortOrder) ? sortOrder : 0,
         req.body?.startPage ? n(req.body.startPage) : null,
         req.body?.endPage ? n(req.body.endPage) : null,
         html,

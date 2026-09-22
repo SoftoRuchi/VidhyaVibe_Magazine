@@ -1,8 +1,23 @@
 import { Router } from 'express';
 import { query } from '../db';
-import type { AuthRequest } from '../middleware/auth';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, type AuthRequest } from '../middleware/auth';
+import { requireChapterAccess, requireSubjectAccess } from '../middleware/courseAccess';
+import { optionalAuth } from '../middleware/optionalAuth';
+import { memoryUpload } from '../middleware/upload';
 import { getStorageAdapter } from '../providers/storage';
+import {
+  acquireReadingSession,
+  assertCanReadSubject,
+  attachBookOrderProof,
+  BookAccessError,
+  confirmBookRazorpayPayment,
+  createBookCheckout,
+  ensureBookAccessTables,
+  heartbeatReadingSession,
+  listEntitledBooks,
+  releaseReadingSession,
+  resolveEntitlement,
+} from '../services/bookAccess';
 import { publicFileUrlForKey, rewriteCourseAssetUrls } from '../utils/courseAssets';
 import { sendStorageBody } from '../utils/sendStorage';
 import { asDoc, jsonToHtml, quickChecksFromDoc } from '../utils/textbookContent';
@@ -72,6 +87,7 @@ router.post('/progress', requireAuth, async (req: AuthRequest, res) => {
       [subjectId],
     );
     if (!subs?.[0]) return res.status(404).json({ error: 'subject_not_found' });
+    await assertCanReadSubject(Number(req.user!.id), subjectId, req.user?.isAdmin);
 
     await query(
       `INSERT INTO course_progress (user_id, subject_id, chapter_id, current_page, percent, updated_at)
@@ -85,6 +101,9 @@ router.post('/progress', requireAuth, async (req: AuthRequest, res) => {
     );
     res.json({ ok: true });
   } catch (e: any) {
+    if (e instanceof BookAccessError) {
+      return res.status(e.status).json({ error: e.code, message: e.message });
+    }
     console.error('[courses] progress failed', e);
     res.status(500).json({ error: 'progress_failed' });
   }
@@ -111,6 +130,9 @@ router.get('/continue', requireAuth, async (req: AuthRequest, res) => {
     );
     const row = rows?.[0];
     if (!row?.chapterId) return res.json(null);
+    const subjectId = n(row.subjectId);
+    const ent = await resolveEntitlement(Number(req.user!.id), subjectId, req.user?.isAdmin);
+    if (!ent.allowed) return res.json(null);
     const semesterNumber = n(row.semesterNumber);
     const page = row.currentPage != null ? n(row.currentPage) : null;
     const href =
@@ -138,8 +160,251 @@ router.get('/continue', requireAuth, async (req: AuthRequest, res) => {
   }
 });
 
+/** GET /api/courses/my-books — textbooks this user may open */
+router.get('/my-books', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const books = await listEntitledBooks(Number(req.user!.id));
+    res.json({ books });
+  } catch (e: any) {
+    console.error('[courses] my-books failed', e);
+    res.status(500).json({ error: 'fetch_failed' });
+  }
+});
+
+function sendBookAccessError(res: any, e: any) {
+  if (e instanceof BookAccessError) {
+    return res.status(e.status).json({ error: e.code, message: e.message });
+  }
+  console.error('[courses] session failed', e);
+  return res.status(500).json({ error: 'session_failed' });
+}
+
+function bookHref(courseSlug: string, semesterNumber: number, subjectSlug: string) {
+  return `/courses/${courseSlug}/sem-${semesterNumber}/${subjectSlug}`;
+}
+
+function numberPrice(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const amount = Number(v);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+/** GET /api/courses/subjects/:id/offer — catalog + price, no license required */
+router.get('/subjects/:id/offer', requireAuth, async (req: AuthRequest, res) => {
+  const id = n(req.params.id);
+  if (!id) return res.status(400).json({ error: 'invalid_id' });
+  try {
+    await ensureBookAccessTables();
+    const [rows]: any = await query(
+      `SELECT s.id, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
+              s.cover_key AS coverKey, s.price,
+              sem.number AS semesterNumber, sem.title AS semesterTitle,
+              c.name AS courseName, c.slug AS courseSlug
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       JOIN courses c ON c.id = sem.course_id
+       WHERE s.id = ? AND ${publishedSubjectSql('s')} AND ${publishedCourseSql('c')}
+       LIMIT 1`,
+      [id],
+    );
+    const s = rows?.[0];
+    if (!s) return res.status(404).json({ error: 'not_found' });
+    const ent = await resolveEntitlement(Number(req.user!.id), id, req.user?.isAdmin);
+    const price = numberPrice(s.price);
+    const href = bookHref(s.courseSlug, n(s.semesterNumber), s.slug);
+    const canRead = !!ent.allowed;
+    const purchasable = !canRead && price != null && price > 0;
+    res.json({
+      id: n(s.id),
+      name: s.name,
+      slug: s.slug,
+      description: s.description,
+      syllabusCode: s.syllabusCode,
+      frontCoverUrl: s.coverKey ? publicFileUrlForKey(s.coverKey) : null,
+      price,
+      currency: 'INR',
+      canRead,
+      alreadyOwned: canRead && ent.accessModel !== 'OPEN',
+      purchasable,
+      accessModel: canRead ? ent.accessModel : null,
+      href,
+      buyHref: `${href}/buy`,
+      course: { name: s.courseName, slug: s.courseSlug },
+      semester: { number: n(s.semesterNumber), title: s.semesterTitle },
+    });
+  } catch (e: any) {
+    sendBookAccessError(res, e);
+  }
+});
+
+/** POST /api/courses/subjects/:id/purchase — start individual checkout */
+router.post('/subjects/:id/purchase', requireAuth, async (req: AuthRequest, res) => {
+  const id = n(req.params.id);
+  if (!id) return res.status(400).json({ error: 'invalid_id' });
+  try {
+    await ensureBookAccessTables();
+    const [rows]: any = await query(
+      `SELECT s.id, s.name, s.slug, s.price,
+              sem.number AS semesterNumber, c.slug AS courseSlug
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       JOIN courses c ON c.id = sem.course_id
+       WHERE s.id = ? AND ${publishedSubjectSql('s')} AND ${publishedCourseSql('c')}
+       LIMIT 1`,
+      [id],
+    );
+    const s = rows?.[0];
+    if (!s) return res.status(404).json({ error: 'not_found' });
+    const href = bookHref(s.courseSlug, n(s.semesterNumber), s.slug);
+    const ent = await resolveEntitlement(Number(req.user!.id), id, req.user?.isAdmin);
+    if (ent.allowed) {
+      return res.status(409).json({
+        error: 'already_owned',
+        message: 'You already have access to this book.',
+        href,
+        accessModel: ent.accessModel,
+      });
+    }
+    const price = numberPrice(s.price);
+    if (price == null || price <= 0) {
+      return res.status(400).json({
+        error: 'not_for_sale',
+        message: 'This book is not listed for individual purchase. Ask your college for a seat.',
+      });
+    }
+    const checkout = await createBookCheckout({
+      userId: Number(req.user!.id),
+      subjectId: id,
+      price,
+    });
+    res.status(201).json({ ...checkout, href });
+  } catch (e: any) {
+    sendBookAccessError(res, e);
+  }
+});
+
+/** POST /api/courses/subjects/:id/purchase/confirm — Razorpay signature */
+router.post('/subjects/:id/purchase/confirm', requireAuth, async (req: AuthRequest, res) => {
+  const id = n(req.params.id);
+  const orderId = n(req.body?.orderId);
+  if (!id || !orderId) return res.status(400).json({ error: 'order_required' });
+  try {
+    const [rows]: any = await query(
+      `SELECT s.slug, sem.number AS semesterNumber, c.slug AS courseSlug
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       JOIN courses c ON c.id = sem.course_id
+       WHERE s.id = ? LIMIT 1`,
+      [id],
+    );
+    const href = rows?.[0]
+      ? bookHref(rows[0].courseSlug, n(rows[0].semesterNumber), rows[0].slug)
+      : '/courses';
+    const result = await confirmBookRazorpayPayment({
+      userId: Number(req.user!.id),
+      subjectId: id,
+      orderId,
+      razorpay_payment_id: String(req.body?.razorpay_payment_id || ''),
+      razorpay_order_id: String(req.body?.razorpay_order_id || ''),
+      razorpay_signature: String(req.body?.razorpay_signature || ''),
+    });
+    res.json({ ok: true, href, ...result, accessModel: 'INDIVIDUAL' });
+  } catch (e: any) {
+    sendBookAccessError(res, e);
+  }
+});
+
+/** POST /api/courses/subjects/:id/purchase/:orderId/proof */
+router.post(
+  '/subjects/:id/purchase/:orderId/proof',
+  requireAuth,
+  memoryUpload.single('proof'),
+  async (req: AuthRequest, res) => {
+    const id = n(req.params.id);
+    const orderId = n(req.params.orderId);
+    const file = (req as any).file as
+      | { buffer: Buffer; originalname: string; mimetype: string }
+      | undefined;
+    if (!file) return res.status(400).json({ error: 'file_required' });
+    try {
+      const storage = getStorageAdapter();
+      const key = `payments/books/${orderId}/${Date.now()}-${file.originalname}`;
+      const up = await storage.upload(key, file.buffer, file.mimetype);
+      const proofId = await attachBookOrderProof({
+        userId: Number(req.user!.id),
+        subjectId: id,
+        orderId,
+        fileKey: up.key,
+      });
+      res.status(201).json({
+        proofId,
+        message: 'Proof uploaded. Access opens after VidhyaVibe confirms the payment.',
+      });
+    } catch (e: any) {
+      sendBookAccessError(res, e);
+    }
+  },
+);
+
+/** GET /api/courses/subjects/:id/access */
+router.get('/subjects/:id/access', requireAuth, async (req: AuthRequest, res) => {
+  const subjectId = n(req.params.id);
+  try {
+    const ent = await resolveEntitlement(Number(req.user!.id), subjectId, req.user?.isAdmin);
+    res.json(ent);
+  } catch (e: any) {
+    sendBookAccessError(res, e);
+  }
+});
+
+/** POST /api/courses/subjects/:id/session */
+router.post('/subjects/:id/session', requireAuth, async (req: AuthRequest, res) => {
+  const subjectId = n(req.params.id);
+  try {
+    const result = await acquireReadingSession({
+      userId: Number(req.user!.id),
+      subjectId,
+      isAdmin: req.user?.isAdmin,
+      deviceKey: String(req.body?.deviceKey || 'unknown'),
+      deviceName: req.body?.deviceName || null,
+      ipAddress: req.ip || null,
+      userAgent: req.headers['user-agent'] ? String(req.headers['user-agent']) : null,
+      chapterId: req.body?.chapterId != null ? n(req.body.chapterId) : null,
+      pageNumber: req.body?.pageNumber != null ? n(req.body.pageNumber) : null,
+    });
+    res.status(201).json(result);
+  } catch (e: any) {
+    sendBookAccessError(res, e);
+  }
+});
+
+router.post('/subjects/:id/session/heartbeat', requireAuth, async (req: AuthRequest, res) => {
+  const sessionId = n(req.body?.sessionId);
+  if (!sessionId) return res.status(400).json({ error: 'sessionId_required' });
+  try {
+    await heartbeatReadingSession({
+      sessionId,
+      userId: Number(req.user!.id),
+      chapterId: req.body?.chapterId != null ? n(req.body.chapterId) : null,
+      pageNumber: req.body?.pageNumber != null ? n(req.body.pageNumber) : null,
+    });
+    res.json({ ok: true });
+  } catch (e: any) {
+    sendBookAccessError(res, e);
+  }
+});
+
+router.post('/subjects/:id/session/release', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    await releaseReadingSession(n(req.body?.sessionId), Number(req.user!.id), 'CLOSE');
+    res.json({ ok: true });
+  } catch (e: any) {
+    sendBookAccessError(res, e);
+  }
+});
+
 /** GET /api/courses/subjects/:id */
-router.get('/subjects/:id', requireAuth, async (req: AuthRequest, res) => {
+router.get('/subjects/:id', requireSubjectAccess, async (req: AuthRequest, res) => {
   const id = n(req.params.id);
   if (!id) return res.status(400).json({ error: 'invalid_id' });
   try {
@@ -222,7 +487,7 @@ router.get('/subjects/:id', requireAuth, async (req: AuthRequest, res) => {
 });
 
 /** GET /api/courses/subjects/:id/pdf */
-router.get('/subjects/:id/pdf', requireAuth, async (req, res) => {
+router.get('/subjects/:id/pdf', requireSubjectAccess, async (req, res) => {
   const id = n(req.params.id);
   try {
     const [rows]: any = await query(
@@ -252,7 +517,7 @@ router.get('/subjects/:id/pdf', requireAuth, async (req, res) => {
 });
 
 /** GET /api/courses/chapters/:id */
-router.get('/chapters/:id', requireAuth, async (req, res) => {
+router.get('/chapters/:id', requireChapterAccess, async (req, res) => {
   const id = n(req.params.id);
   if (!id) return res.status(400).json({ error: 'invalid_id' });
   try {
@@ -341,6 +606,140 @@ router.get('/chapters/:id', requireAuth, async (req, res) => {
   }
 });
 
+/** GET /api/courses/notes — all notes for the signed-in user, with book/chapter metadata */
+router.get('/notes', requireAuth, async (req: AuthRequest, res) => {
+  const userId = n(req.user?.id);
+  try {
+    const [rows]: any = await query(
+      `SELECT
+         n.id,
+         n.chapter_id AS chapterId,
+         n.page_number AS pageNumber,
+         n.content,
+         n.quote,
+         n.created_at AS createdAt,
+         n.updated_at AS updatedAt,
+         ch.title AS chapterTitle,
+         ch.slug AS chapterSlug,
+         s.name AS subjectName,
+         s.slug AS subjectSlug,
+         c.name AS courseName,
+         c.slug AS courseSlug,
+         sem.number AS semesterNumber
+       FROM course_notes n
+       INNER JOIN course_chapters ch ON ch.id = n.chapter_id
+       INNER JOIN course_subjects s ON s.id = ch.subject_id
+       INNER JOIN course_semesters sem ON sem.id = s.semester_id
+       INNER JOIN courses c ON c.id = sem.course_id
+       WHERE n.user_id = ?
+       ORDER BY n.updated_at DESC`,
+      [userId],
+    );
+    res.json({
+      notes: (rows || []).map((r: any) => {
+        const semesterNumber = n(r.semesterNumber);
+        const pageNumber = r.pageNumber != null ? n(r.pageNumber) : null;
+        const chapterQ = encodeURIComponent(String(r.chapterSlug || ''));
+        const pageQ = pageNumber ? `&page=${pageNumber}` : '';
+        const base = `/courses/${r.courseSlug}/sem-${semesterNumber}/${r.subjectSlug}`;
+        return {
+          id: n(r.id),
+          chapterId: n(r.chapterId),
+          pageNumber,
+          content: r.content,
+          quote: r.quote ? String(r.quote) : null,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+          chapterTitle: r.chapterTitle,
+          chapterSlug: r.chapterSlug,
+          subjectName: r.subjectName,
+          subjectSlug: r.subjectSlug,
+          courseName: r.courseName,
+          courseSlug: r.courseSlug,
+          semesterNumber,
+          href: `${base}/read?chapter=${chapterQ}${pageQ}`,
+          notesHref: `${base}/notes?chapter=${chapterQ}${pageQ}`,
+        };
+      }),
+    });
+  } catch (e: any) {
+    console.error('[courses] notes list failed', e);
+    res.status(500).json({ error: 'fetch_failed' });
+  }
+});
+
+/** GET /api/courses/:slug/catalog — textbooks + prices for subscribe */
+router.get('/:slug/catalog', optionalAuth, async (req: AuthRequest, res) => {
+  const slug = String(req.params.slug || '').trim();
+  try {
+    await ensureBookAccessTables();
+    const [rows]: any = await query(
+      `SELECT c.id, c.name, c.slug, c.university, c.description, c.cover_key AS coverKey
+       FROM courses c WHERE c.slug = ? AND ${publishedCourseSql('c')} LIMIT 1`,
+      [slug],
+    );
+    const c = rows?.[0];
+    if (!c) return res.status(404).json({ error: 'not_found' });
+
+    const [books]: any = await query(
+      `SELECT s.id, s.name, s.slug, s.syllabus_code AS syllabusCode, s.cover_key AS coverKey,
+              s.price, s.sort_order AS sortOrder,
+              (SELECT COUNT(*) FROM course_chapters ch WHERE ch.subject_id = s.id) AS chapterCount,
+              sem.number AS semesterNumber, sem.title AS semesterTitle
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       WHERE sem.course_id = ? AND ${publishedSubjectSql('s')}
+       ORDER BY sem.number ASC, s.sort_order ASC, s.id ASC`,
+      [c.id],
+    );
+
+    const userId = req.user?.id != null ? Number(req.user.id) : null;
+    const mapped = [];
+    for (const s of books || []) {
+      const href = bookHref(c.slug, n(s.semesterNumber), s.slug);
+      const price = numberPrice(s.price);
+      let canRead = false;
+      let accessModel: string | null = null;
+      if (userId) {
+        const ent = await resolveEntitlement(userId, n(s.id), req.user?.isAdmin);
+        canRead = !!ent.allowed;
+        accessModel = canRead ? ent.accessModel : null;
+      }
+      const purchasable = !canRead && price != null && price > 0;
+      mapped.push({
+        id: n(s.id),
+        name: s.name,
+        slug: s.slug,
+        syllabusCode: s.syllabusCode,
+        coverKey: s.coverKey,
+        frontCoverUrl: s.coverKey ? publicFileUrlForKey(s.coverKey) : null,
+        price,
+        chapterCount: n(s.chapterCount),
+        semesterNumber: n(s.semesterNumber),
+        semesterTitle: s.semesterTitle,
+        canRead,
+        purchasable,
+        accessModel,
+        href,
+        buyHref: `${href}/buy`,
+      });
+    }
+
+    res.json({
+      id: n(c.id),
+      name: c.name,
+      slug: c.slug,
+      university: c.university,
+      description: c.description,
+      coverKey: c.coverKey,
+      books: mapped,
+    });
+  } catch (e: any) {
+    console.error('[courses] catalog failed', e);
+    res.status(500).json({ error: 'fetch_failed' });
+  }
+});
+
 /** GET /api/courses/:slug */
 router.get('/:slug', async (req, res) => {
   const slug = String(req.params.slug || '').trim();
@@ -386,10 +785,11 @@ router.get('/:slug', async (req, res) => {
 });
 
 /** GET /api/courses/:slug/semesters/:n */
-router.get('/:slug/semesters/:n', async (req, res) => {
+router.get('/:slug/semesters/:n', optionalAuth, async (req: AuthRequest, res) => {
   const slug = String(req.params.slug || '').trim();
   const number = n(req.params.n);
   try {
+    await ensureBookAccessTables();
     const [rows]: any = await query(
       `SELECT c.id AS courseId, c.name AS courseName, c.slug AS courseSlug, c.university,
               sem.id AS semesterId, sem.number, sem.title
@@ -404,13 +804,40 @@ router.get('/:slug/semesters/:n', async (req, res) => {
 
     const [subjects]: any = await query(
       `SELECT s.id, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
-              s.cover_key AS coverKey, s.sort_order AS sortOrder,
+              s.cover_key AS coverKey, s.sort_order AS sortOrder, s.price,
               (SELECT COUNT(*) FROM course_chapters ch WHERE ch.subject_id = s.id) AS chapterCount
        FROM course_subjects s
        WHERE s.semester_id = ? AND ${publishedSubjectSql('s')}
        ORDER BY s.sort_order ASC, s.id ASC`,
       [row.semesterId],
     );
+
+    const userId = req.user?.id != null ? Number(req.user.id) : null;
+    const mapped = [];
+    for (const s of subjects || []) {
+      const price = numberPrice(s.price);
+      let canRead = false;
+      let accessModel: string | null = null;
+      if (userId) {
+        const ent = await resolveEntitlement(userId, n(s.id), req.user?.isAdmin);
+        canRead = !!ent.allowed;
+        accessModel = canRead ? ent.accessModel : null;
+      }
+      mapped.push({
+        id: n(s.id),
+        name: s.name,
+        slug: s.slug,
+        description: s.description,
+        syllabusCode: s.syllabusCode,
+        coverKey: s.coverKey,
+        sortOrder: n(s.sortOrder),
+        price,
+        chapterCount: n(s.chapterCount),
+        canRead,
+        purchasable: !canRead && price != null && price > 0,
+        accessModel,
+      });
+    }
 
     res.json({
       course: {
@@ -424,16 +851,7 @@ router.get('/:slug/semesters/:n', async (req, res) => {
         number: n(row.number),
         title: row.title,
       },
-      subjects: (subjects || []).map((s: any) => ({
-        id: n(s.id),
-        name: s.name,
-        slug: s.slug,
-        description: s.description,
-        syllabusCode: s.syllabusCode,
-        coverKey: s.coverKey,
-        sortOrder: n(s.sortOrder),
-        chapterCount: n(s.chapterCount),
-      })),
+      subjects: mapped,
     });
   } catch (e: any) {
     console.error('[courses] semester failed', e);

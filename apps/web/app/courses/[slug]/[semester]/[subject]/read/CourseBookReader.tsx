@@ -1,27 +1,29 @@
 'use client';
 
+import Link from 'next/link';
 import React from 'react';
 import { getApiOrigin } from '../../../../../../lib/apiBase';
 import {
+  buildCourseInteractives,
+  injectConceptHotspots,
+} from '../../../../../../lib/courseInteractives';
+import {
   addCourseBookmark,
-  addCourseFlashcard,
   addCourseHighlight,
   addCourseNote,
   deleteCourseBookmark,
-  deleteCourseFlashcard,
   deleteCourseHighlight,
   deleteCourseNote,
-  fetchChapterFlashcards,
   fetchChapterStudy,
   updateCourseNote,
   type CourseBookmarkType,
-  type CourseFlashcard,
   type CourseQuickCheckItem,
 } from '../../../../../../lib/coursesApi';
-import CourseFlashcards from './CourseFlashcards';
+import CourseInteractives from './CourseInteractives';
+import CourseNotesPanel from './CourseNotesPanel';
 import CourseQuickCheck from './CourseQuickCheck';
 
-const HIGHLIGHTER_COLORS = ['#FFE66D', '#A8E6A1', '#FFB7C5', '#A8D8FF', '#FFC48A'];
+const HIGHLIGHTER_COLORS = ['#FFE66D', '#A8E6A1', '#FFB7C5', '#C5E8C8', '#FFC48A'];
 const BOOKMARK_TYPES: { id: CourseBookmarkType; label: string; color: string }[] = [
   { id: 'important', label: 'Important', color: '#c4452d' },
   { id: 'doubt', label: 'Doubt', color: '#2b6cb0' },
@@ -232,9 +234,11 @@ async function paginateByMeasure(
     return [blocks.map((b) => htmlForBlock(b, opts.openIds))];
   }
   const host = document.createElement('div');
+  host.className = 'course-book-measure';
   host.setAttribute('aria-hidden', 'true');
   host.style.cssText =
     'position:absolute;left:-99999px;top:0;pointer-events:none;visibility:hidden;';
+  host.style.setProperty('--course-text-scale', String(opts.font / 100));
   const sheetStyle = opts.a4
     ? 'width:100%;height:100%;font-size:' + opts.font + '%;min-height:0;box-sizing:border-box'
     : `width:${opts.width}px;height:${opts.height}px;font-size:${opts.font}%;min-height:0;box-sizing:border-box`;
@@ -420,8 +424,10 @@ function phraseMatchesSearch(hay: string, needle: string) {
   if (!needle || !hay) return false;
   const hayParts = hay.split(' ').filter(Boolean);
   if (!needle.includes(' ')) {
-    if (needle.length <= 3) return hayParts.some((part) => part.startsWith(needle));
-    return hayParts.includes(needle);
+    return hayParts.some(
+      (part) =>
+        part === needle || part.startsWith(needle) || (needle.length >= 4 && part.includes(needle)),
+    );
   }
   if (hay.includes(needle)) return true;
   const words = significantSearchWords(needle);
@@ -440,36 +446,58 @@ function clipSearchSnippet(text: string) {
   return `${snippet.slice(0, 107).trim()}…`;
 }
 
-function findRanges(text: string, marks: { text: string; color?: string; wholeWord?: boolean }[]) {
-  const foldedChars: string[] = [];
-  const map: number[] = [];
-  let pendingSpace = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (/\s/.test(ch)) {
-      pendingSpace = foldedChars.length > 0;
-      continue;
-    }
-    if (pendingSpace) {
-      foldedChars.push(' ');
-      map.push(i);
-      pendingSpace = false;
-    }
-    foldedChars.push(foldText(ch) || ch.toLowerCase());
-    map.push(i);
+function collectHighlightNodes(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (!node.nodeValue) continue;
+    if (node.parentElement?.closest('mark, script, style')) continue;
+    nodes.push(node);
   }
-  const hay = foldedChars.join('');
-  const raw: { start: number; end: number; color: string; z: number }[] = [];
-  marks.forEach((mark, z) => {
-    const needle = foldText(mark.text);
-    if (needle.length < 2) return;
+  return nodes;
+}
+
+function buildHighlightIndex(nodes: Text[]) {
+  const chars: string[] = [];
+  const map: { node: Text; offset: number }[] = [];
+  let pendingSpace = false;
+  nodes.forEach((node, nodeAt) => {
+    const value = node.nodeValue || '';
+    if (nodeAt > 0 && chars.length && !pendingSpace && value.length && !/^\s/.test(value)) {
+      pendingSpace = true;
+    }
+    for (let i = 0; i < value.length; i += 1) {
+      const ch = value[i];
+      if (/\s/.test(ch)) {
+        pendingSpace = chars.length > 0;
+        continue;
+      }
+      if (pendingSpace) {
+        chars.push(' ');
+        map.push({ node, offset: i });
+        pendingSpace = false;
+      }
+      chars.push(foldText(ch) || ch.toLowerCase());
+      map.push({ node, offset: i });
+    }
+  });
+  return { hay: chars.join(''), map };
+}
+
+function locateHighlight(hay: string, rawNeedle: string, wholeWord?: boolean) {
+  const needle = foldText(rawNeedle);
+  if (needle.length < 2 || !hay) return [] as { at: number; len: number }[];
+  const hits: { at: number; len: number }[] = [];
+  const pushAll = (term: string) => {
+    if (term.length < 2) return false;
     let from = 0;
+    let found = false;
     while (from <= hay.length) {
-      const at = hay.indexOf(needle, from);
+      const at = hay.indexOf(term, from);
       if (at < 0) break;
-      const last = at + needle.length - 1;
-      if (last >= map.length) break;
-      if (mark.wholeWord) {
+      const last = at + term.length - 1;
+      if (wholeWord) {
         const beforeOk = at === 0 || hay[at - 1] === ' ';
         const afterOk = last + 1 >= hay.length || hay[last + 1] === ' ';
         if (!beforeOk || !afterOk) {
@@ -477,64 +505,95 @@ function findRanges(text: string, marks: { text: string; color?: string; wholeWo
           continue;
         }
       }
-      raw.push({ start: map[at], end: map[last] + 1, color: mark.color || '#FFE66D', z });
-      from = at + needle.length;
+      hits.push({ at, len: term.length });
+      found = true;
+      from = at + term.length;
     }
-  });
-  const points = Array.from(new Set(raw.flatMap((r) => [r.start, r.end]))).sort((a, b) => a - b);
-  const painted: { start: number; end: number; color: string }[] = [];
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const a = points[i];
-    const b = points[i + 1];
-    if (a >= b) continue;
-    let best: { z: number; color: string } | null = null;
-    for (const range of raw) {
-      if (range.start <= a && range.end >= b && (best == null || range.z < best.z)) {
-        best = { z: range.z, color: range.color };
-      }
-    }
-    if (!best) continue;
-    const last = painted[painted.length - 1];
-    if (last && last.end === a && last.color === best.color) last.end = b;
-    else painted.push({ start: a, end: b, color: best.color });
+    return found;
+  };
+  if (pushAll(needle)) return hits;
+  const compact = needle
+    .replace(/[^\p{L}\p{N} ]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (compact !== needle && pushAll(compact)) return hits;
+  if (needle.length > 18) pushAll(needle.slice(0, 18));
+  return hits;
+}
+
+function wrapNodeRanges(
+  node: Text,
+  ranges: { start: number; end: number }[],
+  color: string,
+  markId?: string,
+) {
+  if (!node.parentNode || !ranges.length) return;
+  const value = node.nodeValue || '';
+  const ordered = [...ranges]
+    .map((range) => ({
+      start: Math.max(0, Math.min(range.start, value.length)),
+      end: Math.max(0, Math.min(range.end, value.length)),
+    }))
+    .filter((range) => range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+  if (!ordered.length) return;
+  const merged: { start: number; end: number }[] = [];
+  for (const range of ordered) {
+    const last = merged[merged.length - 1];
+    if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+    else merged.push({ ...range });
   }
-  return painted;
+  const frag = document.createDocumentFragment();
+  let cursor = 0;
+  for (const range of merged) {
+    if (range.start > cursor) {
+      frag.appendChild(document.createTextNode(value.slice(cursor, range.start)));
+    }
+    const mark = document.createElement('mark');
+    mark.className = 'course-mark';
+    mark.style.background = color;
+    if (markId) mark.setAttribute('data-highlight-id', markId);
+    mark.textContent = value.slice(range.start, range.end);
+    frag.appendChild(mark);
+    cursor = range.end;
+  }
+  if (cursor < value.length) frag.appendChild(document.createTextNode(value.slice(cursor)));
+  node.parentNode.replaceChild(frag, node);
 }
 
 function applyHighlights(
   html: string,
-  marks: { text: string; color?: string; wholeWord?: boolean }[],
+  marks: { text: string; color?: string; wholeWord?: boolean; id?: string | number }[],
 ) {
   const usable = marks.filter((m) => m.text.trim().length >= 2);
   if (!usable.length || typeof window === 'undefined') return html;
   const root = document.createElement('div');
   root.innerHTML = html;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes: Text[] = [];
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text;
-    if (!node.nodeValue || node.parentElement?.closest('mark, script, style')) continue;
-    nodes.push(node);
-  }
-  for (const node of nodes) {
-    const value = node.nodeValue || '';
-    const ranges = findRanges(value, usable);
-    if (!ranges.length) continue;
-    const frag = document.createDocumentFragment();
-    let cursor = 0;
-    for (const range of ranges) {
-      if (range.start > cursor)
-        frag.appendChild(document.createTextNode(value.slice(cursor, range.start)));
-      const mark = document.createElement('mark');
-      mark.className = 'course-mark';
-      mark.style.background = range.color;
-      mark.textContent = value.slice(range.start, range.end);
-      frag.appendChild(mark);
-      cursor = range.end;
-    }
-    if (cursor < value.length) frag.appendChild(document.createTextNode(value.slice(cursor)));
-    node.parentNode?.replaceChild(frag, node);
-  }
+  usable.forEach((mark) => {
+    const nodes = collectHighlightNodes(root);
+    if (!nodes.length) return;
+    const { hay, map } = buildHighlightIndex(nodes);
+    const hits = locateHighlight(hay, mark.text, mark.wholeWord);
+    const color = mark.color || '#FFE66D';
+    const byNode = new Map<Text, { start: number; end: number }[]>();
+    hits.forEach((hit) => {
+      for (let i = hit.at; i < hit.at + hit.len && i < map.length; i += 1) {
+        if (hay[i] === ' ') continue;
+        const point = map[i];
+        const list = byNode.get(point.node) || [];
+        const last = list[list.length - 1];
+        if (last && point.offset >= last.start && point.offset <= last.end) {
+          last.end = Math.max(last.end, point.offset + 1);
+        } else {
+          list.push({ start: point.offset, end: point.offset + 1 });
+        }
+        byNode.set(point.node, list);
+      }
+    });
+    Array.from(byNode.entries()).forEach(([node, ranges]) => {
+      wrapNodeRanges(node, ranges, color, mark.id != null ? String(mark.id) : undefined);
+    });
+  });
   return root.innerHTML;
 }
 
@@ -606,15 +665,32 @@ function selectedText() {
   return (window.getSelection()?.toString() || '').replace(/\s+/g, ' ').trim();
 }
 
+type BookReveal = {
+  token: number;
+  page?: number | null;
+  highlightId?: number;
+  text?: string;
+  conceptId?: string;
+  selector?: string;
+};
+
 type StudyState = {
   bookmarks: { id: number; pageNumber: number; markType?: CourseBookmarkType }[];
   notes: { id: number; pageNumber?: number | null; content: string; quote?: string | null }[];
   highlights: { id: number; pageNumber?: number | null; text: string; color?: string }[];
 };
 
-const OPEN_BOOK_MIN_WIDTH = 900;
+const OPEN_BOOK_MIN_WIDTH = 1200;
 
+type CourseChapterLink = { slug: string; title: string };
 type CourseSpread = { left: number | null; right: number | null };
+
+function isTabletLikeViewport() {
+  if (typeof window === 'undefined') return false;
+  const coarse = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  const shortest = Math.min(window.innerWidth, window.innerHeight);
+  return coarse && shortest >= 600 && shortest <= 1180;
+}
 
 function courseSpreads(pageCount: number, _startPage: number): CourseSpread[] {
   const spreads: CourseSpread[] = [];
@@ -633,33 +709,35 @@ function spreadIndexFor(spreads: CourseSpread[], pageIndex: number) {
   return found < 0 ? 0 : found;
 }
 
-function useA4PageSize(slot: React.RefObject<HTMLElement | null>, leaves: 1 | 2) {
-  const [size, setSize] = React.useState({ w: 420, h: 594 });
+function useBookPageSize(slot: React.RefObject<HTMLElement | null>, leaves: 1 | 2) {
+  const [size, setSize] = React.useState({ w: 480, h: 680 });
   React.useEffect(() => {
     const update = () => {
-      const maxH = Math.min(Math.max(280, window.innerHeight - 170), 820);
-      const maxW = Math.max(
-        240,
-        Math.min(slot.current?.clientWidth || window.innerWidth - 200, 1360),
-      );
-      const ratio = 297 / 210;
+      const el = slot.current;
+      const slotH = el?.clientHeight || 0;
+      const slotW = el?.clientWidth || 0;
+      // Use content box so page never draws under side gutters/padding
+      const cs = el ? getComputedStyle(el) : null;
+      const padX = cs ? (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) : 0;
+      const contentW = Math.max(0, slotW - padX);
+      const maxH = Math.max(280, slotH || Math.round(window.innerHeight * 0.72));
+      const maxW = Math.max(240, contentW || Math.min(window.innerWidth - 120, 720));
       const gutter = leaves === 2 ? 14 : 0;
-      let height = maxH;
-      let width = height / ratio;
-      if (width * leaves + gutter > maxW) {
-        width = (maxW - gutter) / leaves;
-        height = width * ratio;
-      }
-      setSize({ w: Math.round(width), h: Math.round(height) });
+      const maxLeaf = leaves === 2 ? 680 : 720;
+      let width = (maxW - gutter) / leaves;
+      if (width > maxLeaf) width = maxLeaf;
+      setSize({ w: Math.round(width), h: Math.round(maxH) });
     };
     update();
     const el = slot.current;
-    const ro = el ? new ResizeObserver(update) : null;
+    const ro = el ? new ResizeObserver(() => update()) : null;
     if (el && ro) ro.observe(el);
     window.addEventListener('resize', update);
+    const later = window.setTimeout(update, 50);
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', update);
+      window.clearTimeout(later);
     };
   }, [leaves, slot]);
   return size;
@@ -667,10 +745,14 @@ function useA4PageSize(slot: React.RefObject<HTMLElement | null>, leaves: 1 | 2)
 
 function useWideCourseReader() {
   const [wide, setWide] = React.useState(
-    () => typeof window !== 'undefined' && window.innerWidth >= OPEN_BOOK_MIN_WIDTH,
+    () =>
+      typeof window !== 'undefined' &&
+      window.innerWidth >= OPEN_BOOK_MIN_WIDTH &&
+      !isTabletLikeViewport(),
   );
   React.useEffect(() => {
-    const update = () => setWide(window.innerWidth >= OPEN_BOOK_MIN_WIDTH);
+    const update = () =>
+      setWide(window.innerWidth >= OPEN_BOOK_MIN_WIDTH && !isTabletLikeViewport());
     update();
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
@@ -682,22 +764,44 @@ export default function CourseBookReader({
   html,
   header,
   chapterTitle,
+  subjectTitle,
+  closeHref,
+  readBase,
+  chapterSlug,
+  chapters = [],
+  practiceHref,
+  notesHref,
+  prevChapter,
+  nextChapter,
   startPage = 1,
   chapterId,
   initialPage,
   quickChecks = [],
+  contentJson = null,
   frontCoverUrl,
   backCoverUrl,
+  onReadingPage,
 }: {
   html: string;
   header: string;
   chapterTitle: string;
+  subjectTitle?: string;
+  closeHref?: string;
+  readBase?: string;
+  chapterSlug?: string;
+  chapters?: CourseChapterLink[];
+  practiceHref?: string | null;
+  notesHref?: string | null;
+  prevChapter?: CourseChapterLink | null;
+  nextChapter?: CourseChapterLink | null;
   startPage?: number;
   chapterId?: number;
   initialPage?: number;
   quickChecks?: CourseQuickCheckItem[];
+  contentJson?: unknown;
   frontCoverUrl?: string | null;
   backCoverUrl?: string | null;
+  onReadingPage?: (page: number) => void;
 }) {
   const [index, setIndex] = React.useState(0);
   const [pages, setPages] = React.useState<string[][]>([['<p>Loading…</p>']]);
@@ -716,29 +820,23 @@ export default function CourseBookReader({
     notes: [],
     highlights: [],
   });
-  const [cards, setCards] = React.useState<CourseFlashcard[]>([]);
-  const [cardFront, setCardFront] = React.useState('');
-  const [cardBack, setCardBack] = React.useState('');
   const [picked, setPicked] = React.useState('');
   const [ink, setInk] = React.useState(HIGHLIGHTER_COLORS[0]);
-  const [noteDraft, setNoteDraft] = React.useState('');
-  const [noteQuote, setNoteQuote] = React.useState('');
-  const [quoteMark, setQuoteMark] = React.useState('');
   const [openExplains, setOpenExplains] = React.useState<string[]>([]);
   const [ribbonPage, setRibbonPage] = React.useState<number | null>(null);
-  const [editingId, setEditingId] = React.useState<number | null>(null);
-  const [editDraft, setEditDraft] = React.useState('');
+  const [reveal, setReveal] = React.useState<BookReveal | null>(null);
   const [panel, setPanel] = React.useState<
     | 'contents'
     | 'search'
     | 'highlights'
-    | 'notes'
     | 'display'
     | 'bookmarks'
     | 'progress'
     | 'check'
-    | 'cards'
-  >('contents');
+    | 'interact'
+    | 'notes'
+  >('highlights');
+  const [activeConceptId, setActiveConceptId] = React.useState<string | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [theme, setTheme] = React.useState<'paper' | 'sepia' | 'night'>(() => {
     if (typeof window === 'undefined') return 'paper';
@@ -758,20 +856,46 @@ export default function CourseBookReader({
       return 100;
     }
   });
+  const [leftTab, setLeftTab] = React.useState<'contents' | 'bookmarks' | 'notes'>('contents');
+  const [sheetOpen, setSheetOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
-  const [submittedQuery, setSubmittedQuery] = React.useState('');
-  const [activeSearch, setActiveSearch] = React.useState('');
+  const [noteQuote, setNoteQuote] = React.useState('');
   const lastSelection = React.useRef('');
   const searchRef = React.useRef<HTMLInputElement>(null);
+
+  const interactives = React.useMemo(
+    () =>
+      buildCourseInteractives({
+        contentJson: contentJson as any,
+        html,
+        chapterTitle,
+        subjectTitle,
+      }),
+    [contentJson, html, chapterTitle, subjectTitle],
+  );
+
+  const sourceHtml = React.useMemo(
+    () => injectConceptHotspots(html, interactives),
+    [html, interactives],
+  );
+
+  React.useEffect(() => {
+    if (!activeConceptId && interactives[0]) setActiveConceptId(interactives[0].id);
+  }, [interactives, activeConceptId]);
+
+  const openConcept = React.useCallback((id: string) => {
+    setActiveConceptId(id);
+    setPanel('interact');
+    setSheetOpen(true);
+    setMenuOpen(false);
+    revealRef.current({ conceptId: id });
+  }, []);
 
   const loadStudy = React.useCallback(() => {
     if (!chapterId) return;
     fetchChapterStudy(chapterId)
       .then(setStudy)
       .catch(() => {});
-    fetchChapterFlashcards(chapterId)
-      .then(setCards)
-      .catch(() => setCards([]));
   }, [chapterId]);
 
   React.useEffect(() => {
@@ -788,6 +912,8 @@ export default function CourseBookReader({
   const explainAnchor = React.useRef<string | null>(null);
   const bookRef = React.useRef<HTMLDivElement | null>(null);
   const slotRef = React.useRef<HTMLDivElement | null>(null);
+  const toolsScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const revealRef = React.useRef<(next: Omit<BookReveal, 'token'>) => void>(() => {});
   const spread = wide && wantSpread;
   const spreads = React.useMemo(
     () => courseSpreads(pages.length, startPage),
@@ -798,8 +924,8 @@ export default function CourseBookReader({
     ? spreads[spreadAt] || { left: index, right: null }
     : { left: index, right: null };
   const soloLeaf = !spread || openSpread.left == null || openSpread.right == null;
-  const a4 = useA4PageSize(slotRef, spread ? 2 : 1);
-  const imgMax = Math.max(120, Math.round(a4.h * 0.28));
+  const a4 = useBookPageSize(slotRef, spread ? 2 : 1);
+  const imgMax = Math.max(110, Math.round(a4.h * 0.26));
   const goSpread = React.useCallback(
     (delta: number) => {
       if (!spread) {
@@ -817,11 +943,11 @@ export default function CourseBookReader({
 
   React.useEffect(() => {
     let cancelled = false;
-    const pageW = spread ? a4.w : Math.min(window.innerWidth - 40, 720);
-    const pageH = spread ? a4.h : Math.min(window.innerHeight * 0.72, 860);
-    const htmlChanged = htmlRef.current !== html;
-    htmlRef.current = html;
-    paginateByMeasure(blocksFromHtml(html), {
+    const pageW = a4.w;
+    const pageH = a4.h;
+    const htmlChanged = htmlRef.current !== sourceHtml;
+    htmlRef.current = sourceHtml;
+    paginateByMeasure(blocksFromHtml(sourceHtml), {
       width: pageW,
       height: pageH,
       font,
@@ -829,7 +955,7 @@ export default function CourseBookReader({
       openIds: openExplains,
       header,
       chapterTitle,
-      a4: spread,
+      a4: true,
       imgMax,
     }).then((pagesHtml) => {
       if (cancelled) return;
@@ -876,6 +1002,7 @@ export default function CourseBookReader({
     imgMax,
     frontCoverUrl,
     backCoverUrl,
+    sourceHtml,
   ]);
 
   React.useEffect(() => {
@@ -898,6 +1025,12 @@ export default function CourseBookReader({
   }, [panel]);
 
   React.useEffect(() => {
+    if (wide && (panel === 'contents' || panel === 'bookmarks' || panel === 'notes')) {
+      setPanel('highlights');
+    }
+  }, [wide, panel]);
+
+  React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (
@@ -916,6 +1049,14 @@ export default function CourseBookReader({
   React.useEffect(() => {
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
+      const concept = target?.closest?.('.course-concept-hot') as HTMLElement | null;
+      if (concept && bookRef.current?.contains(concept)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = concept.getAttribute('data-concept-id');
+        if (id) openConcept(id);
+        return;
+      }
       const flash = target?.closest?.('.course-flash') as HTMLElement | null;
       if (flash && bookRef.current?.contains(flash)) {
         e.preventDefault();
@@ -959,7 +1100,7 @@ export default function CourseBookReader({
     };
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);
-  }, []);
+  }, [openConcept]);
 
   React.useEffect(() => {
     const onSel = () => {
@@ -994,34 +1135,145 @@ export default function CourseBookReader({
   };
   const printedFor = (pageIndex: number) => startPage + pageIndex - coverShift;
   const indexFromPrinted = (page: number) => Math.max(0, page - startPage + coverShift);
+  const goToPrinted = (page: number) => {
+    const next = Math.min(pages.length - 1, Math.max(0, indexFromPrinted(page)));
+    setIndex(next);
+    setToolIndex(next);
+  };
+
+  const pageIndexForHtml = (test: (html: string) => boolean) =>
+    pages.findIndex((page) => test(page.join('')));
+
+  const revealInBook = (next: Omit<BookReveal, 'token'>) => {
+    let pageIndex: number | null = null;
+    if (next.page != null && Number.isFinite(Number(next.page))) {
+      pageIndex = indexFromPrinted(Number(next.page));
+    }
+    if ((pageIndex == null || pageIndex < 0) && next.highlightId != null) {
+      const hit = study.highlights.find((item) => item.id === next.highlightId);
+      if (hit?.pageNumber != null) pageIndex = indexFromPrinted(hit.pageNumber);
+      const needle = foldText(hit?.text || next.text || '').slice(0, 32);
+      if ((pageIndex == null || pageIndex < 0) && needle.length >= 2) {
+        const found = pageIndexForHtml((html) => foldText(htmlToText(html)).includes(needle));
+        if (found >= 0) pageIndex = found;
+      }
+    }
+    if ((pageIndex == null || pageIndex < 0) && next.conceptId) {
+      const found = pageIndexForHtml((html) =>
+        html.includes(`data-concept-id="${next.conceptId}"`),
+      );
+      if (found >= 0) pageIndex = found;
+      else {
+        const item = interactives.find((row) => row.id === next.conceptId);
+        const needle = foldText(item?.label || '').slice(0, 24);
+        if (needle.length >= 2) {
+          const foundText = pageIndexForHtml((html) => foldText(htmlToText(html)).includes(needle));
+          if (foundText >= 0) pageIndex = foundText;
+        }
+      }
+    }
+    if ((pageIndex == null || pageIndex < 0) && next.selector) {
+      const cls = next.selector.replace(/^[.#]/, '');
+      const found = pageIndexForHtml((html) => html.includes(cls));
+      if (found >= 0) pageIndex = found;
+    }
+    if ((pageIndex == null || pageIndex < 0) && next.text) {
+      const needle = foldText(next.text).slice(0, 32);
+      if (needle.length >= 2) {
+        const found = pageIndexForHtml((html) => foldText(htmlToText(html)).includes(needle));
+        if (found >= 0) pageIndex = found;
+      }
+    }
+    if (pageIndex != null && pageIndex >= 0) {
+      setIndex(Math.min(pages.length - 1, pageIndex));
+      setToolIndex(Math.min(pages.length - 1, pageIndex));
+    }
+    setReveal({ ...next, token: Date.now() });
+    toolsScrollRef.current?.scrollTo({ top: 0 });
+  };
+  revealRef.current = revealInBook;
+
+  React.useEffect(() => {
+    if (!reveal || !bookRef.current) return;
+    const root = bookRef.current;
+    const apply = () => {
+      root
+        .querySelectorAll('.is-book-reveal')
+        .forEach((el) => el.classList.remove('is-book-reveal'));
+      let target: HTMLElement | null = null;
+      if (reveal.highlightId != null) {
+        target = root.querySelector(`[data-highlight-id="${reveal.highlightId}"]`);
+      }
+      if (!target && reveal.conceptId) {
+        target = root.querySelector(`[data-concept-id="${reveal.conceptId}"]`);
+      }
+      if (!target && reveal.selector) {
+        target = root.querySelector(reveal.selector);
+      }
+      if (!target && reveal.text) {
+        const needle = foldText(reveal.text);
+        const marks = Array.from(root.querySelectorAll('mark.course-mark')) as HTMLElement[];
+        target =
+          marks.find((item) => {
+            const hay = foldText(item.textContent || '');
+            return hay.includes(needle.slice(0, 24)) || (hay.length >= 8 && needle.includes(hay));
+          }) || null;
+      }
+      if (!target) return;
+      target.classList.add('is-book-reveal');
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    };
+    const show = window.setTimeout(apply, 80);
+    const hide = window.setTimeout(() => {
+      root
+        .querySelectorAll('.is-book-reveal')
+        .forEach((el) => el.classList.remove('is-book-reveal'));
+    }, 2600);
+    return () => {
+      window.clearTimeout(show);
+      window.clearTimeout(hide);
+    };
+  }, [reveal, index, pages]);
   const printed = printedFor(toolPage);
+  React.useEffect(() => {
+    onReadingPage?.(printed);
+  }, [printed, onReadingPage]);
   const visiblePages = [openSpread.left, openSpread.right].filter((v): v is number => v != null);
   const bookmarkFor = (pageIndex: number) =>
     study.bookmarks.find((b) => b.pageNumber === printedFor(pageIndex));
+  const liveQuery = query.trim();
   const searchMarks =
-    activeSearch.trim().length >= 2
-      ? [{ text: activeSearch.trim(), color: '#9EE7FF', wholeWord: true }]
-      : [];
-  const quoteMarks =
-    quoteMark.trim().length >= 2
-      ? [{ text: quoteMark.trim(), color: '#CDE8C5', wholeWord: false }]
-      : [];
+    liveQuery.length >= 2 ? [{ text: liveQuery, color: '#C5E8C8', wholeWord: false }] : [];
   const markedPage = (pageIndex: number) =>
-    applyHighlights(pages[pageIndex]?.join('') || '', [
-      ...study.highlights,
-      ...searchMarks,
-      ...quoteMarks,
-    ]);
+    applyHighlights(pages[pageIndex]?.join('') || '', [...study.highlights, ...searchMarks]);
   const canRemove =
     picked.length >= 2 && study.highlights.some((h) => highlightOverlaps(h.text, picked));
   const toc = tocFromPages(pages, startPage, coverShift);
-  const searchHits = searchPages(pages, startPage, submittedQuery, coverShift);
+  const searchHits = searchPages(pages, startPage, liveQuery, coverShift).slice(0, 24);
+
+  const jumpToHit = (hit: { snippet: string; page: number; anchor: string }) => {
+    const heading = foldSearch(hit.anchor);
+    const found = pages.findIndex((htmls) =>
+      htmls.some((html) => {
+        if (!/<h[123]\b/i.test(html)) return false;
+        const title = foldSearch(htmlToText(html));
+        return (
+          title === heading ||
+          (heading.length >= 8 && title.includes(heading)) ||
+          (title.length >= 8 && heading.includes(title))
+        );
+      }),
+    );
+    setIndex(found >= 0 ? found : Math.max(0, Math.min(pages.length - 1, hit.page - startPage)));
+    setToolIndex(
+      found >= 0 ? found : Math.max(0, Math.min(pages.length - 1, hit.page - startPage)),
+    );
+  };
 
   const runSearch = () => {
-    setSubmittedQuery(query.trim());
+    if (searchHits[0]) jumpToHit(searchHits[0]);
   };
   const topicIndex = toc.reduce((best, item, i) => (item.page <= printed ? i : best), 0);
-  const topicLabel = toc.length ? `Topic ${topicIndex + 1} of ${toc.length}` : '';
   const lastContentIndex = pages.reduce(
     (last, page, i) => (isCoverHtml(page.join('')) ? last : i),
     -1,
@@ -1041,13 +1293,38 @@ export default function CourseBookReader({
     contents: 'Contents',
     search: 'Search',
     highlights: 'Highlights',
-    notes: 'Notes',
     display: 'Display',
     bookmarks: 'Bookmarks',
     progress: 'Progress',
     check: 'Quick check',
-    cards: 'Flashcards',
+    interact: 'Interact',
+    notes: 'Notes',
   }[panel];
+
+  const notesUrl = (quote?: string) => {
+    if (!notesHref) return '';
+    const url = new URL(notesHref, 'https://vidhyavibe.local');
+    url.searchParams.set('page', String(printed));
+    if (quote) {
+      try {
+        window.sessionStorage.setItem('vv_pending_note_quote', quote);
+      } catch {
+        /* ignore */
+      }
+    }
+    return `${url.pathname}?${url.searchParams.toString()}`;
+  };
+
+  const addNoteFromSelection = () => {
+    const text = (picked || lastSelection.current).trim();
+    setNoteQuote(text);
+    setLeftTab('notes');
+    if (!wide) {
+      setPanel('notes');
+      setMenuOpen(false);
+      setSheetOpen(true);
+    }
+  };
 
   const setBookmark = async (markType: CourseBookmarkType, pageIndex = toolPage) => {
     if (!chapterId) return;
@@ -1108,65 +1385,6 @@ export default function CourseBookReader({
       loadStudy();
     } catch {
       alert('Could not remove highlight.');
-    }
-  };
-
-  const addNoteFromSelection = () => {
-    const text = (picked || lastSelection.current).trim();
-    setNoteQuote(text);
-    setNoteDraft('');
-    setPanel('notes');
-    document.getElementById('course-notes')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    window.setTimeout(() => document.getElementById('course-note-draft')?.focus(), 250);
-  };
-
-  const addFlashcardFromSelection = () => {
-    const text = (picked || lastSelection.current).trim();
-    setCardFront(text);
-    setCardBack('');
-    setPanel('cards');
-    document.getElementById('course-notes')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    window.setTimeout(() => document.getElementById('course-flash-back')?.focus(), 250);
-  };
-
-  const saveFlashcard = async () => {
-    if (!chapterId) return;
-    const front = cardFront.trim();
-    const back = cardBack.trim();
-    if (!front || !back) return;
-    try {
-      await addCourseFlashcard(chapterId, front, back, printed);
-      setCardFront('');
-      setCardBack('');
-      loadStudy();
-    } catch {
-      alert('Could not save the flashcard. Please login and try again.');
-    }
-  };
-
-  const saveNote = async () => {
-    if (!chapterId) return;
-    const content = noteDraft.trim();
-    if (!content) return;
-    try {
-      await addCourseNote(chapterId, content, printed, noteQuote.trim() || undefined);
-      setNoteDraft('');
-      setNoteQuote('');
-      loadStudy();
-    } catch {
-      alert('Could not save the note. Please login and try again.');
-    }
-  };
-
-  const saveEdit = async (id: number) => {
-    const content = editDraft.trim();
-    if (!content) return;
-    try {
-      await updateCourseNote(id, content);
-      setEditingId(null);
-      loadStudy();
-    } catch {
-      alert('Could not update the note.');
     }
   };
 
@@ -1249,9 +1467,257 @@ export default function CourseBookReader({
 
   const atStart = spread ? spreadAt <= 0 : index <= 0;
   const atEnd = spread ? spreadAt >= spreads.length - 1 : index >= pages.length - 1;
+  const progressPct = toc.length
+    ? Math.round(((topicIndex + 1) / toc.length) * 100)
+    : Math.round(((index + 1) / Math.max(pages.length, 1)) * 100);
+  const dockMax = spread ? Math.max(0, spreads.length - 1) : Math.max(0, pages.length - 1);
+  const dockValue = spread ? spreadAt : index;
+  const openPanel = (id: typeof panel) => {
+    setPanel(id);
+    setMenuOpen(false);
+    if (!wide) setSheetOpen(true);
+    if (id === 'interact') {
+      const conceptId = activeConceptId || interactives[0]?.id;
+      if (conceptId) revealInBook({ conceptId });
+    }
+    if (id === 'check') {
+      const item = pageCheck || quickChecks[0];
+      revealInBook({
+        page: item?.pageNumber,
+        selector: '.course-quick-block',
+        text: item?.title,
+      });
+    }
+  };
+  const goDock = (value: number) => {
+    if (spread) {
+      const next = spreads[Math.min(dockMax, Math.max(0, value))];
+      const target = next?.left ?? next?.right ?? 0;
+      setIndex(target);
+      setToolIndex(target);
+      return;
+    }
+    const target = Math.min(pages.length - 1, Math.max(0, value));
+    setIndex(target);
+    setToolIndex(target);
+  };
+
+  const notesPanel = chapterId ? (
+    <CourseNotesPanel
+      notes={study.notes}
+      chapterTitle={chapterTitle}
+      pageNumber={printed}
+      quote={noteQuote}
+      onQuoteChange={setNoteQuote}
+      fullScreenHref={notesUrl()}
+      onJumpPage={(page) => {
+        goToPrinted(page);
+        if (!wide) setSheetOpen(false);
+      }}
+      onSave={async (content, quote) => {
+        await addCourseNote(chapterId, content, printed, quote);
+        loadStudy();
+      }}
+      onUpdate={async (id, content) => {
+        await updateCourseNote(id, content);
+        loadStudy();
+      }}
+      onDelete={async (id) => {
+        await deleteCourseNote(id);
+        loadStudy();
+      }}
+    />
+  ) : (
+    <p className="course-notes-empty">Notes are available once this chapter is loaded.</p>
+  );
 
   return (
-    <div className={`course-reader-with-notes${spread ? ' is-spread' : ''}`}>
+    <div
+      className={`course-reader-workspace course-reader-with-notes${wide ? ' is-desktop' : ' is-compact'}${spread ? ' is-spread' : ''}`}
+      style={{ ['--course-text-scale' as string]: String(font / 100) } as React.CSSProperties}
+    >
+      {!wide ? (
+        <header className="course-reader-toolbar">
+          {closeHref ? (
+            <Link href={closeHref} className="course-reader-close" aria-label="Close reader">
+              ×
+            </Link>
+          ) : null}
+          <div className="course-reader-heading">
+            <strong>{subjectTitle || chapterTitle}</strong>
+            <small>{header}</small>
+          </div>
+          <button
+            type="button"
+            className="course-reader-menu-btn"
+            aria-label="Reader menu"
+            onClick={() => {
+              setSheetOpen((open) => !open);
+              setMenuOpen(false);
+            }}
+          >
+            ☰
+          </button>
+        </header>
+      ) : null}
+      {wide ? (
+        <aside className="course-reader-rail is-toc">
+          <div className="course-reader-heading is-rail">
+            {closeHref ? (
+              <Link href={closeHref} className="course-reader-close" aria-label="Close reader">
+                ×
+              </Link>
+            ) : null}
+            <div>
+              <strong>{subjectTitle || chapterTitle}</strong>
+              <small>{header}</small>
+            </div>
+          </div>
+          <div className="course-reader-tabs">
+            <button
+              type="button"
+              className={leftTab === 'contents' ? 'is-on' : ''}
+              onClick={() => setLeftTab('contents')}
+            >
+              Contents
+            </button>
+            <button
+              type="button"
+              className={leftTab === 'bookmarks' ? 'is-on' : ''}
+              onClick={() => setLeftTab('bookmarks')}
+            >
+              Bookmarks
+            </button>
+            <button
+              type="button"
+              className={leftTab === 'notes' ? 'is-on' : ''}
+              onClick={() => setLeftTab('notes')}
+            >
+              Notes
+            </button>
+          </div>
+          {leftTab === 'contents' ? (
+            <>
+              <form
+                className="course-search-row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setPanel('search');
+                  runSearch();
+                }}
+              >
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    if (e.target.value.trim().length >= 2) setPanel('search');
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder="Search in this book…"
+                  autoComplete="off"
+                />
+              </form>
+              <div className="course-toc-scroll">
+                <div className="course-toc-tree">
+                  {chapters.length
+                    ? chapters.map((ch, i) => {
+                        const current = ch.slug === chapterSlug;
+                        return (
+                          <div
+                            key={ch.slug}
+                            className={`course-toc-chapter${current ? ' is-current' : ''}`}
+                          >
+                            {readBase ? (
+                              <Link
+                                href={`${readBase}/read?chapter=${encodeURIComponent(ch.slug)}`}
+                                className="course-toc-chapter-link"
+                              >
+                                {current ? '▾' : '▸'} {i + 1}. {ch.title}
+                              </Link>
+                            ) : (
+                              <span className="course-toc-chapter-link">
+                                {current ? '▾' : '▸'} {i + 1}. {ch.title}
+                              </span>
+                            )}
+                            {current
+                              ? toc.map((item, ti) => (
+                                  <button
+                                    key={`${item.page}-${ti}`}
+                                    type="button"
+                                    className={`course-toc-item${item.page === printed ? ' is-on' : ''}`}
+                                    style={{ paddingLeft: 18 + (item.level - 1) * 12 }}
+                                    onClick={() => setIndex(indexFromPrinted(item.page))}
+                                  >
+                                    <span>{item.title}</span>
+                                  </button>
+                                ))
+                              : null}
+                          </div>
+                        );
+                      })
+                    : toc.map((item, i) => (
+                        <button
+                          key={`${item.page}-${i}`}
+                          type="button"
+                          className={`course-toc-item${item.page === printed ? ' is-on' : ''}`}
+                          style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
+                          onClick={() => setIndex(indexFromPrinted(item.page))}
+                        >
+                          <span>{item.title}</span>
+                          <span>p.{item.page}</span>
+                        </button>
+                      ))}
+                </div>
+              </div>
+            </>
+          ) : leftTab === 'bookmarks' ? (
+            <div className="course-toc-scroll">
+              {study.bookmarks.length === 0 ? (
+                <p className="course-notes-empty">
+                  Tap the ribbon and choose Important, Doubt, or Revise.
+                </p>
+              ) : null}
+              {study.bookmarks.map((b) => {
+                const type = BOOKMARK_TYPES.find((item) => item.id === asBookmarkType(b.markType));
+                return (
+                  <button
+                    key={`rail-b-${b.id}`}
+                    type="button"
+                    className={`course-note-card course-bookmark-jump${printed === b.pageNumber ? ' is-on' : ''}`}
+                    onClick={() => goToPrinted(b.pageNumber)}
+                  >
+                    <span className="course-note-page">Page {b.pageNumber}</span>
+                    <p className="course-mark-type" style={{ color: type?.color }}>
+                      {type?.label || 'Important'}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="course-notes-rail">{notesPanel}</div>
+          )}
+          {readBase && (prevChapter || nextChapter) && leftTab !== 'notes' ? (
+            <div className="course-toc-chapter-nav">
+              {prevChapter ? (
+                <Link href={`${readBase}/read?chapter=${encodeURIComponent(prevChapter.slug)}`}>
+                  ← Prev chapter
+                </Link>
+              ) : (
+                <span />
+              )}
+              {nextChapter ? (
+                <Link href={`${readBase}/read?chapter=${encodeURIComponent(nextChapter.slug)}`}>
+                  Next chapter →
+                </Link>
+              ) : (
+                <span />
+              )}
+            </div>
+          ) : null}
+        </aside>
+      ) : null}
       <div className="course-book-stage">
         <button
           type="button"
@@ -1261,113 +1727,77 @@ export default function CourseBookReader({
           onClick={() => goSpread(-1)}
         >
           <span>←</span>
-          Previous
         </button>
         <div className="course-book-slot" ref={slotRef}>
           <div
             ref={bookRef}
-            className={`course-book${spread ? ' is-spread is-a4' : ''}${spread && soloLeaf ? ' is-solo' : ''}`}
+            className={`course-book is-a4${spread ? ' is-spread' : ''}${!spread || soloLeaf ? ' is-solo' : ''}`}
             style={{ ['--course-img-max' as string]: `${imgMax}px` } as React.CSSProperties}
           >
-            {spread && soloLeaf ? (
-              <div className="course-book-solo" style={{ width: a4.w, height: a4.h }}>
-                {renderSheet(openSpread.left ?? openSpread.right ?? index)}
-              </div>
-            ) : spread ? (
+            {spread && !soloLeaf ? (
               <div className="course-book-open" style={{ width: a4.w * 2 + 14, height: a4.h }}>
                 {renderSheet(openSpread.left, 'verso')}
                 <div className="course-book-gutter" aria-hidden />
                 {renderSheet(openSpread.right, 'recto')}
               </div>
             ) : (
-              renderSheet(index)
+              <div className="course-book-solo" style={{ width: a4.w, height: a4.h }}>
+                {renderSheet(spread ? (openSpread.left ?? openSpread.right ?? index) : index)}
+              </div>
             )}
-            <div className="course-selection-bar">
-              <div className="course-ink-row">
-                {HIGHLIGHTER_COLORS.map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    className={`course-ink-dot${ink === color ? ' is-on' : ''}`}
-                    style={{ background: color }}
-                    aria-label={`Highlight ${color}`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      setInk(color);
-                      if (picked.length >= 2) highlightSelection(color);
-                    }}
-                  />
-                ))}
-              </div>
-              {picked.length >= 2 ? (
-                <>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => highlightSelection()}
-                  >
-                    Highlight
-                  </button>
-                  {canRemove ? (
+            {picked.length >= 2 ? (
+              <div className="course-selection-bar">
+                <div className="course-ink-row">
+                  {HIGHLIGHTER_COLORS.map((color) => (
                     <button
+                      key={color}
                       type="button"
+                      className={`course-ink-dot${ink === color ? ' is-on' : ''}`}
+                      style={{ background: color }}
+                      aria-label={`Highlight ${color}`}
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={removeHighlights}
-                    >
-                      Remove
-                    </button>
-                  ) : null}
-                  {chapterId ? (
-                    <>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={addNoteFromSelection}
-                      >
-                        Add to notes
-                      </button>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={addFlashcardFromSelection}
-                      >
-                        Flashcard
-                      </button>
-                    </>
-                  ) : null}
-                </>
-              ) : (
-                <p className="course-highlight-hint">Select text, then tap a color.</p>
-              )}
-              <div className="course-book-page-meta">
-                <span>
-                  {spread
-                    ? `${pageMeta} · ${pages.length} pages`
-                    : `${index + 1} / ${pages.length}`}
-                </span>
-                {topicLabel ? <small>{topicLabel}</small> : null}
+                      onClick={() => {
+                        setInk(color);
+                        highlightSelection(color);
+                      }}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => highlightSelection()}
+                >
+                  Highlight
+                </button>
+                {canRemove ? (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={removeHighlights}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+                {chapterId ? (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={addNoteFromSelection}
+                  >
+                    Add to notes
+                  </button>
+                ) : null}
               </div>
-            </div>
+            ) : null}
             {pageCheck ? (
               <button
                 type="button"
                 className="course-quick-launch"
-                onClick={() => setPanel('check')}
+                onClick={() => openPanel('check')}
               >
                 <strong>Quick check</strong>
                 <span>{pageCheck.title}</span>
-              </button>
-            ) : null}
-            {cards.length ? (
-              <button
-                type="button"
-                className="course-quick-launch course-flash-launch"
-                onClick={() => setPanel('cards')}
-              >
-                <strong>Flashcards</strong>
-                <span>
-                  {cards.length} card{cards.length === 1 ? '' : 's'} from this chapter
-                </span>
               </button>
             ) : null}
           </div>
@@ -1380,437 +1810,487 @@ export default function CourseBookReader({
           onClick={() => goSpread(1)}
         >
           <span>→</span>
-          Next
         </button>
       </div>
       {chapterId ? (
-        <aside className="course-notes-section" id="course-notes">
-          <div className="course-kebab-bar">
-            <h2>{panelTitle}</h2>
-            <div className="course-kebab">
+        <aside
+          className={`course-notes-section course-reader-rail is-tools${wide || sheetOpen ? ' is-open' : ''}`}
+          id="course-notes"
+        >
+          {!wide ? (
+            <button
+              type="button"
+              className="course-reader-sheet-close"
+              aria-label="Close panel"
+              onClick={() => setSheetOpen(false)}
+            >
+              ×
+            </button>
+          ) : null}
+          <div className="course-reader-toolbar-actions is-rail">
+            <button
+              type="button"
+              className={panel === 'display' ? 'is-on' : ''}
+              onClick={() => openPanel('display')}
+            >
+              Aa
+              <span>Text Size</span>
+            </button>
+            <button
+              type="button"
+              className={panel === 'display' ? 'is-on' : ''}
+              onClick={() => openPanel('display')}
+            >
+              ◐<span>Theme</span>
+            </button>
+          </div>
+          {wide ? (
+            <div className="course-page-view-row" aria-label="Page view">
               <button
                 type="button"
-                className="course-kebab-btn"
-                aria-label="Reader menu"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((open) => !open)}
+                className={wantSpread ? 'is-on' : ''}
+                onClick={() => setWantSpread(true)}
               >
-                ⋮
+                Open book
               </button>
-              {menuOpen ? (
-                <div className="course-kebab-menu" role="menu">
-                  {(
-                    [
-                      ['contents', 'Contents'],
-                      ['search', 'Search'],
-                      ['highlights', 'Highlights'],
-                      ['notes', 'Notes'],
-                      ['bookmarks', 'Bookmarks'],
-                      ['progress', 'Progress'],
-                      ['display', 'Display'],
-                      ...(quickChecks.length ? ([['check', 'Quick check']] as const) : []),
-                      ['cards', 'Flashcards'],
-                    ] as const
-                  ).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="menuitem"
-                      className={panel === id ? 'is-on' : ''}
-                      onClick={() => {
-                        setPanel(id);
-                        setMenuOpen(false);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-          {panel === 'contents' ? (
-            <>
-              {toc.length === 0 ? (
-                <p className="course-notes-empty">No headings in this chapter yet.</p>
-              ) : null}
-              {toc.map((item, i) => (
-                <button
-                  key={`${item.page}-${i}`}
-                  type="button"
-                  className="course-toc-item"
-                  style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
-                  onClick={() => setIndex(indexFromPrinted(item.page))}
-                >
-                  <span>{item.title}</span>
-                  <span>p.{item.page}</span>
-                </button>
-              ))}
-            </>
-          ) : null}
-          {panel === 'search' ? (
-            <>
-              <form
-                className="course-search-row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  runSearch();
-                }}
+              <button
+                type="button"
+                className={!wantSpread ? 'is-on' : ''}
+                onClick={() => setWantSpread(false)}
               >
-                <input
-                  ref={searchRef}
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  placeholder="Find a word or phrase"
-                  autoComplete="off"
-                  enterKeyHint="search"
-                />
-                <button type="submit">Search</button>
-              </form>
-              {activeSearch ? (
-                <p className="course-notes-kicker">
-                  Showing “{activeSearch}”{' '}
-                  <button
-                    type="button"
-                    className="course-note-page"
-                    onClick={() => {
-                      setActiveSearch('');
-                      setQuery('');
-                      setSubmittedQuery('');
-                    }}
-                  >
-                    Remove search
-                  </button>
-                </p>
-              ) : null}
-              {!submittedQuery ? (
-                <p className="course-notes-empty">Type a word, then press Search.</p>
-              ) : submittedQuery.length < 2 ? (
-                <p className="course-notes-empty">Type at least 2 letters.</p>
-              ) : searchHits.length === 0 ? (
-                <p className="course-notes-empty">No matches in this chapter.</p>
-              ) : (
-                <>
-                  <p className="course-notes-kicker">
-                    {searchHits.length} suggestion{searchHits.length === 1 ? '' : 's'}
-                  </p>
-                  {searchHits.map((hit, i) => (
-                    <button
-                      key={`${hit.page}-${i}`}
-                      type="button"
-                      className="course-toc-item"
-                      onClick={() => {
-                        const typed = query.trim();
-                        setActiveSearch(typed);
-                        const heading = foldSearch(hit.anchor);
-                        const found = pages.findIndex((htmls) =>
-                          htmls.some((html) => {
-                            if (!/<h[123]\b/i.test(html)) return false;
-                            const title = foldSearch(htmlToText(html));
-                            return (
-                              title === heading ||
-                              (heading.length >= 8 && title.includes(heading)) ||
-                              (title.length >= 8 && heading.includes(title))
-                            );
-                          }),
-                        );
-                        setIndex(
-                          found >= 0
-                            ? found
-                            : Math.max(0, Math.min(pages.length - 1, hit.page - startPage)),
-                        );
-                      }}
-                    >
-                      <span>{hit.snippet}</span>
-                      <span>p.{hit.page}</span>
-                    </button>
-                  ))}
-                </>
-              )}
-            </>
+                One page
+              </button>
+            </div>
           ) : null}
-          {panel === 'highlights' ? (
-            <>
-              {study.highlights.length === 0 ? (
-                <p className="course-notes-empty">Select text, then choose a color.</p>
-              ) : null}
-              {study.highlights.map((h) => (
-                <article key={`h-${h.id}`} className="course-note-card">
-                  {h.pageNumber ? (
-                    <button
-                      type="button"
-                      className="course-note-page"
-                      onClick={() => setIndex(indexFromPrinted(h.pageNumber!))}
-                    >
-                      Page {h.pageNumber}
-                    </button>
-                  ) : null}
-                  <p>
-                    <mark className="course-mark" style={{ background: h.color || '#FFE66D' }}>
-                      {h.text}
-                    </mark>
-                  </p>
-                  <div className="course-note-actions">
-                    <button
-                      type="button"
-                      onClick={() => deleteCourseHighlight(h.id).then(loadStudy)}
-                    >
-                      Remove
-                    </button>
+          <div className="course-study-tools">
+            <h2>Study Tools</h2>
+            <button
+              type="button"
+              className={panel === 'highlights' ? 'is-on' : ''}
+              onClick={() => openPanel('highlights')}
+            >
+              Highlights
+            </button>
+            {interactives.length ? (
+              <button
+                type="button"
+                className={panel === 'interact' ? 'is-on' : ''}
+                onClick={() => openPanel('interact')}
+              >
+                Interact
+              </button>
+            ) : null}
+            {!wide && chapterId ? (
+              <button
+                type="button"
+                className={panel === 'notes' ? 'is-on' : ''}
+                onClick={() => openPanel('notes')}
+              >
+                Notes
+              </button>
+            ) : null}
+            {practiceHref ? (
+              <Link href={practiceHref} className="course-study-practice">
+                Practice
+              </Link>
+            ) : quickChecks.length ? (
+              <button
+                type="button"
+                className={panel === 'check' ? 'is-on' : ''}
+                onClick={() => openPanel('check')}
+              >
+                Practice
+              </button>
+            ) : null}
+          </div>
+          <div className="course-reader-progress-card">
+            <h3>Chapter Progress</h3>
+            <div className="course-progress-bar">
+              <span style={{ width: `${progressPct}%` }} />
+            </div>
+            <p>
+              {toc.length
+                ? `Section ${topicIndex + 1} of ${toc.length}`
+                : `Page ${index + 1} of ${pages.length}`}
+              <strong>{progressPct}%</strong>
+            </p>
+            <small>
+              {progressPct >= 80
+                ? 'Almost there — finish this chapter!'
+                : "Keep going! You're making great progress."}
+            </small>
+          </div>
+          <div className="course-tools-scroll" ref={toolsScrollRef}>
+            <div className="course-kebab-bar">
+              <h2>{panelTitle}</h2>
+              <div className="course-kebab">
+                <button
+                  type="button"
+                  className="course-kebab-btn"
+                  aria-label="Reader menu"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen((open) => !open)}
+                >
+                  ⋮
+                </button>
+                {menuOpen ? (
+                  <div className="course-kebab-menu" role="menu">
+                    {(
+                      [
+                        ...(!wide ? [['contents', 'Contents'] as [typeof panel, string]] : []),
+                        ...(!wide ? [['notes', 'Notes'] as [typeof panel, string]] : []),
+                        ['search', 'Search'],
+                        ['highlights', 'Highlights'],
+                        ...(!wide ? [['bookmarks', 'Bookmarks'] as [typeof panel, string]] : []),
+                        ['progress', 'Progress'],
+                        ['display', 'Display'],
+                        ...(interactives.length
+                          ? [['interact', 'Interact'] as [typeof panel, string]]
+                          : []),
+                        ...(quickChecks.length
+                          ? [['check', 'Quick check'] as [typeof panel, string]]
+                          : []),
+                      ] as [typeof panel, string][]
+                    ).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        role="menuitem"
+                        className={panel === id ? 'is-on' : ''}
+                        onClick={() => openPanel(id)}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
-                </article>
-              ))}
-            </>
-          ) : null}
-          {panel === 'notes' ? (
-            <>
-              <p className="course-notes-kicker">Page {printed}</p>
-              {study.notes.length === 0 ? (
-                <p className="course-notes-empty">No notes yet for this chapter.</p>
-              ) : null}
-              {study.notes.map((n) => (
-                <article key={`n-${n.id}`} className="course-note-card">
-                  {n.pageNumber ? (
-                    <button
-                      type="button"
-                      className="course-note-page"
-                      onClick={() => {
-                        setIndex(indexFromPrinted(n.pageNumber!));
-                        setQuoteMark(n.quote || '');
-                      }}
-                    >
-                      Page {n.pageNumber}
-                    </button>
-                  ) : null}
-                  {n.quote ? (
-                    <blockquote className="course-note-quote">“{n.quote}”</blockquote>
-                  ) : null}
-                  {editingId === n.id ? (
-                    <>
-                      <textarea
-                        value={editDraft}
-                        onChange={(e) => setEditDraft(e.target.value)}
-                        rows={4}
-                      />
-                      <div className="course-note-actions">
-                        <button type="button" onClick={() => saveEdit(n.id)}>
-                          Save
-                        </button>
-                        <button type="button" onClick={() => setEditingId(null)}>
-                          Cancel
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p>{n.content}</p>
-                      <div className="course-note-actions">
+                ) : null}
+              </div>
+            </div>
+            {panel === 'contents' ? (
+              <>
+                {chapters.length
+                  ? chapters.map((ch, i) => {
+                      const current = ch.slug === chapterSlug;
+                      return (
+                        <div
+                          key={`panel-${ch.slug}`}
+                          className={`course-toc-chapter${current ? ' is-current' : ''}`}
+                        >
+                          {readBase ? (
+                            <Link
+                              href={`${readBase}/read?chapter=${encodeURIComponent(ch.slug)}`}
+                              className="course-toc-chapter-link"
+                              onClick={() => setSheetOpen(false)}
+                            >
+                              {i + 1}. {ch.title}
+                            </Link>
+                          ) : (
+                            <span className="course-toc-chapter-link">
+                              {i + 1}. {ch.title}
+                            </span>
+                          )}
+                          {current
+                            ? toc.map((item, ti) => (
+                                <button
+                                  key={`${item.page}-${ti}`}
+                                  type="button"
+                                  className={`course-toc-item${item.page === printed ? ' is-on' : ''}`}
+                                  style={{ paddingLeft: 18 + (item.level - 1) * 12 }}
+                                  onClick={() => {
+                                    setIndex(indexFromPrinted(item.page));
+                                    setSheetOpen(false);
+                                  }}
+                                >
+                                  <span>{item.title}</span>
+                                  <span>p.{item.page}</span>
+                                </button>
+                              ))
+                            : null}
+                        </div>
+                      );
+                    })
+                  : null}
+                {!chapters.length && toc.length === 0 ? (
+                  <p className="course-notes-empty">No headings in this chapter yet.</p>
+                ) : null}
+                {!chapters.length
+                  ? toc.map((item, i) => (
+                      <button
+                        key={`${item.page}-${i}`}
+                        type="button"
+                        className="course-toc-item"
+                        style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
+                        onClick={() => setIndex(indexFromPrinted(item.page))}
+                      >
+                        <span>{item.title}</span>
+                        <span>p.{item.page}</span>
+                      </button>
+                    ))
+                  : null}
+              </>
+            ) : null}
+            {panel === 'search' ? (
+              <>
+                <form
+                  className="course-search-row"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    runSearch();
+                  }}
+                >
+                  <input
+                    ref={searchRef}
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    placeholder="Find a word or phrase"
+                    autoComplete="off"
+                    enterKeyHint="search"
+                  />
+                </form>
+                {liveQuery ? (
+                  <p className="course-notes-kicker">
+                    {liveQuery.length < 2
+                      ? 'Keep typing…'
+                      : `${searchHits.length} suggestion${searchHits.length === 1 ? '' : 's'}`}
+                    {liveQuery.length >= 2 ? (
+                      <>
+                        {' '}
                         <button
                           type="button"
+                          className="course-note-page"
                           onClick={() => {
-                            setEditingId(n.id);
-                            setEditDraft(n.content);
+                            setQuery('');
                           }}
                         >
-                          Edit
+                          Clear
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteCourseNote(n.id).then(loadStudy)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </article>
-              ))}
-              <label htmlFor="course-note-draft">New note</label>
-              {noteQuote ? (
-                <blockquote className="course-note-quote">
-                  “{noteQuote}”{' '}
+                      </>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="course-notes-empty">Suggestions appear as you type.</p>
+                )}
+                {liveQuery.length >= 2 && searchHits.length === 0 ? (
+                  <p className="course-notes-empty">No matches in this chapter.</p>
+                ) : null}
+                {searchHits.map((hit, i) => (
                   <button
+                    key={`${hit.page}-${i}`}
                     type="button"
-                    className="course-note-page"
-                    onClick={() => setNoteQuote('')}
+                    className="course-toc-item"
+                    onClick={() => jumpToHit(hit)}
                   >
-                    Remove quote
-                  </button>
-                </blockquote>
-              ) : (
-                <p className="course-notes-kicker">Select text in the book to attach a quote.</p>
-              )}
-              <textarea
-                id="course-note-draft"
-                rows={5}
-                value={noteDraft}
-                onChange={(e) => setNoteDraft(e.target.value)}
-                placeholder="Write your note for this page…"
-              />
-              <button type="button" className="course-note-save" onClick={saveNote}>
-                Save note
-              </button>
-            </>
-          ) : null}
-          {panel === 'display' ? (
-            <>
-              <p className="course-notes-kicker">Paper</p>
-              <div className="course-theme-row">
-                {(['paper', 'sepia', 'night'] as const).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className={theme === item ? 'is-on' : ''}
-                    onClick={() => setTheme(item)}
-                  >
-                    {item[0].toUpperCase() + item.slice(1)}
+                    <span>{hit.snippet}</span>
+                    <span>p.{hit.page}</span>
                   </button>
                 ))}
-              </div>
-              <p className="course-notes-kicker">Text size</p>
-              <div className="course-theme-row">
-                <button type="button" onClick={() => setFont((v) => Math.max(85, v - 10))}>
-                  A-
-                </button>
-                <span>{font}%</span>
-                <button type="button" onClick={() => setFont((v) => Math.min(130, v + 10))}>
-                  A+
-                </button>
-              </div>
-              {wide ? (
-                <>
-                  <p className="course-notes-kicker">Layout</p>
-                  <div className="course-theme-row">
-                    <button
-                      type="button"
-                      className={wantSpread ? 'is-on' : ''}
-                      onClick={() => setWantSpread(true)}
-                    >
-                      Open book
-                    </button>
-                    <button
-                      type="button"
-                      className={!wantSpread ? 'is-on' : ''}
-                      onClick={() => setWantSpread(false)}
-                    >
-                      One page
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </>
-          ) : null}
-          {panel === 'bookmarks' ? (
-            <>
-              {study.bookmarks.length === 0 ? (
-                <p className="course-notes-empty">
-                  Tap the ribbon and choose Important, Doubt, or Revise.
-                </p>
-              ) : null}
-              {study.bookmarks.map((b) => {
-                const type = BOOKMARK_TYPES.find((item) => item.id === asBookmarkType(b.markType));
-                return (
-                  <article key={`b-${b.id}`} className="course-note-card">
-                    <button
-                      type="button"
-                      className="course-note-page"
-                      onClick={() => setIndex(indexFromPrinted(b.pageNumber))}
-                    >
-                      Page {b.pageNumber}
-                    </button>
-                    <p className="course-mark-type" style={{ color: type?.color }}>
-                      {type?.label || 'Important'}
+              </>
+            ) : null}
+            {panel === 'highlights' ? (
+              <>
+                {study.highlights.length === 0 ? (
+                  <p className="course-notes-empty">Select text, then choose a color.</p>
+                ) : null}
+                {study.highlights.map((h) => (
+                  <article
+                    key={`h-${h.id}`}
+                    className="course-note-card is-jump"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() =>
+                      revealInBook({ highlightId: h.id, page: h.pageNumber, text: h.text })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        revealInBook({ highlightId: h.id, page: h.pageNumber, text: h.text });
+                      }
+                    }}
+                  >
+                    {h.pageNumber ? (
+                      <span className="course-note-page">Page {h.pageNumber}</span>
+                    ) : null}
+                    <p>
+                      <mark className="course-mark" style={{ background: h.color || '#FFE66D' }}>
+                        {h.text}
+                      </mark>
                     </p>
                     <div className="course-note-actions">
-                      <button type="button" onClick={() => removeBookmark(b.id)}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteCourseHighlight(h.id).then(loadStudy);
+                        }}
+                      >
                         Remove
                       </button>
                     </div>
                   </article>
-                );
-              })}
-            </>
-          ) : null}
-          {panel === 'progress' ? (
-            <>
-              <p className="course-notes-kicker">
-                {toc.length
-                  ? `Topic ${topicIndex + 1} of ${toc.length}`
-                  : `Page ${index + 1} of ${pages.length}`}
-              </p>
-              <div className="course-progress-bar">
-                <span
-                  style={{
-                    width: `${toc.length ? ((topicIndex + 1) / toc.length) * 100 : ((index + 1) / Math.max(pages.length, 1)) * 100}%`,
-                  }}
-                />
-              </div>
-              <p className="course-notes-kicker">{toc[topicIndex]?.title || chapterTitle}</p>
-              {toc.length === 0 ? (
-                <p className="course-notes-empty">No section headings in this chapter yet.</p>
-              ) : null}
-              {toc.map((item, i) => (
-                <button
-                  key={`${item.page}-${i}`}
-                  type="button"
-                  className={`course-toc-item${i === topicIndex ? ' is-on' : ''}`}
-                  style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
-                  onClick={() => setIndex(indexFromPrinted(item.page))}
-                >
-                  <span>
-                    {item.page <= printed ? '✓ ' : ''}
-                    {item.title}
-                  </span>
-                  <span>p.{item.page}</span>
-                </button>
-              ))}
-            </>
-          ) : null}
-          {panel === 'check' ? (
-            quickChecks.length === 0 ? (
-              <p className="course-notes-empty">No quick check is attached to this chapter yet.</p>
-            ) : (
-              quickChecks.map((item) => <CourseQuickCheck key={item.id} item={item} />)
-            )
-          ) : null}
-          {panel === 'cards' ? (
-            <>
-              <p className="course-notes-kicker">
-                Cards are taken from this chapter. Add your own from selected text.
-              </p>
-              <label htmlFor="course-flash-front">Term</label>
-              <input
-                id="course-flash-front"
-                value={cardFront}
-                onChange={(e) => setCardFront(e.target.value)}
-                placeholder="Term or heading"
+                ))}
+              </>
+            ) : null}
+            {panel === 'display' ? (
+              <>
+                <p className="course-notes-kicker">Paper</p>
+                <div className="course-theme-row">
+                  {(['paper', 'sepia', 'night'] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className={theme === item ? 'is-on' : ''}
+                      onClick={() => setTheme(item)}
+                    >
+                      {item[0].toUpperCase() + item.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <p className="course-notes-kicker">Text size</p>
+                <div className="course-theme-row">
+                  <button type="button" onClick={() => setFont((v) => Math.max(80, v - 10))}>
+                    A-
+                  </button>
+                  <span>{font}%</span>
+                  <button type="button" onClick={() => setFont((v) => Math.min(150, v + 10))}>
+                    A+
+                  </button>
+                </div>
+              </>
+            ) : null}
+            {panel === 'bookmarks' && !wide ? (
+              <>
+                {study.bookmarks.length === 0 ? (
+                  <p className="course-notes-empty">
+                    Tap the ribbon and choose Important, Doubt, or Revise.
+                  </p>
+                ) : null}
+                {study.bookmarks.map((b) => {
+                  const type = BOOKMARK_TYPES.find(
+                    (item) => item.id === asBookmarkType(b.markType),
+                  );
+                  return (
+                    <button
+                      key={`b-${b.id}`}
+                      type="button"
+                      className={`course-note-card course-bookmark-jump${printed === b.pageNumber ? ' is-on' : ''}`}
+                      onClick={() => {
+                        goToPrinted(b.pageNumber);
+                        setSheetOpen(false);
+                      }}
+                    >
+                      <span className="course-note-page">Page {b.pageNumber}</span>
+                      <p className="course-mark-type" style={{ color: type?.color }}>
+                        {type?.label || 'Important'}
+                      </p>
+                    </button>
+                  );
+                })}
+              </>
+            ) : null}
+            {panel === 'notes' && !wide ? (
+              <div className="course-notes-rail">{notesPanel}</div>
+            ) : null}
+            {panel === 'progress' ? (
+              <>
+                <p className="course-notes-kicker">
+                  {toc.length
+                    ? `Topic ${topicIndex + 1} of ${toc.length}`
+                    : `Page ${index + 1} of ${pages.length}`}
+                </p>
+                <div className="course-progress-bar">
+                  <span
+                    style={{
+                      width: `${toc.length ? ((topicIndex + 1) / toc.length) * 100 : ((index + 1) / Math.max(pages.length, 1)) * 100}%`,
+                    }}
+                  />
+                </div>
+                <p className="course-notes-kicker">{toc[topicIndex]?.title || chapterTitle}</p>
+                {toc.length === 0 ? (
+                  <p className="course-notes-empty">No section headings in this chapter yet.</p>
+                ) : null}
+                {toc.map((item, i) => (
+                  <button
+                    key={`${item.page}-${i}`}
+                    type="button"
+                    className={`course-toc-item${i === topicIndex ? ' is-on' : ''}`}
+                    style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
+                    onClick={() => setIndex(indexFromPrinted(item.page))}
+                  >
+                    <span>
+                      {item.page <= printed ? '✓ ' : ''}
+                      {item.title}
+                    </span>
+                    <span>p.{item.page}</span>
+                  </button>
+                ))}
+              </>
+            ) : null}
+            {panel === 'check' ? (
+              quickChecks.length === 0 ? (
+                <p className="course-notes-empty">
+                  No quick check is attached to this chapter yet.
+                </p>
+              ) : (
+                quickChecks.map((item) => (
+                  <div key={item.id} className="course-quick-panel-item">
+                    <button
+                      type="button"
+                      className="course-note-page"
+                      onClick={() =>
+                        revealInBook({
+                          page: item.pageNumber,
+                          selector: '.course-quick-block',
+                          text: item.title,
+                        })
+                      }
+                    >
+                      Show in book{item.pageNumber ? ` · Page ${item.pageNumber}` : ''}
+                    </button>
+                    <CourseQuickCheck item={item} />
+                  </div>
+                ))
+              )
+            ) : null}
+            {panel === 'interact' ? (
+              <CourseInteractives
+                items={interactives}
+                activeId={activeConceptId}
+                onSelect={(id) => {
+                  setActiveConceptId(id);
+                  revealInBook({ conceptId: id });
+                }}
               />
-              <label htmlFor="course-flash-back">Meaning</label>
-              <textarea
-                id="course-flash-back"
-                rows={3}
-                value={cardBack}
-                onChange={(e) => setCardBack(e.target.value)}
-                placeholder="Write the meaning in your own words"
-              />
-              <button
-                type="button"
-                className="course-note-save"
-                disabled={!cardFront.trim() || !cardBack.trim()}
-                onClick={saveFlashcard}
-              >
-                Save my card
-              </button>
-              <CourseFlashcards
-                cards={cards}
-                onDelete={(id) => deleteCourseFlashcard(id).then(loadStudy)}
-              />
-            </>
-          ) : null}
+            ) : null}
+          </div>
         </aside>
       ) : null}
+      {!wide && sheetOpen ? (
+        <button
+          type="button"
+          className="course-reader-sheet-mask"
+          aria-label="Close panel"
+          onClick={() => setSheetOpen(false)}
+        />
+      ) : null}
+      <footer className="course-reader-dock">
+        <div className="course-dock-track">
+          <input
+            type="range"
+            min={0}
+            max={dockMax}
+            value={dockValue}
+            onChange={(e) => goDock(Number(e.target.value))}
+            aria-label="Page"
+          />
+          <span>
+            {spread
+              ? `Page ${pageMeta} of ${pages.length}`
+              : `Page ${index + 1} of ${pages.length}`}
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }

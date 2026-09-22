@@ -18,6 +18,7 @@ import {
   loginOtpRateLimiter,
   loginRateLimiter,
 } from '../middleware/rateLimiter';
+import { endReadingSessionsForUser } from '../services/bookAccess';
 import { upsertGuestBuyer } from '../services/guestBuyer';
 import { createLoginOtp, findUserByLoginIdentifier, verifyLoginOtp } from '../services/loginOtp';
 import {
@@ -107,16 +108,31 @@ async function issueAuthTokens(
   const access = signAccessToken({ sub: user.id, role });
   const { token: refreshToken, jti } = signRefreshToken({ sub: user.id });
 
-  if (snake) {
-    await query(
-      'INSERT INTO sessions (user_id, device_name, ip_address, user_agent, refresh_jti, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-      [user.id, deviceName || null, req.ip || null, userAgent, jti],
-    );
-  } else {
-    await query(
-      'INSERT INTO sessions (userId, deviceName, ipAddress, userAgent, refreshJti, createdAt) VALUES (?, ?, ?, ?, ?, NOW(3))',
-      [user.id, deviceName || null, req.ip || null, userAgent, jti],
-    );
+  const insertArgs = [user.id, deviceName || null, req.ip || null, userAgent, jti];
+  try {
+    if (snake) {
+      await query(
+        'INSERT INTO sessions (user_id, device_name, ip_address, user_agent, refresh_jti, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
+        insertArgs,
+      );
+    } else {
+      await query(
+        'INSERT INTO sessions (userId, deviceName, ipAddress, userAgent, refreshJti, createdAt, last_seen_at) VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3))',
+        insertArgs,
+      );
+    }
+  } catch {
+    if (snake) {
+      await query(
+        'INSERT INTO sessions (user_id, device_name, ip_address, user_agent, refresh_jti, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
+        insertArgs,
+      );
+    } else {
+      await query(
+        'INSERT INTO sessions (userId, deviceName, ipAddress, userAgent, refreshJti, createdAt) VALUES (?, ?, ?, ?, ?, NOW(3))',
+        insertArgs,
+      );
+    }
   }
 
   res.cookie('refresh_token', refreshToken, {
@@ -467,6 +483,12 @@ router.post('/refresh', async (req, res) => {
     const session = rows[0];
     if (!session) return res.status(401).json({ error: 'invalid_session' });
 
+    try {
+      await conn.query('UPDATE sessions SET last_seen_at = NOW() WHERE id = ?', [session.id]);
+    } catch {
+      // last_seen_at may be missing on older databases
+    }
+
     // Fetch user role so the refreshed access token carries the correct role
     const [userRows]: any = await conn.query('SELECT * FROM users WHERE id = ? LIMIT 1', [
       session.userId,
@@ -505,12 +527,31 @@ router.post('/logout', async (req, res) => {
         const payload: any = verifyRefreshToken(refreshToken);
         const jti = payload.jti;
         const snake = await isSessionsSnakeCase();
-        await conn.query(
+        const [sess]: any = await conn.query(
           snake
-            ? 'DELETE FROM sessions WHERE refresh_jti = ?'
-            : 'DELETE FROM sessions WHERE refreshJti = ?',
+            ? 'SELECT user_id AS userId FROM sessions WHERE refresh_jti = ? LIMIT 1'
+            : 'SELECT userId FROM sessions WHERE refreshJti = ? LIMIT 1',
           [jti],
         );
+        const uid = sess?.[0]?.userId;
+        try {
+          await conn.query(
+            snake
+              ? 'UPDATE sessions SET logged_out_at = NOW() WHERE refresh_jti = ?'
+              : 'UPDATE sessions SET loggedOutAt = NOW(3) WHERE refreshJti = ?',
+            [jti],
+          );
+        } catch {
+          await conn.query(
+            snake
+              ? 'DELETE FROM sessions WHERE refresh_jti = ?'
+              : 'DELETE FROM sessions WHERE refreshJti = ?',
+            [jti],
+          );
+        }
+        if (uid) {
+          await endReadingSessionsForUser(Number(uid), 'LOGOUT');
+        }
       } catch (e) {
         // ignore invalid token
       }
