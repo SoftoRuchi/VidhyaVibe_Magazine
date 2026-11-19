@@ -6,9 +6,13 @@ import { requireAdmin } from '../../middleware/admin';
 import { requireAuth, type AuthRequest } from '../../middleware/auth';
 import { memoryUpload } from '../../middleware/upload';
 import { getStorageAdapter } from '../../providers/storage';
-import { ensureBookAccessTables, parseBookPrice, parseDiscountPct } from '../../services/bookAccess';
-import { compareChapters, extractChapterNumber } from '../../utils/courseChapters';
+import {
+  ensureBookAccessTables,
+  parseBookPrice,
+  parseDiscountPct,
+} from '../../services/bookAccess';
 import { publicFileUrlForKey } from '../../utils/courseAssets';
+import { compareChapters, extractChapterNumber } from '../../utils/courseChapters';
 import { slugify } from '../../utils/slugify';
 import { asDoc, htmlToJson, jsonToHtml } from '../../utils/textbookContent';
 
@@ -774,7 +778,9 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
         parseBookPrice(req.body?.price),
         parseBookPrice(req.body?.physicalPrice),
         parseBookPrice(req.body?.bothPrice),
-        String(req.body?.isbn || '').trim().slice(0, 32) || null,
+        String(req.body?.isbn || '')
+          .trim()
+          .slice(0, 32) || null,
         parseBookPrice(req.body?.bookBankPrice),
         parseBookPrice(req.body?.libraryPrice),
         parseDiscountPct(req.body?.discountPct),
@@ -816,7 +822,8 @@ router.post('/subjects/:id/covers', subjectCoverUpload, async (req: AuthRequest,
     if (!rows?.[0]) return res.status(404).json({ error: 'not_found' });
     let coverKey: string | null = null;
     let backCoverKey: string | null = null;
-    if (cover) coverKey = await uploadSubjectImage(rows[0].courseSlug, rows[0].slug, 'cover', cover);
+    if (cover)
+      coverKey = await uploadSubjectImage(rows[0].courseSlug, rows[0].slug, 'cover', cover);
     if (backCover)
       backCoverKey = await uploadSubjectImage(rows[0].courseSlug, rows[0].slug, 'back', backCover);
     await query(
@@ -1198,7 +1205,10 @@ router.put('/chapters/:id', async (req, res) => {
 router.delete('/chapters/:id', async (req, res) => {
   const id = n(req.params.id);
   try {
-    const [existing]: any = await query('SELECT subject_id AS subjectId FROM course_chapters WHERE id = ? LIMIT 1', [id]);
+    const [existing]: any = await query(
+      'SELECT subject_id AS subjectId FROM course_chapters WHERE id = ? LIMIT 1',
+      [id],
+    );
     const subjectId = existing?.[0]?.subjectId ? n(existing[0].subjectId) : null;
     const [r]: any = await query('DELETE FROM course_chapters WHERE id = ?', [id]);
     if (!r.affectedRows) return res.status(404).json({ error: 'not_found' });
@@ -1220,10 +1230,11 @@ router.put('/subjects/:id/chapters/reorder', async (req, res) => {
     const chapterIds = req.body?.chapterIds;
     if (Array.isArray(chapterIds) && chapterIds.length > 0) {
       for (let i = 0; i < chapterIds.length; i++) {
-        await query(
-          'UPDATE course_chapters SET sort_order = ? WHERE id = ? AND subject_id = ?',
-          [(i + 1) * 10, n(chapterIds[i]), subjectId],
-        );
+        await query('UPDATE course_chapters SET sort_order = ? WHERE id = ? AND subject_id = ?', [
+          (i + 1) * 10,
+          n(chapterIds[i]),
+          subjectId,
+        ]);
       }
     } else {
       await resequenceSubjectChapters(subjectId);

@@ -220,7 +220,8 @@ export default function PostLoginChildSetupModal() {
         {step === 'product' ? (
           <>
             <p style={{ color: '#666', marginBottom: 24, textAlign: 'center' }}>
-              Choose Higher Education for university textbooks, or Fun Learning for magazines and kids.
+              Choose Higher Education for university textbooks, or Fun Learning for magazines and
+              kids.
             </p>
             <div className="vv-product-chooser">
               <button

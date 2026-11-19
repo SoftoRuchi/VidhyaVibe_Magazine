@@ -59,7 +59,9 @@ router.put('/', async (req, res) => {
     res.json(toPublicEmailSettings(settings));
   } catch (e: any) {
     if (e?.status === 400) {
-      return res.status(400).json({ error: e.code || 'invalid_email_settings', message: e.message });
+      return res
+        .status(400)
+        .json({ error: e.code || 'invalid_email_settings', message: e.message });
     }
     console.error(e);
     res.status(500).json({ error: 'email_settings_update_failed', message: e?.message });

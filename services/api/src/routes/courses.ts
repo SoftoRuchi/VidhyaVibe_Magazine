@@ -5,7 +5,6 @@ import { requireChapterAccess, requireSubjectAccess } from '../middleware/course
 import { optionalAuth } from '../middleware/optionalAuth';
 import { memoryUpload } from '../middleware/upload';
 import { getStorageAdapter } from '../providers/storage';
-import { ensureShippingAddress } from '../services/guestBuyer';
 import {
   acquireReadingSession,
   applyListDiscount,
@@ -20,10 +19,16 @@ import {
   releaseReadingSession,
   resolveEntitlement,
 } from '../services/bookAccess';
+import { ensureShippingAddress } from '../services/guestBuyer';
 import { publicFileUrlForKey, rewriteCourseAssetUrls } from '../utils/courseAssets';
 import { compareChapters } from '../utils/courseChapters';
 import { sendStorageBody } from '../utils/sendStorage';
-import { asDoc, jsonToHtml, quickChecksFromDoc, stripImageFileNotes } from '../utils/textbookContent';
+import {
+  asDoc,
+  jsonToHtml,
+  quickChecksFromDoc,
+  stripImageFileNotes,
+} from '../utils/textbookContent';
 
 const router = Router();
 
@@ -296,7 +301,10 @@ function salePrice(list: unknown, discountPct: unknown) {
   };
 }
 
-function studentList(row: { price?: unknown; physicalPrice?: unknown; bothPrice?: unknown }, format: string) {
+function studentList(
+  row: { price?: unknown; physicalPrice?: unknown; bothPrice?: unknown },
+  format: string,
+) {
   if (format === 'POD') return row.physicalPrice != null ? row.physicalPrice : row.price;
   if (format === 'BOTH') return row.bothPrice != null ? row.bothPrice : row.price;
   return row.price;
@@ -446,7 +454,11 @@ router.post('/subjects/:id/purchase', requireAuth, async (req: AuthRequest, res)
     res.status(201).json({ ...checkout, href, format });
   } catch (e: any) {
     const code = e?.message;
-    if (code === 'delivery_address_required' || code === 'city_required' || code === 'pincode_required') {
+    if (
+      code === 'delivery_address_required' ||
+      code === 'city_required' ||
+      code === 'pincode_required'
+    ) {
       return res.status(400).json({
         error: code,
         message: 'Please enter a complete delivery address for the printed book.',

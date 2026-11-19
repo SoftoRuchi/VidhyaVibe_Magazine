@@ -19,7 +19,10 @@ function looksLikeHtml(value: string) {
 }
 
 function plainToHtml(value: string) {
-  const parts = value.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const parts = value
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (!parts.length) return EMPTY_DOC;
   return parts.map((line) => `<p>${escapeHtml(line)}</p>`).join('');
 }
@@ -38,9 +41,7 @@ export function notesToHtml(
           note.pageNumber != null
             ? `<p class="word-note-page">Page ${Number(note.pageNumber)}</p>`
             : '';
-        const body = looksLikeHtml(note.content)
-          ? note.content
-          : plainToHtml(note.content);
+        const body = looksLikeHtml(note.content) ? note.content : plainToHtml(note.content);
         return `${page}${quote}${body}`;
       })
       .join('') || EMPTY_DOC
@@ -62,7 +63,10 @@ function sanitizeStyle(style: string): string {
       kept.push(`text-align: ${val.toLowerCase()}`);
     } else if (prop === 'margin-left' && /^(\d+(\.\d+)?(px|em|rem)?|auto)$/i.test(val)) {
       kept.push(`margin-left: ${val}`);
-    } else if (prop === 'color' && /^#([0-9a-f]{3,8})|rgb\([^)]+\)|rgba\([^)]+\)|[a-z]+$/i.test(val)) {
+    } else if (
+      prop === 'color' &&
+      /^#([0-9a-f]{3,8})|rgb\([^)]+\)|rgba\([^)]+\)|[a-z]+$/i.test(val)
+    ) {
       kept.push(`color: ${val}`);
     } else if (
       (prop === 'background-color' || prop === 'background') &&
@@ -71,7 +75,9 @@ function sanitizeStyle(style: string): string {
       kept.push(`background-color: ${val}`);
     } else if (
       prop === 'list-style-type' &&
-      /^(disc|circle|square|decimal|lower-alpha|upper-alpha|lower-roman|upper-roman|none)$/i.test(val)
+      /^(disc|circle|square|decimal|lower-alpha|upper-alpha|lower-roman|upper-roman|none)$/i.test(
+        val,
+      )
     ) {
       kept.push(`list-style-type: ${val}`);
     } else if (
@@ -86,10 +92,7 @@ function sanitizeStyle(style: string): string {
       /^(\d+(\.\d+)?(px|pt|em|rem|%)?|small|medium|large|x-large|xx-large)$/i.test(val)
     ) {
       kept.push(`font-size: ${val}`);
-    } else if (
-      prop === 'line-height' &&
-      /^(\d+(\.\d+)?(px|em|rem|%)?|normal)$/i.test(val)
-    ) {
+    } else if (prop === 'line-height' && /^(\d+(\.\d+)?(px|em|rem|%)?|normal)$/i.test(val)) {
       kept.push(`line-height: ${val}`);
     } else if (prop === 'display' && /^(block|inline-block|inline|flex)$/i.test(val)) {
       kept.push(`display: ${val}`);
@@ -389,7 +392,10 @@ export default function WordNotesEditor({
 
   // Floating image controls in editor
   const [selectedImg, setSelectedImg] = React.useState<HTMLImageElement | null>(null);
-  const [imgToolbarPos, setImgToolbarPos] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [imgToolbarPos, setImgToolbarPos] = React.useState<{ top: number; left: number }>({
+    top: 0,
+    left: 0,
+  });
 
   const saveRef = React.useRef(onSave);
   const updateRef = React.useRef(onUpdate);
@@ -474,7 +480,9 @@ export default function WordNotesEditor({
             .current(html)
             .then((created) => {
               const id =
-                created && typeof created === 'object' ? Number((created as { id?: number }).id) : null;
+                created && typeof created === 'object'
+                  ? Number((created as { id?: number }).id)
+                  : null;
               if (id) docIdRef.current = id;
               return id;
             })
@@ -705,9 +713,11 @@ export default function WordNotesEditor({
     if (listStyle) {
       const sel = window.getSelection();
       if (sel?.anchorNode) {
-        const parent = (sel.anchorNode.nodeType === Node.ELEMENT_NODE
-          ? (sel.anchorNode as HTMLElement)
-          : sel.anchorNode.parentElement)?.closest(type === 'ordered' ? 'ol' : 'ul');
+        const parent = (
+          sel.anchorNode.nodeType === Node.ELEMENT_NODE
+            ? (sel.anchorNode as HTMLElement)
+            : sel.anchorNode.parentElement
+        )?.closest(type === 'ordered' ? 'ol' : 'ul');
         if (parent) {
           (parent as HTMLElement).style.listStyleType = listStyle;
         }
@@ -957,7 +967,8 @@ export default function WordNotesEditor({
     const imgRect = img.getBoundingClientRect();
     const paperRect = paper.getBoundingClientRect();
     const toolbarWidth = 360;
-    const idealLeft = imgRect.left - paperRect.left + paper.scrollLeft + imgRect.width / 2 - toolbarWidth / 2;
+    const idealLeft =
+      imgRect.left - paperRect.left + paper.scrollLeft + imgRect.width / 2 - toolbarWidth / 2;
     const clampedLeft = Math.min(paperRect.width - toolbarWidth - 16, Math.max(8, idealLeft));
     setImgToolbarPos({
       top: Math.max(8, imgRect.top - paperRect.top + paper.scrollTop - 44),
@@ -1104,7 +1115,9 @@ export default function WordNotesEditor({
           node?.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node?.parentElement
         )?.closest('li.word-notes-task-item');
         if (currentLi) {
-          const input = currentLi.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+          const input = currentLi.querySelector(
+            'input[type="checkbox"]',
+          ) as HTMLInputElement | null;
           if (input) {
             input.checked = false;
             input.removeAttribute('checked');
@@ -1139,8 +1152,7 @@ export default function WordNotesEditor({
     for (const img of images) {
       const rect = img.getBoundingClientRect();
       const isLeft =
-        img.style.float === 'left' ||
-        (!img.style.float && !img.style.margin?.includes('auto'));
+        img.style.float === 'left' || (!img.style.float && !img.style.margin?.includes('auto'));
       const isRight = img.style.float === 'right';
 
       if (e.clientY >= rect.top - 6 && e.clientY <= rect.bottom + 10) {
@@ -1170,7 +1182,10 @@ export default function WordNotesEditor({
     // Try standard caretRangeFromPoint / caretPositionFromPoint if available
     const docWithCaret = document as unknown as {
       caretRangeFromPoint?: (x: number, y: number) => Range | null;
-      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+      caretPositionFromPoint?: (
+        x: number,
+        y: number,
+      ) => { offsetNode: Node; offset: number } | null;
     };
 
     if (docWithCaret.caretRangeFromPoint) {
@@ -1211,7 +1226,7 @@ export default function WordNotesEditor({
     // Calculate true visual bottom of all content in the editor (including floated images)
     let contentBottom = editor.getBoundingClientRect().top;
     const allChildren = Array.from(
-      editor.querySelectorAll('p, li, blockquote, h1, h2, h3, div, img, input, ul, ol, figure')
+      editor.querySelectorAll('p, li, blockquote, h1, h2, h3, div, img, input, ul, ol, figure'),
     );
     for (const child of allChildren) {
       const b = child.getBoundingClientRect().bottom;
@@ -1305,9 +1320,7 @@ export default function WordNotesEditor({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => toggleMenu('size')}
           >
-            <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>
-              {currentFontSize || 16}
-            </span>
+            <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>{currentFontSize || 16}</span>
             <span className="word-notes-chevron">▼</span>
           </button>
           {openMenu === 'size' && (
@@ -1386,7 +1399,9 @@ export default function WordNotesEditor({
                 <span>Custom:</span>
                 <input
                   type="color"
-                  value={textColor.startsWith('#') && textColor.length === 7 ? textColor : '#0078d4'}
+                  value={
+                    textColor.startsWith('#') && textColor.length === 7 ? textColor : '#0078d4'
+                  }
                   onChange={(e) => applyTextColor(e.target.value)}
                 />
                 <span style={{ fontSize: '0.74rem', color: '#8a8886' }}>{textColor}</span>
@@ -1414,7 +1429,16 @@ export default function WordNotesEditor({
             onClick={() => toggleMenu('highlight')}
           >
             <span className="word-notes-btn-content">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="m9 11-6 6v3h3l6-6" />
                 <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
               </svg>
@@ -1423,7 +1447,11 @@ export default function WordNotesEditor({
             <span className="word-notes-chevron">▼</span>
           </button>
           {openMenu === 'highlight' && (
-            <div className="word-notes-dropdown" style={{ minWidth: 200 }} onMouseDown={(e) => e.preventDefault()}>
+            <div
+              className="word-notes-dropdown"
+              style={{ minWidth: 200 }}
+              onMouseDown={(e) => e.preventDefault()}
+            >
               <div className="word-notes-dropdown-header">Highlight color</div>
               <div className="word-notes-highlight-grid">
                 {HIGHLIGHT_COLORS.map((c) => (
@@ -1467,7 +1495,11 @@ export default function WordNotesEditor({
             <span className="word-notes-chevron">▼</span>
           </button>
           {openMenu === 'bullet' && (
-            <div className="word-notes-dropdown" style={{ minWidth: 170 }} onMouseDown={(e) => e.preventDefault()}>
+            <div
+              className="word-notes-dropdown"
+              style={{ minWidth: 170 }}
+              onMouseDown={(e) => e.preventDefault()}
+            >
               <div className="word-notes-dropdown-header">Bullet styles</div>
               <button
                 type="button"
@@ -1511,7 +1543,11 @@ export default function WordNotesEditor({
             <span className="word-notes-chevron">▼</span>
           </button>
           {openMenu === 'number' && (
-            <div className="word-notes-dropdown" style={{ minWidth: 190 }} onMouseDown={(e) => e.preventDefault()}>
+            <div
+              className="word-notes-dropdown"
+              style={{ minWidth: 190 }}
+              onMouseDown={(e) => e.preventDefault()}
+            >
               <div className="word-notes-dropdown-header">Numbered styles</div>
               <button
                 type="button"
@@ -1595,7 +1631,16 @@ export default function WordNotesEditor({
             setIsImageModalOpen(true);
           }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
             <circle cx="9" cy="9" r="2" />
             <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
@@ -1653,7 +1698,11 @@ export default function WordNotesEditor({
             </button>
             <button
               type="button"
-              className={!selectedImg.style.float || selectedImg.style.float === 'none' ? 'is-active-btn' : ''}
+              className={
+                !selectedImg.style.float || selectedImg.style.float === 'none'
+                  ? 'is-active-btn'
+                  : ''
+              }
               onClick={() => alignSelectedImg('center')}
               title="Center image with no text wrap"
             >
@@ -1671,12 +1720,24 @@ export default function WordNotesEditor({
             <span className="img-tb-sep" />
 
             <span className="img-tb-label">Size:</span>
-            <button type="button" onClick={() => resizeSelectedImg(25)}>25%</button>
-            <button type="button" onClick={() => resizeSelectedImg(40)}>40%</button>
-            <button type="button" onClick={() => resizeSelectedImg(45)}>45%</button>
-            <button type="button" onClick={() => resizeSelectedImg(50)}>50%</button>
-            <button type="button" onClick={() => resizeSelectedImg(75)}>75%</button>
-            <button type="button" onClick={() => resizeSelectedImg(100)}>100%</button>
+            <button type="button" onClick={() => resizeSelectedImg(25)}>
+              25%
+            </button>
+            <button type="button" onClick={() => resizeSelectedImg(40)}>
+              40%
+            </button>
+            <button type="button" onClick={() => resizeSelectedImg(45)}>
+              45%
+            </button>
+            <button type="button" onClick={() => resizeSelectedImg(50)}>
+              50%
+            </button>
+            <button type="button" onClick={() => resizeSelectedImg(75)}>
+              75%
+            </button>
+            <button type="button" onClick={() => resizeSelectedImg(100)}>
+              100%
+            </button>
 
             <span className="img-tb-sep" />
 
@@ -1798,7 +1859,17 @@ export default function WordNotesEditor({
                       }}
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#2d7a3e" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto' }}>
+                      <svg
+                        width="36"
+                        height="36"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#2d7a3e"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{ margin: '0 auto' }}
+                      >
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                         <polyline points="17 8 12 3 7 8" />
                         <line x1="12" x2="12" y1="3" y2="15" />
@@ -1850,7 +1921,15 @@ export default function WordNotesEditor({
                     onChange={(e) => setUrlInput(e.target.value)}
                   />
                   {urlInput.trim() && (
-                    <div style={{ marginTop: 8, maxHeight: 120, overflow: 'hidden', borderRadius: 4, textAlign: 'center' }}>
+                    <div
+                      style={{
+                        marginTop: 8,
+                        maxHeight: 120,
+                        overflow: 'hidden',
+                        borderRadius: 4,
+                        textAlign: 'center',
+                      }}
+                    >
                       <img
                         src={urlInput.trim()}
                         alt="URL Preview"

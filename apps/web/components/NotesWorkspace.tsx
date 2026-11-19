@@ -359,8 +359,8 @@ export default function NotesWorkspace({
     lastReadHref && book && lastReadHref.startsWith(`${book.href}/read`)
       ? lastReadHref
       : book && chapter
-      ? `${book.href}/read?chapter=${encodeURIComponent(chapter.slug)}`
-      : book?.href || '/books';
+        ? `${book.href}/read?chapter=${encodeURIComponent(chapter.slug)}`
+        : book?.href || '/books';
 
   if (loading || authLoading) {
     return (
@@ -466,7 +466,11 @@ export default function NotesWorkspace({
             quote={chapter.slug === quoteChapter.current ? quote : ''}
             onQuoteChange={setQuote}
             openHref={readHref}
-            onClose={onClose ? () => onClose(book?.key || bookKey, chapter?.slug || chapterSlug) : undefined}
+            onClose={
+              onClose
+                ? () => onClose(book?.key || bookKey, chapter?.slug || chapterSlug)
+                : undefined
+            }
             onSave={async (content, savedQuote) => {
               const created = await addCourseNote(chapter.id, content, undefined, savedQuote);
               await reloadNotes();
@@ -481,8 +485,17 @@ export default function NotesWorkspace({
             }}
           />
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '24px 36px' }}>
-            <p className="onenote-blank" style={{ margin: 0 }}>Choose a chapter to open its notes.</p>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '24px 36px',
+            }}
+          >
+            <p className="onenote-blank" style={{ margin: 0 }}>
+              Choose a chapter to open its notes.
+            </p>
             {onClose ? (
               <button
                 type="button"
@@ -491,7 +504,16 @@ export default function NotesWorkspace({
                 title="Close notes and return to book"
                 aria-label="Close notes"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -503,7 +525,16 @@ export default function NotesWorkspace({
                 title="Close notes and return to book"
                 aria-label="Close notes"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>

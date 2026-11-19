@@ -751,9 +751,10 @@ router.post('/:id/lots/:lotId/payment-email', async (req, res) => {
       payUrl: mail.payUrl,
       detail: mail.detail,
       upiSet: mail.upiSet,
-      emailWarning: mail.ok && !mail.upiSet
-        ? 'Mail sent with pay link and QR. Add VidhyaVibe UPI ID in Admin → Email Configuration so the mail also includes the UPI ID.'
-        : undefined,
+      emailWarning:
+        mail.ok && !mail.upiSet
+          ? 'Mail sent with pay link and QR. Add VidhyaVibe UPI ID in Admin → Email Configuration so the mail also includes the UPI ID.'
+          : undefined,
     });
   } catch (e: any) {
     if (e instanceof BookAccessError) {

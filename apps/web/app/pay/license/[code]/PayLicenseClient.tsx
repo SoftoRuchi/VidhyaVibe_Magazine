@@ -144,7 +144,9 @@ export default function PayLicenseClient() {
 
   return (
     <main className="container" style={{ padding: '24px 16px 64px', maxWidth: 560 }}>
-      <h1 className="course-page-title">{paid ? 'Payment received' : 'Pay for textbook licenses'}</h1>
+      <h1 className="course-page-title">
+        {paid ? 'Payment received' : 'Pay for textbook licenses'}
+      </h1>
       <p className="course-page-lead">
         {offer.collegeName}
         {offer.courseName ? ` · ${offer.courseName}` : ''}

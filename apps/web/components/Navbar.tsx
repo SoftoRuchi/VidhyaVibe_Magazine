@@ -117,11 +117,7 @@ const Navbar = () => {
   return (
     <header className="vv-app-header">
       <nav className="vv-navbar">
-        <Link
-          href="/"
-          className="vv-navbar-brand"
-          aria-label={brandLabel}
-        >
+        <Link href="/" className="vv-navbar-brand" aria-label={brandLabel}>
           <Image
             src={brandLogo}
             alt=""
@@ -134,9 +130,7 @@ const Navbar = () => {
             <span className="vv-navbar-titleIcon" style={{ color: '#facc15' }} aria-hidden>
               ★
             </span>
-            <span className="vv-navbar-brandText">
-              {brandLabel}
-            </span>
+            <span className="vv-navbar-brandText">{brandLabel}</span>
             <span
               className="vv-navbar-titleIcon"
               style={{ color: '#6b4423', opacity: 0.9 }}
@@ -265,7 +259,11 @@ const Navbar = () => {
           {loggedIn && <div className="vv-mobile-welcome">Welcome, {welcomeName}</div>}
 
           {showProductToggle ? (
-            <div className="vv-mode-switch vv-mode-switch--mobile" role="tablist" aria-label="Switch product">
+            <div
+              className="vv-mode-switch vv-mode-switch--mobile"
+              role="tablist"
+              aria-label="Switch product"
+            >
               <button
                 type="button"
                 className={mode === 'course' ? 'is-on' : ''}

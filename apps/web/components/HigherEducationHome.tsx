@@ -91,7 +91,9 @@ export default function HigherEducationHome({
   const ready = catalog != null;
   const courses = catalog || [];
   const q = query.trim();
-  const allBooks = ready ? courses.flatMap((course) => course.semesters.flatMap((sem) => sem.books)) : [];
+  const allBooks = ready
+    ? courses.flatMap((course) => course.semesters.flatMap((sem) => sem.books))
+    : [];
   const matches = q ? booksMatching(courses, q) : allBooks;
 
   return (
@@ -121,7 +123,12 @@ export default function HigherEducationHome({
             .map((course) => {
               const bookCount = course.semesters.reduce((sum, sem) => sum + sem.books.length, 0);
               return (
-                <div key={course.id} className="vv-he-tabpanel" role="region" aria-label={`${course.name} books`}>
+                <div
+                  key={course.id}
+                  className="vv-he-tabpanel"
+                  role="region"
+                  aria-label={`${course.name} books`}
+                >
                   {bookCount ? (
                     course.semesters.map((semester) => (
                       <div key={semester.number} className="vv-he-tabcol">
@@ -170,15 +177,16 @@ export default function HigherEducationHome({
           <div className="vv-he-hero-copy">
             <p className="vv-he-lead">
               VidhyaVibe publishes textbooks for higher-education programmes. Search for a book by
-              its name, subject, course, or a keyword, open it directly, and buy it without
-              creating an account first.
+              its name, subject, course, or a keyword, open it directly, and buy it without creating
+              an account first.
             </p>
             <div className="vv-he-formats">
               <article>
                 <h2>Interactive e-book</h2>
                 <p>
                   Transform passive reading into active learning. Includes instant keyword search,
-                  in-chapter quizzes, smart flashcards, digital notes, and access anywhere without heavy paper books.
+                  in-chapter quizzes, smart flashcards, digital notes, and access anywhere without
+                  heavy paper books.
                 </p>
                 <a href="#why-interactive" className="vv-he-format-link">
                   Why interactive is better ↓
@@ -217,7 +225,9 @@ export default function HigherEducationHome({
                   </li>
                   <li>
                     <strong>Buy the book</strong>
-                    <span>Choose the e-book or a printed copy and pay with your contact details.</span>
+                    <span>
+                      Choose the e-book or a printed copy and pay with your contact details.
+                    </span>
                   </li>
                 </ol>
               </>
@@ -270,9 +280,9 @@ export default function HigherEducationHome({
             <span className="vv-he-why-badge">Interactive Advantage</span>
             <h2>Why Interactive E-Books Are Better Than Printed Books</h2>
             <p className="vv-he-lead">
-              Traditional paper textbooks are static, heavy, and quickly outdated. VidhyaVibe interactive
-              e-books combine university curriculum with powerful digital study tools to help you learn faster,
-              retain more, and score higher in exams.
+              Traditional paper textbooks are static, heavy, and quickly outdated. VidhyaVibe
+              interactive e-books combine university curriculum with powerful digital study tools to
+              help you learn faster, retain more, and score higher in exams.
             </p>
           </div>
 
@@ -281,9 +291,9 @@ export default function HigherEducationHome({
               <div className="vv-he-why-icon">⚡</div>
               <h3>Active Practice vs. Passive Reading</h3>
               <p>
-                Printed books only allow passive reading where it is easy to lose focus. Interactive e-books
-                include end-of-chapter quizzes and instant knowledge checks so you can test your understanding
-                immediately after reading.
+                Printed books only allow passive reading where it is easy to lose focus. Interactive
+                e-books include end-of-chapter quizzes and instant knowledge checks so you can test
+                your understanding immediately after reading.
               </p>
             </div>
 
@@ -291,8 +301,9 @@ export default function HigherEducationHome({
               <div className="vv-he-why-icon">🔍</div>
               <h3>Instant Keyword & Concept Search</h3>
               <p>
-                No more flipping through hundreds of paper pages or incomplete indices. Search any technical
-                formula, term, definition, or code snippet across the entire textbook in milliseconds.
+                No more flipping through hundreds of paper pages or incomplete indices. Search any
+                technical formula, term, definition, or code snippet across the entire textbook in
+                milliseconds.
               </p>
             </div>
 
@@ -300,8 +311,9 @@ export default function HigherEducationHome({
               <div className="vv-he-why-icon">🎴</div>
               <h3>Smart Chapter Flashcards</h3>
               <p>
-                Master difficult definitions, theorems, and concepts with built-in digital flashcards. Ideal for
-                quick self-testing on your commute or fast revision right before exam hall entry.
+                Master difficult definitions, theorems, and concepts with built-in digital
+                flashcards. Ideal for quick self-testing on your commute or fast revision right
+                before exam hall entry.
               </p>
             </div>
 
@@ -309,8 +321,9 @@ export default function HigherEducationHome({
               <div className="vv-he-why-icon">📝</div>
               <h3>Searchable In-Context Notes</h3>
               <p>
-                Jot down personal notes and bookmark key passages directly alongside textbook chapters. Your notes
-                stay organized, searchable, and intact without ink bleed or damaging physical book pages.
+                Jot down personal notes and bookmark key passages directly alongside textbook
+                chapters. Your notes stay organized, searchable, and intact without ink bleed or
+                damaging physical book pages.
               </p>
             </div>
 
@@ -318,8 +331,9 @@ export default function HigherEducationHome({
               <div className="vv-he-why-icon">🎒</div>
               <h3>Zero Backpack Weight & Anywhere Access</h3>
               <p>
-                Your entire multi-semester degree syllabus fits in your pocket. Read seamlessly on your laptop,
-                tablet, or smartphone wherever you study—at home, in college, or on the move.
+                Your entire multi-semester degree syllabus fits in your pocket. Read seamlessly on
+                your laptop, tablet, or smartphone wherever you study—at home, in college, or on the
+                move.
               </p>
             </div>
 
@@ -327,8 +341,9 @@ export default function HigherEducationHome({
               <div className="vv-he-why-icon">💡</div>
               <h3>Always Current & Fraction of the Cost</h3>
               <p>
-                Whenever university syllabi change or errors are revised, digital editions update automatically.
-                Get the latest textbook content at a fraction of the cost of printing and shipping physical paperbacks.
+                Whenever university syllabi change or errors are revised, digital editions update
+                automatically. Get the latest textbook content at a fraction of the cost of printing
+                and shipping physical paperbacks.
               </p>
             </div>
           </div>
@@ -346,34 +361,82 @@ export default function HigherEducationHome({
                 </thead>
                 <tbody>
                   <tr>
-                    <td><strong>Study Engagement</strong></td>
-                    <td><span className="vv-check">✓</span> <strong>Active:</strong> Embedded quizzes, practice checks & flashcards</td>
-                    <td><span className="vv-cross">✕</span> <strong>Passive:</strong> Text only, self-testing requires external aids</td>
+                    <td>
+                      <strong>Study Engagement</strong>
+                    </td>
+                    <td>
+                      <span className="vv-check">✓</span> <strong>Active:</strong> Embedded quizzes,
+                      practice checks & flashcards
+                    </td>
+                    <td>
+                      <span className="vv-cross">✕</span> <strong>Passive:</strong> Text only,
+                      self-testing requires external aids
+                    </td>
                   </tr>
                   <tr>
-                    <td><strong>Finding Topics</strong></td>
-                    <td><span className="vv-check">✓</span> <strong>Instant:</strong> Sub-second search across the whole syllabus</td>
-                    <td><span className="vv-cross">✕</span> <strong>Slow:</strong> Manual flipping through pages and indices</td>
+                    <td>
+                      <strong>Finding Topics</strong>
+                    </td>
+                    <td>
+                      <span className="vv-check">✓</span> <strong>Instant:</strong> Sub-second
+                      search across the whole syllabus
+                    </td>
+                    <td>
+                      <span className="vv-cross">✕</span> <strong>Slow:</strong> Manual flipping
+                      through pages and indices
+                    </td>
                   </tr>
                   <tr>
-                    <td><strong>Note-Taking</strong></td>
-                    <td><span className="vv-check">✓</span> <strong>Organized:</strong> Digital, searchable notes tied to chapters</td>
-                    <td><span className="vv-cross">✕</span> <strong>Cluttered:</strong> Margin scribbles that wear out and can't be searched</td>
+                    <td>
+                      <strong>Note-Taking</strong>
+                    </td>
+                    <td>
+                      <span className="vv-check">✓</span> <strong>Organized:</strong> Digital,
+                      searchable notes tied to chapters
+                    </td>
+                    <td>
+                      <span className="vv-cross">✕</span> <strong>Cluttered:</strong> Margin
+                      scribbles that wear out and can't be searched
+                    </td>
                   </tr>
                   <tr>
-                    <td><strong>Portability</strong></td>
-                    <td><span className="vv-check">✓</span> <strong>0 kg:</strong> Access all semester books on mobile, tablet, or laptop</td>
-                    <td><span className="vv-cross">✕</span> <strong>Bulky:</strong> Heavy backpacks carrying multiple thick books</td>
+                    <td>
+                      <strong>Portability</strong>
+                    </td>
+                    <td>
+                      <span className="vv-check">✓</span> <strong>0 kg:</strong> Access all semester
+                      books on mobile, tablet, or laptop
+                    </td>
+                    <td>
+                      <span className="vv-cross">✕</span> <strong>Bulky:</strong> Heavy backpacks
+                      carrying multiple thick books
+                    </td>
                   </tr>
                   <tr>
-                    <td><strong>Curriculum Updates</strong></td>
-                    <td><span className="vv-check">✓</span> <strong>Immediate:</strong> Real-time syllabus updates and corrections</td>
-                    <td><span className="vv-cross">✕</span> <strong>Static:</strong> Outdated quickly; requires buying new editions</td>
+                    <td>
+                      <strong>Curriculum Updates</strong>
+                    </td>
+                    <td>
+                      <span className="vv-check">✓</span> <strong>Immediate:</strong> Real-time
+                      syllabus updates and corrections
+                    </td>
+                    <td>
+                      <span className="vv-cross">✕</span> <strong>Static:</strong> Outdated quickly;
+                      requires buying new editions
+                    </td>
                   </tr>
                   <tr>
-                    <td><strong>Affordability</strong></td>
-                    <td><span className="vv-check">✓</span> <strong>Budget-friendly:</strong> Accessible pricing starting from just ₹1</td>
-                    <td><span className="vv-cross">✕</span> <strong>Costly:</strong> High printing, paper, and shipping fees</td>
+                    <td>
+                      <strong>Affordability</strong>
+                    </td>
+                    <td>
+                      <span className="vv-check">✓</span> <strong>Budget-friendly:</strong>{' '}
+                      Accessible pricing starting from just ₹1
+                    </td>
+                    <td>
+                      <span className="vv-cross">✕</span> <strong>Costly:</strong> High printing,
+                      paper, and shipping fees
+                    </td>
                   </tr>
                 </tbody>
               </table>

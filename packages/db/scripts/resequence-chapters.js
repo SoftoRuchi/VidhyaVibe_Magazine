@@ -63,7 +63,9 @@ async function run() {
           newSort,
           sorted[i].id,
         ]);
-        console.log(`Subject ${subject_id}: Chapter ${sorted[i].id} ("${sorted[i].title}") -> sort_order = ${newSort}`);
+        console.log(
+          `Subject ${subject_id}: Chapter ${sorted[i].id} ("${sorted[i].title}") -> sort_order = ${newSort}`,
+        );
       }
     }
     console.log('Chapter resequencing completed successfully.');

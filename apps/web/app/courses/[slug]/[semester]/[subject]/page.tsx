@@ -7,8 +7,8 @@ import React from 'react';
 import { CourseCover, CourseEmpty } from '../../../../../components/CourseBrowse';
 import { assetUrl, apiUrl } from '../../../../../lib/apiBase';
 import { useAuth } from '../../../../../lib/authContext';
-import { courseCountLabel } from '../../../../../lib/courseLabels';
 import { compareChapters, extractChapterNumber } from '../../../../../lib/courseChapters';
+import { courseCountLabel } from '../../../../../lib/courseLabels';
 import { fetchSemester, fetchSubject, formatBookPrice } from '../../../../../lib/coursesApi';
 import CoursePracticeQuiz from './read/CoursePracticeQuiz';
 
@@ -155,7 +155,12 @@ export default function SubjectPage() {
             {sampleHref ? (
               <p className="course-page-lead">
                 A sample of this book is available.{' '}
-                <a className="course-sample-link" href={sampleHref} target="_blank" rel="noreferrer">
+                <a
+                  className="course-sample-link"
+                  href={sampleHref}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   Open sample PDF
                 </a>
               </p>
@@ -215,13 +220,10 @@ export default function SubjectPage() {
           ) : (
             <div className="course-chapter-list">
               {chapters.map((ch: any, i: number) => {
-                const chNum = extractChapterNumber(ch.title) ?? (i + 1);
+                const chNum = extractChapterNumber(ch.title) ?? i + 1;
                 return (
                   <div key={ch.id} className="course-chapter-row">
-                    <Link
-                      href={`${base}/read?chapter=${ch.slug}`}
-                      className="course-chapter-open"
-                    >
+                    <Link href={`${base}/read?chapter=${ch.slug}`} className="course-chapter-open">
                       <span className="course-nav-badge">{chNum}</span>
                       <span>
                         <span className="course-card-kicker">Chapter {chNum}</span>

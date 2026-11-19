@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import React from 'react';
 import { CourseAccessBlocked } from '../../../../../../components/CourseBrowse';
 import { useAuth } from '../../../../../../lib/authContext';
+import { compareChapters } from '../../../../../../lib/courseChapters';
 import {
   acquireBookSession,
   courseAccessMessage,
@@ -19,7 +20,6 @@ import {
   saveCourseProgress,
   type CourseQuickCheckItem,
 } from '../../../../../../lib/coursesApi';
-import { compareChapters } from '../../../../../../lib/courseChapters';
 import CourseBookReader from './CourseBookReader';
 
 export default function CourseReadPage() {
