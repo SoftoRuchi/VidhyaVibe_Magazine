@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import React from 'react';
+import NotesWorkspace from '../../../../../../components/NotesWorkspace';
 import { getApiOrigin } from '../../../../../../lib/apiBase';
 import {
   buildCourseInteractives,
@@ -12,16 +13,21 @@ import {
   addCourseHighlight,
   addCourseNote,
   deleteCourseBookmark,
+  deleteCourseFlashcard,
   deleteCourseHighlight,
   deleteCourseNote,
+  fetchChapterFlashcards,
   fetchChapterStudy,
   updateCourseNote,
   type CourseBookmarkType,
+  type CourseFlashcard,
   type CourseQuickCheckItem,
 } from '../../../../../../lib/coursesApi';
+import CourseFlashcards from './CourseFlashcards';
 import CourseInteractives from './CourseInteractives';
 import CourseNotesPanel from './CourseNotesPanel';
-import CourseQuickCheck from './CourseQuickCheck';
+import CoursePracticeQuiz from './CoursePracticeQuiz';
+import CourseQuickCheck, { CourseQuizPrompt } from './CourseQuickCheck';
 
 const HIGHLIGHTER_COLORS = ['#FFE66D', '#A8E6A1', '#FFB7C5', '#C5E8C8', '#FFC48A'];
 const BOOKMARK_TYPES: { id: CourseBookmarkType; label: string; color: string }[] = [
@@ -33,6 +39,48 @@ const BOOKMARK_TYPES: { id: CourseBookmarkType; label: string; color: string }[]
 function asBookmarkType(v?: string | null): CourseBookmarkType {
   if (v === 'doubt' || v === 'revise') return v;
   return 'important';
+}
+
+function decodeFlashText(html: string) {
+  return html
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function flashcardsFromHtml(html: string): CourseFlashcard[] {
+  if (!html) return [];
+  const cards: CourseFlashcard[] = [];
+  const seen = new Set<string>();
+  const re =
+    /<(div|section|aside)[^>]*class=["'][^"']*course-flash[^"']*["'][^>]*>([\s\S]*?)<\/\1>/gi;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = re.exec(html))) {
+    const inner = m[2] || '';
+    const strong = inner.match(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/i);
+    const p = inner.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+    const front = decodeFlashText(strong?.[2] || '').slice(0, 500);
+    const rest = strong ? inner.replace(strong[0], ' ') : inner;
+    const back = decodeFlashText(p?.[1] || rest).slice(0, 2000);
+    const key = front.toLowerCase();
+    if (front.length < 2 || seen.has(key)) continue;
+    seen.add(key);
+    cards.push({
+      id: -(++i),
+      chapterId: 0,
+      front,
+      back: back || 'No answer yet.',
+    });
+  }
+  return cards;
 }
 
 function resolveSrc(src: string) {
@@ -72,7 +120,7 @@ function blocksFromHtml(html: string): { id: string; kind: string; text: string;
   wrap.innerHTML = rewriteImages(html || '');
   const nodes = Array.from(
     wrap.querySelectorAll(
-      'h1,h2,h3,p,ul,ol,li,nav.course-chapter-toc,div.course-callout,div.course-split,div.course-flash,figure,img,details.course-explain,aside.course-explain,div.course-explain,aside.course-quick-block,div.course-table-wrap,table.course-table',
+      'h1,h2,h3,p,ul,ol,li,nav.course-chapter-toc,div.course-callout,div.course-split,div.course-flash,figure,img,details.course-explain,aside.course-explain,div.course-explain,aside.course-quick-block,div.course-table-wrap,table.course-table,pre.course-code,pre',
     ),
   ).filter((el) => {
     if (el.closest('.course-flash') && !el.classList.contains('course-flash')) return false;
@@ -86,10 +134,11 @@ function blocksFromHtml(html: string): { id: string; kind: string; text: string;
       return false;
     if (el.tagName.toLowerCase() === 'table' && el.closest('figure, div.course-table-wrap'))
       return false;
+    if (el.tagName.toLowerCase() === 'code' && el.closest('pre')) return false;
     if (el.tagName.toLowerCase() === 'li' && el.closest('ul, ol')) return false;
     if (
       el.tagName.toLowerCase() === 'p' &&
-      el.closest('ul, ol, li, figure, table, .course-table-wrap')
+      el.closest('ul, ol, li, figure, table, .course-table-wrap, pre')
     )
       return false;
     if (el.tagName.toLowerCase() !== 'img') return true;
@@ -117,7 +166,9 @@ function blocksFromHtml(html: string): { id: string; kind: string; text: string;
                       ? 'formula'
                       : tag === 'p' && el.classList.contains('course-kicker')
                         ? 'kicker'
-                        : tag;
+                        : tag === 'pre' || el.classList.contains('course-code')
+                          ? 'code'
+                          : tag;
       const id = `b-${i}`;
       if (kind === 'explain') el.setAttribute('data-explain-id', id);
       return { id, kind, text: (el.textContent || '').trim(), html: el.outerHTML };
@@ -125,6 +176,7 @@ function blocksFromHtml(html: string): { id: string; kind: string; text: string;
     .filter(
       (b) =>
         b.text.length > 0 ||
+        b.kind === 'code' ||
         b.kind === 'img' ||
         b.kind === 'figure' ||
         b.kind === 'split' ||
@@ -167,6 +219,13 @@ function isCoverHtml(html: string) {
   return /course-book-cover/.test(html);
 }
 
+function coverImageSrc(html: string) {
+  const match =
+    html.match(/<img[^>]+src=["']([^"']+)["']/i) ||
+    html.match(/<img[^>]+src=\{?["']([^"']+)["']/i);
+  return match ? match[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"') : null;
+}
+
 function canSplitBlock(kind: string) {
   return (
     kind === 'p' ||
@@ -176,6 +235,169 @@ function canSplitBlock(kind: string) {
     kind === 'kicker' ||
     kind === 'formula'
   );
+}
+
+function canSplitList(kind: string) {
+  return kind === 'toc' || kind === 'ol' || kind === 'ul';
+}
+
+function isSectionHeading(kind: string) {
+  return kind === 'h1' || kind === 'h2' || kind === 'h3' || kind === 'h4' || kind === 'kicker';
+}
+
+function isChapterStart(kind: string, html: string) {
+  if (kind === 'h1') return true;
+  if (kind !== 'h2' && kind !== 'h3') return false;
+  const text = html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return /^chapter\s+\d+/i.test(text);
+}
+
+function listPieces(html: string): string[] | null {
+  if (typeof document === 'undefined') return null;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return null;
+  const list = (root.matches('ul,ol') ? root : root.querySelector('ol, ul')) as HTMLElement | null;
+  if (!list) return null;
+  const items = Array.from(list.children).filter((el) => el.tagName.toLowerCase() === 'li');
+  if (items.length < 2) return null;
+  return items.map((el) => (el as HTMLElement).outerHTML);
+}
+
+function htmlWithListSlice(
+  html: string,
+  itemHtmls: string[],
+  fromIndex: number,
+  continued: boolean,
+) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return html;
+  const list = (root.matches('ul,ol') ? root : root.querySelector('ol, ul')) as HTMLElement | null;
+  if (!list) return html;
+  list.innerHTML = itemHtmls.join('');
+  if (fromIndex > 0 && list.tagName.toLowerCase() === 'ol') {
+    list.setAttribute('start', String(fromIndex + 1));
+  }
+  if (continued && root.classList.contains('course-chapter-toc')) {
+    const kicker = root.querySelector('.course-kicker');
+    if (kicker) {
+      const base = (kicker.textContent || 'Contents').replace(/\s*\(continued\)\s*$/i, '').trim();
+      kicker.textContent = `${base} (continued)`;
+    }
+  }
+  return root.outerHTML;
+}
+
+function parseTableRoot(html: string) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return null;
+  const table = (
+    root.matches('table') ? root : root.querySelector('table')
+  ) as HTMLTableElement | null;
+  if (!table) return null;
+  return { root, table };
+}
+
+function classifyTable(table: HTMLTableElement) {
+  const headerRows: HTMLTableRowElement[] = [];
+  const footerRows: HTMLTableRowElement[] = [];
+  const bodyRows: HTMLTableRowElement[] = [];
+  Array.from(table.rows).forEach((row) => {
+    const parent = row.parentElement?.tagName.toLowerCase();
+    if (parent === 'thead') headerRows.push(row);
+    else if (parent === 'tfoot') footerRows.push(row);
+    else bodyRows.push(row);
+  });
+  if (!headerRows.length && bodyRows.length) {
+    const first = bodyRows[0];
+    const cells = Array.from(first.cells);
+    if (cells.length && cells.every((cell) => cell.tagName.toLowerCase() === 'th')) {
+      headerRows.push(bodyRows.shift() as HTMLTableRowElement);
+    }
+  }
+  return { headerRows, footerRows, bodyRows };
+}
+
+function tableBodyRows(html: string): string[] | null {
+  if (typeof document === 'undefined') return null;
+  const parsed = parseTableRoot(html);
+  if (!parsed) return null;
+  const { bodyRows } = classifyTable(parsed.table);
+  if (bodyRows.length < 2) return null;
+  return bodyRows.map((row) => row.outerHTML);
+}
+
+function htmlWithTableSlice(html: string, rowHtmls: string[], continued: boolean, isLast: boolean) {
+  const parsed = parseTableRoot(html);
+  if (!parsed) return html;
+  const { root, table } = parsed;
+  const caption = table.querySelector('caption');
+  const { headerRows, footerRows } = classifyTable(table);
+  const thead = document.createElement('thead');
+  headerRows.forEach((row) => thead.appendChild(row));
+  const tfoot = document.createElement('tfoot');
+  footerRows.forEach((row) => tfoot.appendChild(row));
+  caption?.remove();
+  table.replaceChildren();
+  if (caption && !continued) table.appendChild(caption);
+  if (headerRows.length) table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  tbody.innerHTML = rowHtmls.join('');
+  table.appendChild(tbody);
+  if (isLast && footerRows.length) table.appendChild(tfoot);
+  if (continued) {
+    root.classList.add('is-table-continued');
+  }
+  if (!isLast) root.querySelectorAll('figcaption').forEach((el) => el.remove());
+  return root.outerHTML;
+}
+
+function compositeChildHtmls(html: string): string[] | null {
+  if (typeof document === 'undefined') return null;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return null;
+  if (
+    root.matches('table, ul, ol, p, h1, h2, h3, h4, img, pre, blockquote, li, details') ||
+    root.classList.contains('course-flash') ||
+    root.classList.contains('course-quick-block') ||
+    root.classList.contains('course-book-cover') ||
+    root.classList.contains('course-table-wrap') ||
+    root.classList.contains('course-table') ||
+    root.classList.contains('course-callout') ||
+    root.classList.contains('course-explain') ||
+    root.querySelector('table, ul, ol')
+  ) {
+    return null;
+  }
+  const hasLooseText = Array.from(root.childNodes).some(
+    (node) => node.nodeType === Node.TEXT_NODE && (node.textContent || '').trim().length > 0,
+  );
+  if (hasLooseText) return null;
+  const kids = Array.from(root.children).filter(
+    (el) => (el.textContent || '').trim().length > 0 || Boolean(el.querySelector('img, svg, video')),
+  );
+  if (kids.length < 2) return null;
+  return kids.map((el) => el.outerHTML);
+}
+
+function htmlWithChildSlice(html: string, parts: string[], continued: boolean) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return html;
+  root.innerHTML = parts.join('');
+  if (continued) root.classList.add('is-flow-continued');
+  return root.outerHTML;
 }
 
 function wordsFromHtml(html: string) {
@@ -274,7 +496,7 @@ async function paginateByMeasure(
   let current: string[] = [];
 
   const paint = async (pieces: string[]) => {
-    body.innerHTML = pieces.join('');
+    body.innerHTML = wrapPagePieces(pieces);
     await waitForProbeImages(body);
     return fits();
   };
@@ -320,14 +542,164 @@ async function paginateByMeasure(
     }
   };
 
-  try {
-    for (const block of blocks) {
-      const full = htmlForBlock(block, opts.openIds);
-      if (await paint(current.concat(full))) {
-        current.push(full);
-        continue;
+  const maxList = async (base: string[], html: string, rest: string[], offset: number) => {
+    if (!rest.length) return 0;
+    let lo = 1;
+    let hi = rest.length;
+    let best = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const slice = htmlWithListSlice(html, rest.slice(0, mid), offset, offset > 0);
+      if (await paint(base.concat(slice))) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
       }
-      if (canSplitBlock(block.kind)) {
+    }
+    return best;
+  };
+
+  const emitList = async (html: string, items: string[]) => {
+    let offset = 0;
+    while (offset < items.length) {
+      const rest = items.slice(offset);
+      let fitted = await maxList(current, html, rest, offset);
+      if (fitted <= 0 && current.length) {
+        pages.push(current);
+        current = [];
+        fitted = await maxList(current, html, rest, offset);
+      }
+      if (fitted <= 0) {
+        current.push(htmlWithListSlice(html, rest, offset, offset > 0));
+        pages.push(current);
+        current = [];
+        break;
+      }
+      current.push(htmlWithListSlice(html, rest.slice(0, fitted), offset, offset > 0));
+      offset += fitted;
+      if (offset < items.length) {
+        pages.push(current);
+        current = [];
+      }
+    }
+  };
+
+  try {
+    const endPage = () => {
+      if (!current.length) return;
+      pages.push(current);
+      current = [];
+    };
+
+    const maxTable = async (base: string[], html: string, rest: string[], continued: boolean) => {
+      if (!rest.length) return 0;
+      let lo = 1;
+      let hi = rest.length;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const slice = htmlWithTableSlice(html, rest.slice(0, mid), continued, mid === rest.length);
+        if (await paint(base.concat(slice))) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return best;
+    };
+
+    const emitTable = async (html: string, rows: string[]) => {
+      let offset = 0;
+      while (offset < rows.length) {
+        const rest = rows.slice(offset);
+        const continued = offset > 0;
+        let fitted = await maxTable(current, html, rest, continued);
+        if (fitted <= 0 && current.length) {
+          pages.push(current);
+          current = [];
+          fitted = await maxTable(current, html, rest, continued);
+        }
+        if (fitted <= 0) {
+          current.push(htmlWithTableSlice(html, rest.slice(0, 1), continued, rest.length === 1));
+          pages.push(current);
+          current = [];
+          offset += 1;
+          continue;
+        }
+        current.push(
+          htmlWithTableSlice(html, rest.slice(0, fitted), continued, offset + fitted >= rows.length),
+        );
+        offset += fitted;
+        if (offset < rows.length) {
+          pages.push(current);
+          current = [];
+        }
+      }
+    };
+
+    const maxParts = async (base: string[], html: string, rest: string[], continued: boolean) => {
+      if (!rest.length) return 0;
+      let lo = 1;
+      let hi = rest.length;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const slice = htmlWithChildSlice(html, rest.slice(0, mid), continued);
+        if (await paint(base.concat(slice))) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return best;
+    };
+
+    const emitParts = async (html: string, parts: string[]) => {
+      let offset = 0;
+      while (offset < parts.length) {
+        const rest = parts.slice(offset);
+        const continued = offset > 0;
+        let fitted = await maxParts(current, html, rest, continued);
+        if (fitted <= 0 && current.length) {
+          pages.push(current);
+          current = [];
+          fitted = await maxParts(current, html, rest, continued);
+        }
+        if (fitted <= 0) {
+          current.push(htmlWithChildSlice(html, rest.slice(0, 1), continued));
+          pages.push(current);
+          current = [];
+          offset += 1;
+          continue;
+        }
+        current.push(htmlWithChildSlice(html, rest.slice(0, fitted), continued));
+        offset += fitted;
+        if (offset < parts.length) {
+          pages.push(current);
+          current = [];
+        }
+      }
+    };
+
+    const fillOverflow = async (full: string, kind: string) => {
+      if (canSplitList(kind)) {
+        const items = listPieces(full);
+        if (items) {
+          await emitList(full, items);
+          return true;
+        }
+      }
+      if (kind === 'table') {
+        const rows = tableBodyRows(full);
+        if (rows) {
+          await emitTable(full, rows);
+          return true;
+        }
+      }
+      if (canSplitBlock(kind)) {
         const words = wordsFromHtml(full);
         const fitted = await maxWords(current, full, words);
         if (fitted > 0 && fitted < words.length) {
@@ -335,9 +707,76 @@ async function paginateByMeasure(
           pages.push(current);
           current = [];
           await emitWords(full, words.slice(fitted));
-          continue;
+          return true;
         }
       }
+      const parts = compositeChildHtmls(full);
+      if (parts) {
+        await emitParts(full, parts);
+        return true;
+      }
+      return false;
+    };
+
+    const headingKeepsFollowing = async (
+      base: string[],
+      headingHtmls: string[],
+      next: { id: string; kind: string; html: string } | undefined,
+    ) => {
+      if (!next) return true;
+      const nextHtml = htmlForBlock(next, opts.openIds);
+      if (await paint(base.concat(headingHtmls, nextHtml))) return true;
+      if (next.kind === 'table') {
+        const rows = tableBodyRows(nextHtml);
+        if (!rows?.length) return false;
+        const need = Math.min(rows.length, Math.max(3, Math.ceil(rows.length * 0.34)));
+        return paint(
+          base.concat(
+            headingHtmls,
+            htmlWithTableSlice(nextHtml, rows.slice(0, need), false, need >= rows.length),
+          ),
+        );
+      }
+      if (canSplitList(next.kind)) {
+        const items = listPieces(nextHtml);
+        if (!items?.length) return false;
+        const need = Math.min(items.length, Math.max(2, Math.ceil(items.length * 0.34)));
+        return paint(
+          base.concat(headingHtmls, htmlWithListSlice(nextHtml, items.slice(0, need), 0, false)),
+        );
+      }
+      if (canSplitBlock(next.kind)) {
+        const words = wordsFromHtml(nextHtml);
+        if (!words.length) return false;
+        const need = Math.min(words.length, Math.max(28, Math.ceil(words.length * 0.34)));
+        return paint(base.concat(headingHtmls, htmlWithWords(nextHtml, words.slice(0, need))));
+      }
+      return false;
+    };
+
+    for (let bi = 0; bi < blocks.length; bi += 1) {
+      const block = blocks[bi];
+      const full = htmlForBlock(block, opts.openIds);
+      if (isChapterStart(block.kind, full)) endPage();
+      if (current.length && isSectionHeading(block.kind) && !isChapterStart(block.kind, full)) {
+        let runEnd = bi;
+        const headingHtmls = [full];
+        while (
+          runEnd + 1 < blocks.length &&
+          isSectionHeading(blocks[runEnd + 1].kind) &&
+          !isChapterStart(blocks[runEnd + 1].kind, blocks[runEnd + 1].html)
+        ) {
+          runEnd += 1;
+          headingHtmls.push(htmlForBlock(blocks[runEnd], opts.openIds));
+        }
+        if (!(await headingKeepsFollowing(current, headingHtmls, blocks[runEnd + 1]))) endPage();
+      }
+
+      if (await paint(current.concat(full))) {
+        current.push(full);
+        continue;
+      }
+      if (await fillOverflow(full, block.kind)) continue;
       if (current.length) {
         pages.push(current);
         current = [];
@@ -346,6 +785,7 @@ async function paginateByMeasure(
         current.push(full);
         continue;
       }
+      if (await fillOverflow(full, block.kind)) continue;
       if (canSplitBlock(block.kind)) {
         await emitWords(full, wordsFromHtml(full));
       } else {
@@ -355,6 +795,40 @@ async function paginateByMeasure(
       }
     }
     if (current.length) pages.push(current);
+
+    const htmlStartsChapter = (html: string) => {
+      if (isCoverHtml(html)) return true;
+      if (/<h1\b/i.test(html)) return true;
+      const match = html.match(/<h([23])[^>]*>([\s\S]*?)<\/h\1>/i);
+      if (!match) return false;
+      const text = match[2]
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return /^chapter\s+\d+/i.test(text);
+    };
+
+    for (let i = 0; i < pages.length - 1; i += 1) {
+      if (!pages[i].length || isCoverHtml(pages[i].join(''))) continue;
+      while (pages[i + 1]?.length) {
+        const nextHtml = pages[i + 1][0];
+        if (htmlStartsChapter(nextHtml) || /is-table-continued/.test(nextHtml)) break;
+        const nextIsHeading = /^<(h[1-4]|p\b[^>]*course-kicker)/i.test(nextHtml.trim());
+        if (nextIsHeading) {
+          const follow = pages[i + 1][1];
+          if (!follow || !(await paint(pages[i].concat(nextHtml, follow)))) break;
+          pages[i].push(pages[i + 1].shift() as string);
+          pages[i].push(pages[i + 1].shift() as string);
+          continue;
+        }
+        if (!(await paint(pages[i].concat(nextHtml)))) break;
+        pages[i].push(pages[i + 1].shift() as string);
+      }
+      if (pages[i + 1] && !pages[i + 1].length) {
+        pages.splice(i + 1, 1);
+        i -= 1;
+      }
+    }
   } finally {
     host.remove();
   }
@@ -393,6 +867,72 @@ function htmlToText(html: string) {
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function pagePlainText(pieces: string[]) {
+  return foldSearch(htmlToText(pieces.join(' ')));
+}
+
+function readingPlaceAnchor(pages: string[][], pageIndex: number) {
+  const pieces = pages[pageIndex];
+  if (!pieces?.length) return null;
+  const html = pieces.join('');
+  if (isCoverHtml(html)) {
+    return {
+      cover: true,
+      coverSrc: coverImageSrc(html) || '',
+      edge: (pageIndex === 0 ? 'front' : 'back') as 'front' | 'back',
+      text: '',
+    };
+  }
+  const text = pagePlainText(pieces).slice(0, 120);
+  if (text.length < 8) return null;
+  return { cover: false, coverSrc: '', edge: 'front' as const, text };
+}
+
+function pageIndexForAnchor(
+  pages: string[][],
+  anchor: { cover: boolean; coverSrc: string; edge: 'front' | 'back'; text: string },
+  hint: number,
+  prevCount: number,
+) {
+  const last = Math.max(0, pages.length - 1);
+  const proportional =
+    prevCount > 1 && pages.length > 1
+      ? Math.round((Math.min(Math.max(0, hint), prevCount - 1) / (prevCount - 1)) * last)
+      : Math.min(Math.max(0, hint), last);
+  if (anchor.cover) {
+    const found = pages.findIndex((pieces, i) => {
+      const html = pieces.join('');
+      if (!isCoverHtml(html)) return false;
+      const src = coverImageSrc(html) || '';
+      if (anchor.coverSrc && src !== anchor.coverSrc) return false;
+      if (anchor.edge === 'front') return i === 0;
+      return i === pages.length - 1;
+    });
+    if (found >= 0) return found;
+    return anchor.edge === 'back' ? last : 0;
+  }
+  if (!anchor.text) return proportional;
+  const needleSource = anchor.text;
+  const lengths = [120, 80, 48, 28, 16];
+  for (const len of lengths) {
+    const needle = needleSource.slice(0, Math.min(len, needleSource.length));
+    if (needle.length < 10) break;
+    let best = -1;
+    let bestScore = Number.POSITIVE_INFINITY;
+    pages.forEach((pieces, i) => {
+      const at = pagePlainText(pieces).indexOf(needle);
+      if (at < 0) return;
+      const score = at * 100000 + Math.abs(i - proportional);
+      if (score < bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    });
+    if (best >= 0) return best;
+  }
+  return proportional;
 }
 
 function significantSearchWords(folded: string) {
@@ -628,6 +1168,96 @@ function tocFromPages(pages: string[][], startPage: number, coverShift = 0) {
   return items;
 }
 
+function tocCoverKey(item: { title: string; page: number }) {
+  return `${item.page}::${item.title}`;
+}
+
+function tocDescendantKeys(
+  items: { title: string; level: number; page: number }[],
+  index: number,
+) {
+  const parent = items[index];
+  if (!parent) return [] as string[];
+  const keys: string[] = [];
+  for (let i = index + 1; i < items.length; i += 1) {
+    if (items[i].level <= parent.level) break;
+    keys.push(tocCoverKey(items[i]));
+  }
+  return keys;
+}
+
+function coveredStoreKey(chapterId?: number, chapterSlug?: string) {
+  return `vv_toc_checked:${chapterId || chapterSlug || 'anon'}`;
+}
+
+function ReaderBackIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        d="M15.2 5.2 8.4 12l6.8 6.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function readCoveredSet(storeKey: string) {
+  if (typeof window === 'undefined') return new Set<string>();
+  try {
+    const raw = window.localStorage.getItem(storeKey);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set<string>(Array.isArray(arr) ? arr.map(String) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function TocTopicRow({
+  item,
+  current,
+  done,
+  onOpen,
+  onToggleCovered,
+}: {
+  item: { title: string; level: number; page: number };
+  current?: boolean;
+  done?: boolean;
+  onOpen: () => void;
+  onToggleCovered: () => void;
+}) {
+  return (
+    <div
+      className={`course-toc-item is-level-${item.level}${current ? ' is-on' : ''}${done ? ' is-done' : ''}`}
+      style={{ ['--toc-depth' as string]: String(Math.max(0, item.level - 1)) }}
+    >
+      <button
+        type="button"
+        className="course-toc-tick"
+        aria-pressed={Boolean(done)}
+        aria-label={done ? `Unmark ${item.title}` : `Mark ${item.title}`}
+        title={done ? 'Uncheck this topic' : 'Mark this topic'}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleCovered();
+        }}
+      />
+      <button
+        type="button"
+        className="course-toc-link"
+        aria-label={`${item.title}, page ${item.page}`}
+        onClick={onOpen}
+      >
+        <span className="course-toc-title">{item.title}</span>
+        <span className="course-toc-page">{item.page}</span>
+      </button>
+    </div>
+  );
+}
+
 function searchPages(pages: string[][], startPage: number, query: string, coverShift = 0) {
   const needle = foldSearch(query);
   if (needle.length < 2) return [] as { snippet: string; page: number; anchor: string }[];
@@ -660,6 +1290,308 @@ function searchPages(pages: string[][], startPage: number, query: string, coverS
   return hits;
 }
 
+function selectionPaintRects(root: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
+  const origin = root.getBoundingClientRect();
+  return Array.from(sel.getRangeAt(0).getClientRects())
+    .filter((box) => box.width >= 1 && box.height >= 1)
+    .map((box) => ({
+      left: box.left - origin.left,
+      top: box.top - origin.top,
+      width: box.width,
+      height: box.height,
+    }));
+}
+
+function eventElement(target: EventTarget | Node | null): HTMLElement | null {
+  if (!target) return null;
+  if (target instanceof HTMLElement) return target;
+  if (target instanceof Element) return target.parentElement;
+  if (target instanceof Node) return target.parentElement;
+  return null;
+}
+
+function restorePhraseSelection(root: HTMLElement, phrase: string) {
+  const folded = foldText(phrase);
+  if (folded.length < 2) return false;
+  const marks = Array.from(root.querySelectorAll('mark.course-mark')) as HTMLElement[];
+  const mark = marks.find((el) => {
+    const hay = foldText(el.textContent || '');
+    return hay === folded || hay.includes(folded) || (folded.length >= 8 && folded.includes(hay));
+  });
+  try {
+    const range = document.createRange();
+    if (mark) {
+      range.selectNodeContents(mark);
+    } else {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes: Text[] = [];
+      while (walker.nextNode()) {
+        const node = walker.currentNode as Text;
+        if (!node.nodeValue || node.parentElement?.closest('script, style')) continue;
+        nodes.push(node);
+      }
+      const { hay, map } = buildHighlightIndex(nodes);
+      const hit = locateHighlight(hay, phrase, false)[0];
+      if (!hit || !map[hit.at] || !map[hit.at + hit.len - 1]) return false;
+      const start = map[hit.at];
+      const end = map[hit.at + hit.len - 1];
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset + 1);
+    }
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function collapseQuickBlocks(html: string) {
+  if (!html || typeof document === 'undefined' || !/course-quick-block/.test(html)) return html;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.course-quick-block').forEach((el, i) => {
+    if (el.querySelector('.course-quick-icon-btn')) return;
+    const kind = el.getAttribute('data-kind') === 'mcq' ? 'Quiz' : 'Quick check';
+    const slug = (el.textContent || '').replace(/[^a-z0-9]+/gi, '').slice(0, 24);
+    const id = el.getAttribute('data-quick-id') || `quick-${i}-${slug}`;
+    el.setAttribute('data-quick-id', id);
+    el.classList.add('is-collapsed');
+    const inner = el.innerHTML.trim();
+    el.innerHTML = `<button type="button" class="course-quick-icon-btn" aria-expanded="false" aria-label="${kind}"><span class="course-quick-icon" aria-hidden="true"></span><span class="course-quick-icon-label">${kind}</span></button><template class="course-quick-expand">${inner}</template>`;
+  });
+  groupAdjacentQuizzes(wrap);
+  return wrap.innerHTML;
+}
+
+function groupAdjacentQuizzes(root: HTMLElement) {
+  const sequence: Array<{ kind: 'quiz' | 'other'; el?: HTMLElement }> = [];
+  const walk = (parent: Element) => {
+    Array.from(parent.children).forEach((child) => {
+      if (child.classList.contains('course-quick-block')) {
+        sequence.push({ kind: 'quiz', el: child as HTMLElement });
+        return;
+      }
+      if (child.querySelector('.course-quick-block')) {
+        walk(child);
+        return;
+      }
+      const hasContent =
+        Boolean((child.textContent || '').trim()) || Boolean(child.querySelector('img, table, svg, figure'));
+      if (hasContent) sequence.push({ kind: 'other' });
+    });
+  };
+  walk(root);
+  const groups: HTMLElement[][] = [];
+  let current: HTMLElement[] = [];
+  sequence.forEach((item) => {
+    if (item.kind === 'quiz' && item.el) {
+      current.push(item.el);
+      return;
+    }
+    if (current.length) groups.push(current);
+    current = [];
+  });
+  if (current.length) groups.push(current);
+  groups.forEach((group) => {
+    if (group.length < 2) return;
+    const gid = `qg-${group[0].getAttribute('data-quick-id') || 'stack'}`;
+    group.forEach((el, i) => {
+      el.setAttribute('data-quick-group', gid);
+      el.setAttribute('data-quick-group-index', String(i));
+      if (i > 0) {
+        el.classList.add('is-grouped-hidden');
+        return;
+      }
+      el.classList.add('is-quiz-stack');
+      const label = el.querySelector('.course-quick-icon-label');
+      if (label) label.textContent = `Quiz · ${group.length}`;
+      const btn = el.querySelector('.course-quick-icon-btn');
+      if (btn) {
+        btn.setAttribute('aria-label', `${group.length} quizzes`);
+      }
+    });
+  });
+}
+
+function quickFromBlock(
+  block: HTMLElement,
+  expand?: HTMLTemplateElement | HTMLElement | null,
+): {
+  id: string;
+  answer: number;
+  html: string;
+  checked: boolean;
+  picked: string | null;
+} {
+  const src =
+    expand ||
+    (block.querySelector('.course-quick-expand') as HTMLTemplateElement | HTMLElement | null);
+  return {
+    id: block.getAttribute('data-quick-id') || '',
+    answer: Number(block.getAttribute('data-answer') || 0),
+    html: src?.innerHTML || '',
+    checked: block.classList.contains('is-checked'),
+    picked: block.getAttribute('data-picked'),
+  };
+}
+
+function wrapPagePieces(pieces: string[]) {
+  return collapseQuickBlocks(
+    pieces
+      .map((html) => {
+        if (!html) return '';
+        if (isCoverHtml(html) || /course-select-block/.test(html)) return html;
+        return `<div class="course-select-block">${html}</div>`;
+      })
+      .join(''),
+  );
+}
+
+const SELECT_BLOCK =
+  'p, h1, h2, h3, h4, li, td, th, figcaption, dt, dd, pre, blockquote, .course-formula, .course-kicker, .course-select-block';
+
+function selectionIsland(node: Node | null) {
+  const el = node instanceof Element ? node : node?.parentElement;
+  if (!el) return null;
+  const body = el.closest('.course-book-body') as HTMLElement | null;
+  if (!body) return null;
+  const block = el.closest(SELECT_BLOCK) as HTMLElement | null;
+  if (block && body.contains(block) && block !== body) return block;
+  const wrapped = el.closest('.course-select-block') as HTMLElement | null;
+  if (wrapped && body.contains(wrapped)) return wrapped;
+  return null;
+}
+
+function nearestTextBlock(body: HTMLElement, clientY: number) {
+  const blocks = Array.from(body.querySelectorAll(SELECT_BLOCK)) as HTMLElement[];
+  if (!blocks.length) return null;
+  let inside: HTMLElement | null = null;
+  let insideH = Number.POSITIVE_INFINITY;
+  let below: HTMLElement | null = null;
+  let belowDist = Number.POSITIVE_INFINITY;
+  let above: HTMLElement | null = null;
+  let aboveDist = Number.POSITIVE_INFINITY;
+  for (const el of blocks) {
+    if (el.closest(SELECT_BLOCK) !== el) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.height <= 0) continue;
+    if (clientY >= rect.top && clientY <= rect.bottom) {
+      if (rect.height <= insideH) {
+        inside = el;
+        insideH = rect.height;
+      }
+      continue;
+    }
+    if (clientY < rect.top) {
+      const dist = rect.top - clientY;
+      if (dist < belowDist) {
+        below = el;
+        belowDist = dist;
+      }
+    } else {
+      const dist = clientY - rect.bottom;
+      if (dist < aboveDist) {
+        above = el;
+        aboveDist = dist;
+      }
+    }
+  }
+  if (inside) return inside;
+  if (below && belowDist <= aboveDist + 8) return below;
+  return above || below;
+}
+
+function islandFromPoint(x: number, y: number, root: HTMLElement | null) {
+  if (!root) return null;
+  const hit = document.elementFromPoint(x, y) as HTMLElement | null;
+  if (!hit || !root.contains(hit)) return null;
+  const direct = selectionIsland(hit);
+  if (direct) return direct;
+  const body = hit.closest('.course-book-body') as HTMLElement | null;
+  if (!body || !root.contains(body)) return null;
+  return nearestTextBlock(body, y);
+}
+
+function caretFromPoint(x: number, y: number) {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  if (typeof doc.caretPositionFromPoint === 'function') {
+    const pos = doc.caretPositionFromPoint(x, y);
+    if (pos?.offsetNode) return { node: pos.offsetNode, offset: pos.offset };
+  }
+  if (typeof doc.caretRangeFromPoint === 'function') {
+    const range = doc.caretRangeFromPoint(x, y);
+    if (range) return { node: range.startContainer, offset: range.startOffset };
+  }
+  return null;
+}
+
+function islandEdge(island: HTMLElement, which: 'start' | 'end') {
+  const range = document.createRange();
+  range.selectNodeContents(island);
+  if (which === 'start') return { node: range.startContainer, offset: range.startOffset };
+  return { node: range.endContainer, offset: range.endOffset };
+}
+
+function caretInIsland(island: HTMLElement, x: number, y: number) {
+  const caret = caretFromPoint(x, y);
+  if (caret && (caret.node === island || island.contains(caret.node))) return caret;
+  const rect = island.getBoundingClientRect();
+  if (y < rect.top + 1) return islandEdge(island, 'start');
+  if (y > rect.bottom - 1) return islandEdge(island, 'end');
+  if (x <= rect.left + 1) return islandEdge(island, 'start');
+  return islandEdge(island, 'end');
+}
+
+function applyCaretSelection(
+  start: { node: Node; offset: number },
+  end: { node: Node; offset: number },
+) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  try {
+    sel.setBaseAndExtent(start.node, start.offset, end.node, end.offset);
+  } catch {
+    try {
+      const range = document.createRange();
+      range.setStart(start.node, start.offset);
+      range.setEnd(end.node, end.offset);
+      if (range.collapsed) {
+        range.setStart(end.node, end.offset);
+        range.setEnd(start.node, start.offset);
+      }
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function expandWordInIsland(island: HTMLElement, x: number, y: number) {
+  const caret = caretInIsland(island, x, y);
+  if (caret.node.nodeType !== Node.TEXT_NODE) {
+    applyCaretSelection(islandEdge(island, 'start'), islandEdge(island, 'end'));
+    return;
+  }
+  const text = caret.node.textContent || '';
+  let start = caret.offset;
+  let end = caret.offset;
+  while (start > 0 && /[\p{L}\p{N}]/u.test(text[start - 1] || '')) start -= 1;
+  while (end < text.length && /[\p{L}\p{N}]/u.test(text[end] || '')) end += 1;
+  if (end <= start) {
+    applyCaretSelection(islandEdge(island, 'start'), islandEdge(island, 'end'));
+    return;
+  }
+  applyCaretSelection({ node: caret.node, offset: start }, { node: caret.node, offset: end });
+}
+
 function selectedText() {
   if (typeof window === 'undefined') return '';
   return (window.getSelection()?.toString() || '').replace(/\s+/g, ' ').trim();
@@ -682,15 +1614,11 @@ type StudyState = {
 
 const OPEN_BOOK_MIN_WIDTH = 1200;
 
+/** Printed leaf. Pagination always uses this box, so laptop and tablet show the same pages. */
+const _PDF_LEAF = { w: 418, h: 888 };
+
 type CourseChapterLink = { slug: string; title: string };
 type CourseSpread = { left: number | null; right: number | null };
-
-function isTabletLikeViewport() {
-  if (typeof window === 'undefined') return false;
-  const coarse = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-  const shortest = Math.min(window.innerWidth, window.innerHeight);
-  return coarse && shortest >= 600 && shortest <= 1180;
-}
 
 function courseSpreads(pageCount: number, _startPage: number): CourseSpread[] {
   const spreads: CourseSpread[] = [];
@@ -709,55 +1637,99 @@ function spreadIndexFor(spreads: CourseSpread[], pageIndex: number) {
   return found < 0 ? 0 : found;
 }
 
-function useBookPageSize(slot: React.RefObject<HTMLElement | null>, leaves: 1 | 2) {
+function useBookPageSize(
+  slot: React.RefObject<HTMLElement | null>,
+  leaves: 1 | 2,
+  fill = false,
+) {
   const [size, setSize] = React.useState({ w: 480, h: 680 });
+  const [live, setLive] = React.useState({ w: 480, h: 680 });
+  const fillRef = React.useRef(fill);
+  fillRef.current = fill;
   React.useEffect(() => {
-    const update = () => {
+    const measure = (fullscreenBox: boolean) => {
       const el = slot.current;
       const slotH = el?.clientHeight || 0;
       const slotW = el?.clientWidth || 0;
-      // Use content box so page never draws under side gutters/padding
       const cs = el ? getComputedStyle(el) : null;
       const padX = cs ? (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) : 0;
       const contentW = Math.max(0, slotW - padX);
-      const maxH = Math.max(280, slotH || Math.round(window.innerHeight * 0.72));
-      const maxW = Math.max(240, contentW || Math.min(window.innerWidth - 120, 720));
+      const maxH = Math.max(280, slotH || Math.round(window.innerHeight * (fullscreenBox ? 0.92 : 0.72)));
+      const maxW = Math.max(
+        240,
+        contentW || Math.min(window.innerWidth - (fullscreenBox ? 48 : 120), fullscreenBox ? window.innerWidth : 720),
+      );
       const gutter = leaves === 2 ? 14 : 0;
       const maxLeaf = leaves === 2 ? 680 : 720;
       let width = (maxW - gutter) / leaves;
-      if (width > maxLeaf) width = maxLeaf;
-      setSize({ w: Math.round(width), h: Math.round(maxH) });
+      if (!fullscreenBox && width > maxLeaf) width = maxLeaf;
+      return { w: Math.round(Math.max(80, width)), h: Math.round(maxH) };
+    };
+    const nativeFullscreen = () => {
+      const native = document.fullscreenElement || (document as any).webkitFullscreenElement;
+      return !!(native && slot.current && native.contains(slot.current));
+    };
+    const update = () => {
+      const inFullscreen = fillRef.current || nativeFullscreen();
+      const nextLive = measure(inFullscreen);
+      setLive((prev) => (prev.w === nextLive.w && prev.h === nextLive.h ? prev : nextLive));
+      if (inFullscreen) return;
+      const next = measure(false);
+      setSize((prev) => (prev.w === next.w && prev.h === next.h ? prev : next));
     };
     update();
     const el = slot.current;
     const ro = el ? new ResizeObserver(() => update()) : null;
     if (el && ro) ro.observe(el);
     window.addEventListener('resize', update);
+    document.addEventListener('fullscreenchange', update);
+    document.addEventListener('webkitfullscreenchange', update);
     const later = window.setTimeout(update, 50);
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', update);
+      document.removeEventListener('fullscreenchange', update);
+      document.removeEventListener('webkitfullscreenchange', update);
       window.clearTimeout(later);
     };
   }, [leaves, slot]);
-  return size;
+  return { read: size, live };
 }
 
-function useWideCourseReader() {
-  const [wide, setWide] = React.useState(
-    () =>
-      typeof window !== 'undefined' &&
-      window.innerWidth >= OPEN_BOOK_MIN_WIDTH &&
-      !isTabletLikeViewport(),
+type CourseReaderLayout = 'phone' | 'tablet' | 'desktop';
+
+function readCourseReaderLayout(): CourseReaderLayout {
+  if (typeof window === 'undefined') return 'desktop';
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const shortest = Math.min(w, h);
+  const coarse = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (w >= OPEN_BOOK_MIN_WIDTH && h >= 760 && !(coarse && shortest <= 1180)) return 'desktop';
+  if (w >= 600 && h >= 600) return 'tablet';
+  return 'phone';
+}
+
+function useCourseReaderLayout() {
+  const [layout, setLayout] = React.useState<CourseReaderLayout>(() =>
+    typeof window === 'undefined' ? 'desktop' : readCourseReaderLayout(),
+  );
+  const [width, setWidth] = React.useState(() =>
+    typeof window === 'undefined' ? 1440 : window.innerWidth,
   );
   React.useEffect(() => {
-    const update = () =>
-      setWide(window.innerWidth >= OPEN_BOOK_MIN_WIDTH && !isTabletLikeViewport());
+    const update = () => {
+      setLayout(readCourseReaderLayout());
+      setWidth(window.innerWidth);
+    };
     update();
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
   }, []);
-  return wide;
+  return { layout, width };
 }
 
 export default function CourseBookReader({
@@ -770,7 +1742,8 @@ export default function CourseBookReader({
   chapterSlug,
   chapters = [],
   practiceHref,
-  notesHref,
+  practiceActivity = null,
+  notesHref: _notesHref,
   prevChapter,
   nextChapter,
   startPage = 1,
@@ -781,6 +1754,8 @@ export default function CourseBookReader({
   frontCoverUrl,
   backCoverUrl,
   onReadingPage,
+  initialNotesOpen = false,
+  bookKey = '',
 }: {
   html: string;
   header: string;
@@ -791,6 +1766,7 @@ export default function CourseBookReader({
   chapterSlug?: string;
   chapters?: CourseChapterLink[];
   practiceHref?: string | null;
+  practiceActivity?: any | null;
   notesHref?: string | null;
   prevChapter?: CourseChapterLink | null;
   nextChapter?: CourseChapterLink | null;
@@ -802,10 +1778,15 @@ export default function CourseBookReader({
   frontCoverUrl?: string | null;
   backCoverUrl?: string | null;
   onReadingPage?: (page: number) => void;
+  initialNotesOpen?: boolean;
+  bookKey?: string;
 }) {
   const [index, setIndex] = React.useState(0);
   const [pages, setPages] = React.useState<string[][]>([['<p>Loading…</p>']]);
-  const wide = useWideCourseReader();
+  const { layout, width: viewportW } = useCourseReaderLayout();
+  const wide = layout === 'desktop';
+  const tablet = layout === 'tablet';
+  const shelf = wide || tablet;
   const [wantSpread, setWantSpread] = React.useState(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -820,7 +1801,11 @@ export default function CourseBookReader({
     notes: [],
     highlights: [],
   });
+  const [userFlashcards, setUserFlashcards] = React.useState<CourseFlashcard[]>([]);
   const [picked, setPicked] = React.useState('');
+  const [selRects, setSelRects] = React.useState<
+    { left: number; top: number; width: number; height: number }[]
+  >([]);
   const [ink, setInk] = React.useState(HIGHLIGHTER_COLORS[0]);
   const [openExplains, setOpenExplains] = React.useState<string[]>([]);
   const [ribbonPage, setRibbonPage] = React.useState<number | null>(null);
@@ -858,9 +1843,52 @@ export default function CourseBookReader({
   });
   const [leftTab, setLeftTab] = React.useState<'contents' | 'bookmarks' | 'notes'>('contents');
   const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [bookFullscreen, setBookFullscreen] = React.useState(false);
+  const [cssFullscreen, setCssFullscreen] = React.useState(false);
+  const [notesFullscreen, setNotesFullscreen] = React.useState(initialNotesOpen);
+  const [practiceFullscreen, setPracticeFullscreen] = React.useState(false);
+  const [flashDeckOpen, setFlashDeckOpen] = React.useState(false);
+  const [openQuick, setOpenQuick] = React.useState<{
+    items: {
+      id: string;
+      answer: number;
+      html: string;
+      checked: boolean;
+      picked: string | null;
+    }[];
+    index: number;
+  } | null>(null);
+  const [openFlash, setOpenFlash] = React.useState<{ front: string; back: string } | null>(null);
+  const [flashFlipped, setFlashFlipped] = React.useState(false);
+  const [flashEntering, setFlashEntering] = React.useState(false);
+  const coveredKey = coveredStoreKey(chapterId, chapterSlug);
+  const [covered, setCovered] = React.useState<Set<string>>(() => readCoveredSet(coveredKey));
   const [query, setQuery] = React.useState('');
   const [noteQuote, setNoteQuote] = React.useState('');
   const lastSelection = React.useRef('');
+  const selectIslandRef = React.useRef<HTMLElement | null>(null);
+  const restoreSelRef = React.useRef<string | null>(null);
+  const holdSelectionRef = React.useRef(false);
+  const dragSelRef = React.useRef<{
+    island: HTMLElement;
+    start: { node: Node; offset: number };
+  } | null>(null);
+  const pageTurnLockRef = React.useRef(0);
+  const wheelGestureRef = React.useRef(false);
+  const goSpreadRef = React.useRef<(delta: number) => void>(() => {});
+  const flipLockRef = React.useRef(false);
+  const flipTimerRef = React.useRef(0);
+  const markedPagesRef = React.useRef<string[]>([]);
+  const [flip, setFlip] = React.useState<null | {
+    dir: 1 | -1;
+    frontIndex: number;
+    backIndex: number;
+    underLeft: number | null;
+    underRight: number | null;
+    solo: boolean;
+  }>(null);
+  const setSelRectsRef = React.useRef(setSelRects);
+  setSelRectsRef.current = setSelRects;
   const searchRef = React.useRef<HTMLInputElement>(null);
 
   const interactives = React.useMemo(
@@ -896,7 +1924,24 @@ export default function CourseBookReader({
     fetchChapterStudy(chapterId)
       .then(setStudy)
       .catch(() => {});
+    fetchChapterFlashcards(chapterId)
+      .then(setUserFlashcards)
+      .catch(() => setUserFlashcards([]));
   }, [chapterId]);
+
+  const bookFlashcards = React.useMemo(() => flashcardsFromHtml(html), [html]);
+  const chapterFlashcards = React.useMemo(() => {
+    const seen = new Set(bookFlashcards.map((card) => card.front.toLowerCase()));
+    return [
+      ...bookFlashcards,
+      ...userFlashcards.filter((card) => {
+        const key = (card.front || '').trim().toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }),
+    ];
+  }, [bookFlashcards, userFlashcards]);
 
   React.useEffect(() => {
     try {
@@ -910,11 +1955,17 @@ export default function CourseBookReader({
 
   const htmlRef = React.useRef<string | null>(null);
   const explainAnchor = React.useRef<string | null>(null);
+  const pagesRef = React.useRef(pages);
+  const indexRef = React.useRef(index);
+  pagesRef.current = pages;
+  indexRef.current = index;
   const bookRef = React.useRef<HTMLDivElement | null>(null);
   const slotRef = React.useRef<HTMLDivElement | null>(null);
+  const stageRef = React.useRef<HTMLDivElement | null>(null);
   const toolsScrollRef = React.useRef<HTMLDivElement | null>(null);
   const revealRef = React.useRef<(next: Omit<BookReveal, 'token'>) => void>(() => {});
-  const spread = wide && wantSpread;
+  const spread = wantSpread && (wide || (tablet && viewportW >= 1024));
+  const spreadRef = React.useRef(spread);
   const spreads = React.useMemo(
     () => courseSpreads(pages.length, startPage),
     [pages.length, startPage],
@@ -924,68 +1975,316 @@ export default function CourseBookReader({
     ? spreads[spreadAt] || { left: index, right: null }
     : { left: index, right: null };
   const soloLeaf = !spread || openSpread.left == null || openSpread.right == null;
-  const a4 = useBookPageSize(slotRef, spread ? 2 : 1);
+  const coverPageIndex =
+    !spread || soloLeaf ? (spread ? (openSpread.left ?? openSpread.right ?? index) : index) : null;
+  const coverHtml = coverPageIndex != null ? pages[coverPageIndex]?.join('') || '' : '';
+  const coverSrc =
+    coverHtml && isCoverHtml(coverHtml) ? coverImageSrc(coverHtml) || frontCoverUrl || null : null;
+  const pageFit = useBookPageSize(slotRef, spread ? 2 : 1, bookFullscreen);
+  const a4 = pageFit.read;
   const imgMax = Math.max(110, Math.round(a4.h * 0.26));
+  const layoutBookW = spread && !soloLeaf ? a4.w * 2 + 14 : a4.w;
+  const pageScale =
+    bookFullscreen && a4.w > 0 && a4.h > 0
+      ? Math.max(0.2, Math.min(pageFit.live.w / a4.w, pageFit.live.h / a4.h))
+      : 1;
+  const visualBookW = Math.round(layoutBookW * pageScale);
+  const visualBookH = Math.round(a4.h * pageScale);
   const goSpread = React.useCallback(
     (delta: number) => {
+      if (flipLockRef.current) return;
+      const flippingIndex =
+        !spread || soloLeaf
+          ? index
+          : delta > 0
+            ? (openSpread.right ?? openSpread.left ?? index)
+            : (openSpread.left ?? openSpread.right ?? index);
+      const commit = (target: number) => {
+        setIndex(target);
+        setToolIndex(target);
+      };
+      const beginFlip = (motion: {
+        dir: 1 | -1;
+        frontIndex: number;
+        backIndex: number;
+        underLeft: number | null;
+        underRight: number | null;
+        nextIndex: number;
+        solo: boolean;
+      }) => {
+        const reduced =
+          typeof window !== 'undefined' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduced) {
+          commit(motion.nextIndex);
+          return;
+        }
+        flipLockRef.current = true;
+        pageTurnLockRef.current = Date.now() + 460;
+        setFlip({
+          dir: motion.dir,
+          frontIndex: motion.frontIndex,
+          backIndex: motion.backIndex,
+          underLeft: motion.underLeft,
+          underRight: motion.underRight,
+          solo: motion.solo,
+        });
+        window.clearTimeout(flipTimerRef.current);
+        flipTimerRef.current = window.setTimeout(() => {
+          commit(motion.nextIndex);
+          setFlip(null);
+          flipLockRef.current = false;
+        }, 400);
+      };
       if (!spread) {
-        setIndex((i) => Math.min(pages.length - 1, Math.max(0, i + delta)));
+        const next = Math.min(pages.length - 1, Math.max(0, index + delta));
+        if (next === index) return;
+        beginFlip({
+          dir: delta > 0 ? 1 : -1,
+          frontIndex: index,
+          backIndex: next,
+          underLeft: next,
+          underRight: null,
+          nextIndex: next,
+          solo: true,
+        });
         return;
       }
       const nextAt = Math.min(spreads.length - 1, Math.max(0, spreadAt + delta));
-      const next = spreads[nextAt];
-      const target = next?.left ?? next?.right ?? 0;
-      setIndex(target);
-      setToolIndex(target);
+      if (nextAt === spreadAt) return;
+      const dest = spreads[nextAt] || { left: index, right: null };
+      const current = spreads[spreadAt] || { left: openSpread.left, right: openSpread.right };
+      const goingNext = delta > 0;
+      const soloNow = current.left == null || current.right == null;
+      const nextIndex = dest.left ?? dest.right ?? 0;
+      beginFlip({
+        dir: goingNext ? 1 : -1,
+        frontIndex: goingNext
+          ? (current.right ?? current.left ?? flippingIndex)
+          : (current.left ?? current.right ?? flippingIndex),
+        backIndex: goingNext
+          ? (dest.left ?? dest.right ?? nextIndex)
+          : (dest.right ?? dest.left ?? nextIndex),
+        underLeft: soloNow ? nextIndex : goingNext ? current.left : dest.left,
+        underRight: soloNow ? null : goingNext ? (dest.right ?? dest.left) : current.right,
+        nextIndex,
+        solo: soloNow,
+      });
     },
-    [spread, spreadAt, spreads, pages.length],
+    [
+      spread,
+      soloLeaf,
+      index,
+      openSpread.left,
+      openSpread.right,
+      spreadAt,
+      spreads,
+      pages.length,
+    ],
   );
+  goSpreadRef.current = goSpread;
+
+  React.useEffect(
+    () => () => {
+      window.clearTimeout(flipTimerRef.current);
+      flipLockRef.current = false;
+    },
+    [],
+  );
+
+  const exitBookFullscreen = React.useCallback(async () => {
+    setCssFullscreen(false);
+    setBookFullscreen(false);
+    const native = document.fullscreenElement || (document as any).webkitFullscreenElement;
+    if (!native) return;
+    try {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if ((document as any).webkitExitFullscreen) await (document as any).webkitExitFullscreen();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toggleBookFullscreen = React.useCallback(async () => {
+    if (bookFullscreen) {
+      await exitBookFullscreen();
+      return;
+    }
+    const el = stageRef.current;
+    if (!el) return;
+    try {
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else if ((el as any).webkitRequestFullscreen) await (el as any).webkitRequestFullscreen();
+      else throw new Error('no_fs');
+      setBookFullscreen(true);
+    } catch {
+      setCssFullscreen(true);
+      setBookFullscreen(true);
+    }
+  }, [bookFullscreen, exitBookFullscreen]);
+
+  const openNotesFullscreen = React.useCallback(async () => {
+    if (bookFullscreen) await exitBookFullscreen();
+    setPracticeFullscreen(false);
+    setFlashDeckOpen(false);
+    setNotesFullscreen(true);
+  }, [bookFullscreen, exitBookFullscreen]);
+
+  React.useEffect(() => {
+    const handleToggle = () => {
+      setNotesFullscreen((prev) => !prev);
+    };
+    window.addEventListener('vv-toggle-reader-notes', handleToggle);
+    return () => window.removeEventListener('vv-toggle-reader-notes', handleToggle);
+  }, []);
+
+  React.useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('vv-reader-notes-state', { detail: { open: notesFullscreen } }),
+    );
+  }, [notesFullscreen]);
+
+  React.useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.location.pathname.includes('/read')) {
+        window.sessionStorage.setItem('vv_last_read_href', window.location.pathname + window.location.search);
+      }
+    } catch {
+      // ignore storage access errors
+    }
+  }, [chapterSlug, index]);
+
+  const openPracticePopup = React.useCallback(() => {
+    setNotesFullscreen(false);
+    setSheetOpen(false);
+    setOpenQuick(null);
+    setOpenFlash(null);
+    setFlashDeckOpen(false);
+    setPanel((prev) => (prev === 'check' ? 'highlights' : prev));
+    setPracticeFullscreen(true);
+  }, []);
+
+  const openFlashDeck = React.useCallback(() => {
+    setNotesFullscreen(false);
+    setSheetOpen(false);
+    setOpenQuick(null);
+    setOpenFlash(null);
+    setPracticeFullscreen(false);
+    setFlashDeckOpen(true);
+  }, []);
+
+  React.useEffect(() => {
+    const current = openQuick?.items[openQuick.index];
+    if (!current?.checked || !stageRef.current) return;
+    const quiz = stageRef.current.querySelector(
+      '.course-quick-popup .course-quick-block',
+    ) as HTMLElement | null;
+    if (!quiz) return;
+    const picked = Number(current.picked);
+    const answer = current.answer;
+    quiz.classList.add('is-checked');
+    quiz.querySelectorAll('[data-opt]').forEach((btn) => {
+      const i = Number(btn.getAttribute('data-opt'));
+      btn.classList.toggle('is-on', i === picked);
+      btn.classList.toggle('is-right', i === answer);
+      btn.classList.toggle('is-wrong', i === picked && i !== answer);
+    });
+  }, [openQuick]);
+
+  React.useEffect(() => {
+    if (!notesFullscreen && !practiceFullscreen && !flashDeckOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [notesFullscreen, practiceFullscreen, flashDeckOpen]);
+
+  React.useEffect(() => {
+    const sync = () => {
+      const el = stageRef.current;
+      const native =
+        document.fullscreenElement || (document as any).webkitFullscreenElement || null;
+      if (el && native === el) setBookFullscreen(true);
+      else if (!cssFullscreen) setBookFullscreen(false);
+    };
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    return () => {
+      document.removeEventListener('fullscreenchange', sync);
+      document.removeEventListener('webkitfullscreenchange', sync);
+    };
+  }, [cssFullscreen]);
 
   React.useEffect(() => {
     let cancelled = false;
     const pageW = a4.w;
     const pageH = a4.h;
     const htmlChanged = htmlRef.current !== sourceHtml;
-    htmlRef.current = sourceHtml;
-    paginateByMeasure(blocksFromHtml(sourceHtml), {
-      width: pageW,
-      height: pageH,
-      font,
-      theme,
-      openIds: openExplains,
-      header,
-      chapterTitle,
-      a4: true,
-      imgMax,
-    }).then((pagesHtml) => {
+    const spreadChanged = spreadRef.current !== spread;
+    spreadRef.current = spread;
+    const timer = window.setTimeout(() => {
       if (cancelled) return;
-      const next = withCoverPages(
-        pagesHtml,
-        frontCoverUrl ? resolveSrc(frontCoverUrl) : null,
-        backCoverUrl ? resolveSrc(backCoverUrl) : null,
-      );
-      setPages(next);
-      const anchor = explainAnchor.current;
-      explainAnchor.current = null;
-      const coverShift = frontCoverUrl ? 1 : 0;
-      setIndex((i) => {
-        if (anchor) {
+      const currentPages = pagesRef.current;
+      const currentIndex = indexRef.current;
+      let anchorIndex = currentIndex;
+      if (!htmlChanged && spread && !spreadChanged && currentPages.length) {
+        const list = courseSpreads(currentPages.length, startPage);
+        const open = list[spreadIndexFor(list, currentIndex)];
+        if (open) anchorIndex = open.left ?? open.right ?? currentIndex;
+      }
+      const place = htmlChanged ? null : readingPlaceAnchor(currentPages, anchorIndex);
+      const placeHint = anchorIndex;
+      const placeCount = currentPages.length;
+      htmlRef.current = sourceHtml;
+      paginateByMeasure(blocksFromHtml(sourceHtml), {
+        width: pageW,
+        height: pageH,
+        font,
+        theme,
+        openIds: openExplains,
+        header,
+        chapterTitle,
+        a4: true,
+        imgMax,
+      }).then((pagesHtml) => {
+        if (cancelled) return;
+        const next = withCoverPages(
+          pagesHtml,
+          frontCoverUrl ? resolveSrc(frontCoverUrl) : null,
+          backCoverUrl ? resolveSrc(backCoverUrl) : null,
+        );
+        const explainId = explainAnchor.current;
+        explainAnchor.current = null;
+        const coverShift = frontCoverUrl ? 1 : 0;
+        let nextIndex = 0;
+        if (explainId) {
           const found = next.findIndex((page) =>
-            page.some((item) => item.includes(`data-explain-id="${anchor}"`)),
+            page.some((item) => item.includes(`data-explain-id="${explainId}"`)),
           );
-          if (found >= 0) return found;
+          if (found >= 0) nextIndex = found;
+          else if (place) nextIndex = pageIndexForAnchor(next, place, placeHint, placeCount);
+        } else if (!htmlChanged && place) {
+          nextIndex = pageIndexForAnchor(next, place, placeHint, placeCount);
+        } else if (htmlChanged) {
+          nextIndex = initialPage ? Math.max(0, initialPage - startPage) + coverShift : 0;
+        } else {
+          nextIndex = pageIndexForAnchor(
+            next,
+            { cover: false, coverSrc: '', edge: 'front', text: '' },
+            placeHint,
+            placeCount,
+          );
         }
-        const raw = htmlChanged
-          ? initialPage
-            ? Math.max(0, initialPage - startPage) + coverShift
-            : 0
-          : i;
-        return Math.min(Math.max(0, raw), Math.max(0, next.length - 1));
+        nextIndex = Math.min(Math.max(0, nextIndex), Math.max(0, next.length - 1));
+        setPages(next);
+        setIndex(nextIndex);
+        setToolIndex(nextIndex);
       });
-      setToolIndex((i) => Math.min(Math.max(0, i), Math.max(0, next.length - 1)));
-    });
+    }, htmlChanged ? 0 : 90);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [
     html,
@@ -1025,32 +2324,186 @@ export default function CourseBookReader({
   }, [panel]);
 
   React.useEffect(() => {
-    if (wide && (panel === 'contents' || panel === 'bookmarks' || panel === 'notes')) {
+    if (shelf && (panel === 'contents' || panel === 'bookmarks' || panel === 'notes')) {
       setPanel('highlights');
     }
-  }, [wide, panel]);
+  }, [shelf, panel]);
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
+      if (e.key === 'Escape' && notesFullscreen) {
+        setNotesFullscreen(false);
+        return;
+      }
+      if (e.key === 'Escape' && openFlash) {
+        setOpenFlash(null);
+        setFlashFlipped(false);
+        setFlashEntering(false);
+        return;
+      }
+      if (e.key === 'Escape' && openQuick) {
+        setOpenQuick(null);
+        return;
+      }
+      if (openQuick && openQuick.items.length > 1) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          const delta = e.key === 'ArrowRight' ? 1 : -1;
+          setOpenQuick((prev) => {
+            if (!prev) return prev;
+            const next = prev.index + delta;
+            if (next < 0 || next >= prev.items.length) return prev;
+            return { ...prev, index: next };
+          });
+          return;
+        }
+      }
+      if (e.key === 'Escape' && flashDeckOpen) {
+        setFlashDeckOpen(false);
+        return;
+      }
+      if (e.key === 'Escape' && practiceFullscreen) {
+        setPracticeFullscreen(false);
+        return;
+      }
       if (
         tag === 'INPUT' ||
         tag === 'TEXTAREA' ||
         (e.target as HTMLElement | null)?.isContentEditable
       )
         return;
+      if (notesFullscreen || practiceFullscreen || flashDeckOpen || openQuick || openFlash) return;
       if (e.key === 'ArrowRight') goSpread(1);
       if (e.key === 'ArrowLeft') goSpread(-1);
+      if (e.key === 'Escape' && cssFullscreen) {
+        setCssFullscreen(false);
+        setBookFullscreen(false);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [goSpread]);
+  }, [goSpread, cssFullscreen, notesFullscreen, practiceFullscreen, flashDeckOpen, openQuick, openFlash]);
+
+  React.useEffect(() => {
+    if (!openFlash) {
+      setFlashFlipped(false);
+      setFlashEntering(false);
+      return;
+    }
+    setFlashFlipped(false);
+    setFlashEntering(true);
+    let done = 0;
+    const start = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        setFlashFlipped(true);
+        done = window.setTimeout(() => setFlashEntering(false), 750);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(start);
+      window.clearTimeout(done);
+    };
+  }, [openFlash]);
+
+  React.useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    let wheelIdle = 0;
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+    let touchConsumed = false;
+    const ignoreTarget = (node: EventTarget | null) => {
+      const el = eventElement(node);
+      return !!el?.closest(
+        'input, textarea, select, [contenteditable], .course-reader-rail, .course-notes-section, .course-practice-popup, .course-quick-popup, .course-selection-bar',
+      );
+    };
+    const turnOnce = (delta: number) => {
+      if (Date.now() < pageTurnLockRef.current) return false;
+      if (notesFullscreen || practiceFullscreen || flashDeckOpen || openQuick || openFlash) return false;
+      pageTurnLockRef.current = Date.now() + 460;
+      goSpreadRef.current(delta);
+      return true;
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (ignoreTarget(e.target)) return;
+      const absX = Math.abs(e.deltaX);
+      const absY = Math.abs(e.deltaY);
+      if (absX < 18 || absX < absY * 1.1) return;
+      e.preventDefault();
+      window.clearTimeout(wheelIdle);
+      if (!wheelGestureRef.current) {
+        wheelGestureRef.current = true;
+        turnOnce(e.deltaX > 0 ? 1 : -1);
+      }
+      wheelIdle = window.setTimeout(() => {
+        wheelGestureRef.current = false;
+      }, 560);
+    };
+    const consumeTouch = (x: number, y: number) => {
+      if (touchConsumed || dragSelRef.current) return;
+      const dx = x - startX;
+      const dy = y - startY;
+      if (Math.abs(dx) < 48 || Math.abs(dx) <= Math.abs(dy) * 1.15) return;
+      touchConsumed = true;
+      turnOnce(dx < 0 ? 1 : -1);
+      pageTurnLockRef.current = Date.now() + 460;
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || ignoreTarget(e.target)) {
+        tracking = false;
+        touchConsumed = false;
+        return;
+      }
+      tracking = true;
+      touchConsumed = false;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!tracking || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (touchConsumed || (Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.15)) {
+        e.preventDefault();
+        consumeTouch(t.clientX, t.clientY);
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      if (dragSelRef.current) {
+        touchConsumed = false;
+        return;
+      }
+      const t = e.changedTouches[0];
+      if (t && !touchConsumed) consumeTouch(t.clientX, t.clientY);
+      touchConsumed = false;
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    stage.addEventListener('touchstart', onTouchStart, { passive: true });
+    stage.addEventListener('touchmove', onTouchMove, { passive: false });
+    stage.addEventListener('touchend', onTouchEnd, { passive: true });
+    stage.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    return () => {
+      window.clearTimeout(wheelIdle);
+      stage.removeEventListener('wheel', onWheel);
+      stage.removeEventListener('touchstart', onTouchStart);
+      stage.removeEventListener('touchmove', onTouchMove);
+      stage.removeEventListener('touchend', onTouchEnd);
+      stage.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [notesFullscreen, practiceFullscreen, flashDeckOpen, openQuick, openFlash]);
 
   React.useEffect(() => {
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       const concept = target?.closest?.('.course-concept-hot') as HTMLElement | null;
       if (concept && bookRef.current?.contains(concept)) {
+        if ((window.getSelection()?.toString() || '').trim().length >= 2) return;
         e.preventDefault();
         e.stopPropagation();
         const id = concept.getAttribute('data-concept-id');
@@ -1061,23 +2514,77 @@ export default function CourseBookReader({
       if (flash && bookRef.current?.contains(flash)) {
         e.preventDefault();
         e.stopPropagation();
-        flash.classList.toggle('is-flipped');
+        const front = (flash.querySelector('strong')?.textContent || '').trim();
+        const back = (flash.querySelector('p')?.textContent || '').trim();
+        setFlashFlipped(false);
+        setFlashEntering(true);
+        setFlashDeckOpen(false);
+        setOpenFlash({ front: front || 'Flashcard', back: back || 'No answer yet.' });
         return;
       }
+      const iconBtn = target?.closest?.('.course-quick-icon-btn') as HTMLElement | null;
+      if (iconBtn && bookRef.current?.contains(iconBtn)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const block = iconBtn.closest('.course-quick-block') as HTMLElement | null;
+        const expand = block?.querySelector('.course-quick-expand') as
+          | HTMLTemplateElement
+          | HTMLElement
+          | null;
+        if (!block || !expand) return;
+        const group = block.getAttribute('data-quick-group');
+        const items: {
+          id: string;
+          answer: number;
+          html: string;
+          checked: boolean;
+          picked: string | null;
+        }[] = [];
+        if (group && bookRef.current) {
+          bookRef.current
+            .querySelectorAll(`.course-quick-block[data-quick-group="${group}"]`)
+            .forEach((el) => items.push(quickFromBlock(el as HTMLElement)));
+        }
+        if (!items.length) items.push(quickFromBlock(block, expand));
+        const start = Math.max(0, Number(block.getAttribute('data-quick-group-index') || 0));
+        setOpenQuick({ items, index: Math.min(start, items.length - 1) });
+        return;
+      }
+      if (target?.closest?.('.course-quick-popup')) return;
       const opt = target?.closest?.('.course-quick-block [data-opt]') as HTMLElement | null;
       const quiz = opt?.closest?.('.course-quick-block') as HTMLElement | null;
-      if (quiz && opt && bookRef.current?.contains(quiz)) {
+      const quizHost = Boolean(
+        quiz && (bookRef.current?.contains(quiz) || stageRef.current?.contains(quiz)),
+      );
+      if (quiz && opt && quizHost) {
         e.preventDefault();
         e.stopPropagation();
         if (quiz.classList.contains('is-checked')) return;
         const picked = Number(opt.getAttribute('data-opt'));
         const answer = Number(quiz.getAttribute('data-answer'));
         quiz.classList.add('is-checked');
+        quiz.setAttribute('data-picked', String(picked));
         quiz.querySelectorAll('[data-opt]').forEach((btn) => {
           const i = Number(btn.getAttribute('data-opt'));
           btn.classList.toggle('is-on', i === picked);
           btn.classList.toggle('is-right', i === answer);
           btn.classList.toggle('is-wrong', i === picked && i !== answer);
+        });
+        const id = quiz.getAttribute('data-quick-id');
+        if (id && bookRef.current) {
+          bookRef.current.querySelectorAll(`.course-quick-block[data-quick-id="${id}"]`).forEach((src) => {
+            src.classList.add('is-checked');
+            src.setAttribute('data-picked', String(picked));
+          });
+        }
+        setOpenQuick((prev) => {
+          if (!prev || !id) return prev;
+          return {
+            ...prev,
+            items: prev.items.map((item) =>
+              item.id === id ? { ...item, checked: true, picked: String(picked) } : item,
+            ),
+          };
         });
         return;
       }
@@ -1103,7 +2610,18 @@ export default function CourseBookReader({
   }, [openConcept]);
 
   React.useEffect(() => {
-    const onSel = () => {
+    const skipSel = (target: EventTarget | Node | null) =>
+      !!eventElement(target)?.closest(
+        'button, a, input, textarea, select, [contenteditable], .course-flash, .course-quick-block, .course-explain summary, .course-book-turn, .course-selection-bar, .course-bookmark-picker, .course-page-fold',
+      );
+
+    const paint = () => {
+      const root = bookRef.current;
+      if (root) setSelRectsRef.current(selectionPaintRects(root));
+    };
+
+    const publishSel = () => {
+      if (holdSelectionRef.current) return;
       const text = selectedText();
       const sel = window.getSelection();
       const node = sel?.anchorNode;
@@ -1116,15 +2634,130 @@ export default function CourseBookReader({
       if (text.length >= 2) {
         lastSelection.current = text;
         setPicked(text);
-        return;
-      }
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-        setPicked('');
+        paint();
       }
     };
-    document.addEventListener('selectionchange', onSel);
-    return () => document.removeEventListener('selectionchange', onSel);
+
+    const onSelectStart = (e: Event) => {
+      const node = e.target instanceof Node ? e.target : null;
+      const target = eventElement(node);
+      if (!node || !target || !bookRef.current?.contains(node)) return;
+      if (skipSel(target)) return;
+      if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+      if (target.closest('.course-book-body')) e.preventDefault();
+    };
+
+    const onDown = (e: PointerEvent) => {
+      const node = e.target instanceof Node ? e.target : null;
+      const target = eventElement(node);
+      const root = bookRef.current;
+      if (target?.closest('.course-quick-popup, .course-practice-popup, .course-flash-popup')) {
+        return;
+      }
+      if (!node || !target || !root?.contains(node)) {
+        dragSelRef.current = null;
+        selectIslandRef.current = null;
+        setSelRectsRef.current([]);
+        setPicked('');
+        return;
+      }
+      if (skipSel(target)) {
+        dragSelRef.current = null;
+        selectIslandRef.current = null;
+        return;
+      }
+      if (e.pointerType === 'touch') return;
+      const island = selectionIsland(target) || islandFromPoint(e.clientX, e.clientY, root);
+      if (!island) {
+        dragSelRef.current = null;
+        selectIslandRef.current = null;
+        setSelRectsRef.current([]);
+        setPicked('');
+        return;
+      }
+      const start = caretInIsland(island, e.clientX, e.clientY);
+      selectIslandRef.current = island;
+      dragSelRef.current = { island, start };
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const drag = dragSelRef.current;
+      if (!drag || e.buttons !== 1) return;
+      if (!bookRef.current?.contains(drag.island)) {
+        dragSelRef.current = null;
+        return;
+      }
+      e.preventDefault();
+      applyCaretSelection(drag.start, caretInIsland(drag.island, e.clientX, e.clientY));
+    };
+
+    const onUp = () => {
+      if (!dragSelRef.current) return;
+      dragSelRef.current = null;
+      publishSel();
+    };
+
+    const onDblClick = (e: MouseEvent) => {
+      const node = e.target instanceof Node ? e.target : null;
+      const target = eventElement(node);
+      const root = bookRef.current;
+      if (!node || !target || !root?.contains(node) || skipSel(target)) return;
+      const island = selectionIsland(target) || islandFromPoint(e.clientX, e.clientY, root);
+      if (!island) return;
+      e.preventDefault();
+      expandWordInIsland(island, e.clientX, e.clientY);
+      paint();
+      publishSel();
+    };
+
+    const onSelChange = () => {
+      if (dragSelRef.current || holdSelectionRef.current) return;
+      const text = selectedText();
+      if (text.length >= 2) publishSel();
+    };
+
+    document.addEventListener('selectstart', onSelectStart, true);
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('pointermove', onMove, { capture: true, passive: false });
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('dblclick', onDblClick, true);
+    document.addEventListener('selectionchange', onSelChange);
+    return () => {
+      document.removeEventListener('selectstart', onSelectStart, true);
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('pointermove', onMove, true);
+      document.removeEventListener('pointerup', onUp, true);
+      document.removeEventListener('dblclick', onDblClick, true);
+      document.removeEventListener('selectionchange', onSelChange);
+    };
   }, []);
+
+  React.useEffect(() => {
+    const phrase = restoreSelRef.current;
+    if (!phrase) return;
+    let inner = 0;
+    const outer = window.requestAnimationFrame(() => {
+      inner = window.requestAnimationFrame(() => {
+        if (bookRef.current) {
+          restorePhraseSelection(bookRef.current, phrase);
+          setSelRectsRef.current(selectionPaintRects(bookRef.current));
+        }
+        lastSelection.current = phrase;
+        setPicked(phrase);
+        holdSelectionRef.current = false;
+        restoreSelRef.current = null;
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(outer);
+      window.cancelAnimationFrame(inner);
+    };
+  }, [study.highlights]);
+
+  React.useEffect(() => {
+    setSelRects([]);
+    setPicked('');
+  }, [index]);
 
   const coverShift = frontCoverUrl ? 1 : 0;
   const toolPage = Math.min(Math.max(0, toolIndex), Math.max(0, pages.length - 1));
@@ -1136,6 +2769,7 @@ export default function CourseBookReader({
   const printedFor = (pageIndex: number) => startPage + pageIndex - coverShift;
   const indexFromPrinted = (page: number) => Math.max(0, page - startPage + coverShift);
   const goToPrinted = (page: number) => {
+    setPracticeFullscreen(false);
     const next = Math.min(pages.length - 1, Math.max(0, indexFromPrinted(page)));
     setIndex(next);
     setToolIndex(next);
@@ -1244,8 +2878,14 @@ export default function CourseBookReader({
   const liveQuery = query.trim();
   const searchMarks =
     liveQuery.length >= 2 ? [{ text: liveQuery, color: '#C5E8C8', wholeWord: false }] : [];
-  const markedPage = (pageIndex: number) =>
-    applyHighlights(pages[pageIndex]?.join('') || '', [...study.highlights, ...searchMarks]);
+  const markedPages = React.useMemo(
+    () =>
+      pages.map((pieces) =>
+        applyHighlights(wrapPagePieces(pieces), [...study.highlights, ...searchMarks]),
+      ),
+    [pages, study.highlights, liveQuery],
+  );
+  markedPagesRef.current = markedPages;
   const canRemove =
     picked.length >= 2 && study.highlights.some((h) => highlightOverlaps(h.text, picked));
   const toc = tocFromPages(pages, startPage, coverShift);
@@ -1274,6 +2914,35 @@ export default function CourseBookReader({
     if (searchHits[0]) jumpToHit(searchHits[0]);
   };
   const topicIndex = toc.reduce((best, item, i) => (item.page <= printed ? i : best), 0);
+
+  const toggleCovered = (item: { title: string; page: number }) => {
+    const index = toc.findIndex((t) => tocCoverKey(t) === tocCoverKey(item));
+    if (index < 0) return;
+    const k = tocCoverKey(item);
+    const descendants = tocDescendantKeys(toc, index);
+    setCovered((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) {
+        next.delete(k);
+        descendants.forEach((dk) => next.delete(dk));
+      } else {
+        next.add(k);
+      }
+      return next;
+    });
+  };
+
+  React.useEffect(() => {
+    setCovered(readCoveredSet(coveredKey));
+  }, [coveredKey]);
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(coveredKey, JSON.stringify([...covered]));
+    } catch {
+      /* ignore */
+    }
+  }, [coveredKey, covered]);
   const lastContentIndex = pages.reduce(
     (last, page, i) => (isCoverHtml(page.join('')) ? last : i),
     -1,
@@ -1301,29 +2970,59 @@ export default function CourseBookReader({
     notes: 'Notes',
   }[panel];
 
-  const notesUrl = (quote?: string) => {
-    if (!notesHref) return '';
-    const url = new URL(notesHref, 'https://vidhyavibe.local');
-    url.searchParams.set('page', String(printed));
-    if (quote) {
-      try {
-        window.sessionStorage.setItem('vv_pending_note_quote', quote);
-      } catch {
-        /* ignore */
+  const notesPanelProps = chapterId
+    ? {
+        notes: study.notes,
+        chapterTitle,
+        pageNumber: printed,
+        quote: noteQuote,
+        onQuoteChange: setNoteQuote,
+        onJumpPage: (page: number) => {
+          goToPrinted(page);
+          setNotesFullscreen(false);
+          if (!wide) setSheetOpen(false);
+        },
+        onSave: async (content: string, quote?: string) => {
+          const created = await addCourseNote(chapterId, content, printed, quote);
+          loadStudy();
+          return created;
+        },
+        onUpdate: async (id: number, content: string) => {
+          await updateCourseNote(id, content);
+        },
+        onDelete: async (id: number) => {
+          await deleteCourseNote(id);
+          loadStudy();
+        },
       }
-    }
-    return `${url.pathname}?${url.searchParams.toString()}`;
-  };
+    : null;
+
+  const notesPanel = notesPanelProps ? (
+    <CourseNotesPanel
+      key={chapterId}
+      {...notesPanelProps}
+      onFullScreen={() => void openNotesFullscreen()}
+    />
+  ) : (
+    <p className="course-notes-empty">Notes are available once this chapter is loaded.</p>
+  );
 
   const addNoteFromSelection = () => {
     const text = (picked || lastSelection.current).trim();
-    setNoteQuote(text);
-    setLeftTab('notes');
-    if (!wide) {
-      setPanel('notes');
-      setMenuOpen(false);
-      setSheetOpen(true);
+    if (text.length >= 2) {
+      holdSelectionRef.current = true;
+      restoreSelRef.current = text;
+      lastSelection.current = text;
+      setPicked(text);
     }
+    setNoteQuote(text);
+    void openNotesFullscreen();
+    window.requestAnimationFrame(() => {
+      const phrase = restoreSelRef.current;
+      if (phrase && bookRef.current) restorePhraseSelection(bookRef.current, phrase);
+      holdSelectionRef.current = false;
+      restoreSelRef.current = null;
+    });
   };
 
   const setBookmark = async (markType: CourseBookmarkType, pageIndex = toolPage) => {
@@ -1357,14 +3056,17 @@ export default function CourseBookReader({
       return;
     }
     try {
+      holdSelectionRef.current = true;
+      restoreSelRef.current = text;
       const same = study.highlights.filter((h) => highlightSame(h.text, text));
       await Promise.all(same.map((h) => deleteCourseHighlight(h.id)));
       await addCourseHighlight(chapterId, text, printed, color);
-      window.getSelection()?.removeAllRanges();
-      lastSelection.current = '';
-      setPicked('');
+      lastSelection.current = text;
+      setPicked(text);
       loadStudy();
     } catch {
+      holdSelectionRef.current = false;
+      restoreSelRef.current = null;
       alert('Could not save highlight. Please login and try again.');
     }
   };
@@ -1378,15 +3080,55 @@ export default function CourseBookReader({
       return;
     }
     try {
+      holdSelectionRef.current = true;
+      restoreSelRef.current = text;
       await Promise.all(matches.map((h) => deleteCourseHighlight(h.id)));
-      window.getSelection()?.removeAllRanges();
-      lastSelection.current = '';
-      setPicked('');
+      lastSelection.current = text;
+      setPicked(text);
       loadStudy();
     } catch {
+      holdSelectionRef.current = false;
+      restoreSelRef.current = null;
       alert('Could not remove highlight.');
     }
   };
+
+  const atStart = spread ? spreadAt <= 0 : index <= 0;
+  const atEnd = spread ? spreadAt >= spreads.length - 1 : index >= pages.length - 1;
+  const bookReadRatio = pages.length > 1 ? index / (pages.length - 1) : 0;
+
+  const turnByDelta = (delta: number) => {
+    if ((delta < 0 && atStart) || (delta > 0 && atEnd)) return;
+    if (Date.now() < pageTurnLockRef.current) return;
+    goSpread(delta);
+  };
+
+  const pageFolds = (side?: 'verso' | 'recto') => (
+    <>
+      {!atStart && side !== 'recto' ? (
+        <button
+          type="button"
+          className="course-page-fold is-prev"
+          aria-label="Previous page"
+          onClick={(e) => {
+            e.stopPropagation();
+            turnByDelta(-1);
+          }}
+        />
+      ) : null}
+      {!atEnd && side !== 'verso' ? (
+        <button
+          type="button"
+          className="course-page-fold is-next"
+          aria-label="Next page"
+          onClick={(e) => {
+            e.stopPropagation();
+            turnByDelta(1);
+          }}
+        />
+      ) : null}
+    </>
+  );
 
   const renderSheet = (pageIndex: number | null, side?: 'verso' | 'recto') => {
     const sideClass = side ? ` is-${side}` : '';
@@ -1399,10 +3141,11 @@ export default function CourseBookReader({
           <div className="course-book-running">{header}</div>
           <div className="course-book-running-title">{chapterTitle}</div>
           <div className="course-book-body" />
+          {pageFolds(side)}
         </div>
       );
     }
-    const html = markedPage(pageIndex);
+    const html = markedPages[pageIndex] || '';
     const cover = isCoverHtml(html);
     const pagePrinted = printedFor(pageIndex);
     const bookmark = cover ? undefined : bookmarkFor(pageIndex);
@@ -1454,6 +3197,31 @@ export default function CourseBookReader({
           dangerouslySetInnerHTML={{ __html: html }}
         />
         <div className="course-book-folio">{pagePrinted}</div>
+        {pageFolds(side)}
+      </div>
+    );
+  };
+
+  const viewSolo = flip ? flip.solo : !spread || soloLeaf;
+  const viewLeft = flip
+    ? flip.underLeft
+    : spread
+      ? (openSpread.left ?? openSpread.right ?? index)
+      : index;
+  const viewRight = flip ? flip.underRight : spread ? openSpread.right : null;
+
+  const renderFlipFace = (pageIndex: number, face: 'front' | 'back') => {
+    const html = markedPages[pageIndex] || '';
+    const cover = isCoverHtml(html);
+    return (
+      <div
+        className={`course-book-sheet is-${theme}${cover ? ' is-cover' : ''} course-book-flip-${face}`}
+        style={{ fontSize: `${font}%` }}
+      >
+        {cover ? null : <div className="course-book-running">{header}</div>}
+        {cover ? null : <div className="course-book-running-title">{chapterTitle}</div>}
+        <div className="course-chapter course-book-body" dangerouslySetInnerHTML={{ __html: html }} />
+        {cover ? null : <div className="course-book-folio">{printedFor(pageIndex)}</div>}
       </div>
     );
   };
@@ -1465,8 +3233,6 @@ export default function CourseBookReader({
       : captions[0] || 'Cover'
     : pageCaption(toolPage);
 
-  const atStart = spread ? spreadAt <= 0 : index <= 0;
-  const atEnd = spread ? spreadAt >= spreads.length - 1 : index >= pages.length - 1;
   const progressPct = toc.length
     ? Math.round(((topicIndex + 1) / toc.length) * 100)
     : Math.round(((index + 1) / Math.max(pages.length, 1)) * 100);
@@ -1475,7 +3241,7 @@ export default function CourseBookReader({
   const openPanel = (id: typeof panel) => {
     setPanel(id);
     setMenuOpen(false);
-    if (!wide) setSheetOpen(true);
+    if (!shelf) setSheetOpen(true);
     if (id === 'interact') {
       const conceptId = activeConceptId || interactives[0]?.id;
       if (conceptId) revealInBook({ conceptId });
@@ -1502,51 +3268,31 @@ export default function CourseBookReader({
     setToolIndex(target);
   };
 
-  const notesPanel = chapterId ? (
-    <CourseNotesPanel
-      notes={study.notes}
-      chapterTitle={chapterTitle}
-      pageNumber={printed}
-      quote={noteQuote}
-      onQuoteChange={setNoteQuote}
-      fullScreenHref={notesUrl()}
-      onJumpPage={(page) => {
-        goToPrinted(page);
-        if (!wide) setSheetOpen(false);
-      }}
-      onSave={async (content, quote) => {
-        await addCourseNote(chapterId, content, printed, quote);
-        loadStudy();
-      }}
-      onUpdate={async (id, content) => {
-        await updateCourseNote(id, content);
-        loadStudy();
-      }}
-      onDelete={async (id) => {
-        await deleteCourseNote(id);
-        loadStudy();
-      }}
-    />
-  ) : (
-    <p className="course-notes-empty">Notes are available once this chapter is loaded.</p>
-  );
-
   return (
+    <>
     <div
-      className={`course-reader-workspace course-reader-with-notes${wide ? ' is-desktop' : ' is-compact'}${spread ? ' is-spread' : ''}`}
+      className={`course-reader-workspace course-reader-with-notes${wide ? ' is-desktop' : tablet ? ' is-tablet' : ' is-compact'}${spread ? ' is-spread' : ''}${cssFullscreen ? ' is-book-fullscreen' : ''}`}
       style={{ ['--course-text-scale' as string]: String(font / 100) } as React.CSSProperties}
     >
-      {!wide ? (
+      {layout === 'phone' ? (
         <header className="course-reader-toolbar">
           {closeHref ? (
-            <Link href={closeHref} className="course-reader-close" aria-label="Close reader">
-              ×
+            <Link href={closeHref} className="course-reader-close" aria-label="Back">
+              <ReaderBackIcon />
             </Link>
           ) : null}
           <div className="course-reader-heading">
             <strong>{subjectTitle || chapterTitle}</strong>
             <small>{header}</small>
           </div>
+          <button
+            type="button"
+            className="course-reader-menu-btn"
+            aria-label={bookFullscreen ? 'Exit full screen' : 'Full screen'}
+            onClick={() => void toggleBookFullscreen()}
+          >
+            {bookFullscreen ? '✕' : '⛶'}
+          </button>
           <button
             type="button"
             className="course-reader-menu-btn"
@@ -1560,12 +3306,12 @@ export default function CourseBookReader({
           </button>
         </header>
       ) : null}
-      {wide ? (
+      {shelf ? (
         <aside className="course-reader-rail is-toc">
           <div className="course-reader-heading is-rail">
             {closeHref ? (
-              <Link href={closeHref} className="course-reader-close" aria-label="Close reader">
-                ×
+              <Link href={closeHref} className="course-reader-close" aria-label="Back">
+                <ReaderBackIcon />
               </Link>
             ) : null}
             <div>
@@ -1590,8 +3336,8 @@ export default function CourseBookReader({
             </button>
             <button
               type="button"
-              className={leftTab === 'notes' ? 'is-on' : ''}
-              onClick={() => setLeftTab('notes')}
+              className={notesFullscreen ? 'is-on' : ''}
+              onClick={() => void openNotesFullscreen()}
             >
               Notes
             </button>
@@ -1633,40 +3379,45 @@ export default function CourseBookReader({
                                 href={`${readBase}/read?chapter=${encodeURIComponent(ch.slug)}`}
                                 className="course-toc-chapter-link"
                               >
-                                {current ? '▾' : '▸'} {i + 1}. {ch.title}
+                                <span className="course-toc-chapter-index">{i + 1}</span>
+                                <span>{ch.title}</span>
                               </Link>
                             ) : (
                               <span className="course-toc-chapter-link">
-                                {current ? '▾' : '▸'} {i + 1}. {ch.title}
+                                <span className="course-toc-chapter-index">{i + 1}</span>
+                                <span>{ch.title}</span>
                               </span>
                             )}
                             {current
                               ? toc.map((item, ti) => (
-                                  <button
+                                  <TocTopicRow
                                     key={`${item.page}-${ti}`}
-                                    type="button"
-                                    className={`course-toc-item${item.page === printed ? ' is-on' : ''}`}
-                                    style={{ paddingLeft: 18 + (item.level - 1) * 12 }}
-                                    onClick={() => setIndex(indexFromPrinted(item.page))}
-                                  >
-                                    <span>{item.title}</span>
-                                  </button>
+                                    item={item}
+                                    current={item.page === printed}
+                                    done={covered.has(tocCoverKey(item))}
+                                    onOpen={() => {
+                                      setPracticeFullscreen(false);
+                                      setIndex(indexFromPrinted(item.page));
+                                    }}
+                                    onToggleCovered={() => toggleCovered(item)}
+                                  />
                                 ))
                               : null}
                           </div>
                         );
                       })
                     : toc.map((item, i) => (
-                        <button
+                        <TocTopicRow
                           key={`${item.page}-${i}`}
-                          type="button"
-                          className={`course-toc-item${item.page === printed ? ' is-on' : ''}`}
-                          style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
-                          onClick={() => setIndex(indexFromPrinted(item.page))}
-                        >
-                          <span>{item.title}</span>
-                          <span>p.{item.page}</span>
-                        </button>
+                          item={item}
+                          current={item.page === printed}
+                          done={covered.has(tocCoverKey(item))}
+                          onOpen={() => {
+                            setPracticeFullscreen(false);
+                            setIndex(indexFromPrinted(item.page));
+                          }}
+                          onToggleCovered={() => toggleCovered(item)}
+                        />
                       ))}
                 </div>
               </div>
@@ -1718,33 +3469,115 @@ export default function CourseBookReader({
           ) : null}
         </aside>
       ) : null}
-      <div className="course-book-stage">
-        <button
-          type="button"
-          className="course-book-side-btn is-prev"
-          disabled={atStart}
-          aria-label="Previous pages"
-          onClick={() => goSpread(-1)}
-        >
-          <span>←</span>
-        </button>
+      <div className="course-book-stage" ref={stageRef}>
+        {bookFullscreen ? (
+          <button
+            type="button"
+            className="course-book-fs-exit"
+            aria-label="Exit full screen"
+            onClick={() => void exitBookFullscreen()}
+          >
+            Exit full screen
+          </button>
+        ) : null}
         <div className="course-book-slot" ref={slotRef}>
           <div
             ref={bookRef}
             className={`course-book is-a4${spread ? ' is-spread' : ''}${!spread || soloLeaf ? ' is-solo' : ''}`}
-            style={{ ['--course-img-max' as string]: `${imgMax}px` } as React.CSSProperties}
+            style={
+              {
+                ['--course-img-max' as string]: `${imgMax}px`,
+                ['--course-book-w' as string]: `${visualBookW}px`,
+              } as React.CSSProperties
+            }
           >
-            {spread && !soloLeaf ? (
-              <div className="course-book-open" style={{ width: a4.w * 2 + 14, height: a4.h }}>
-                {renderSheet(openSpread.left, 'verso')}
-                <div className="course-book-gutter" aria-hidden />
-                {renderSheet(openSpread.right, 'recto')}
+            <button
+              type="button"
+              className="course-book-turn is-prev"
+              aria-label="Previous page"
+              disabled={atStart}
+              onClick={(e) => {
+                e.stopPropagation();
+                turnByDelta(-1);
+              }}
+            />
+            <button
+              type="button"
+              className="course-book-turn is-next"
+              aria-label="Next page"
+              disabled={atEnd}
+              onClick={(e) => {
+                e.stopPropagation();
+                turnByDelta(1);
+              }}
+            />
+            <div className="course-book-scale-frame" style={{ width: visualBookW, height: visualBookH }}>
+            <div
+              className="course-book-scale"
+              style={{
+                width: layoutBookW,
+                height: a4.h,
+                transform: pageScale === 1 ? undefined : `scale(${pageScale})`,
+                transformOrigin: 'top left',
+              }}
+            >
+            <div
+              className={`course-book-volume${viewSolo ? ' is-solo' : ' is-open'}${coverSrc ? ' is-cover-front' : ''}${flip ? ` is-flipping ${flip.dir === 1 ? 'is-next' : 'is-prev'}` : ''}`}
+              style={
+                {
+                  ['--book-read' as string]: `${(3 + bookReadRatio * 10).toFixed(1)}px`,
+                  ['--book-unread' as string]: coverSrc
+                    ? '14px'
+                    : `${(3 + (1 - bookReadRatio) * 10).toFixed(1)}px`,
+                } as React.CSSProperties
+              }
+            >
+              <span className="course-book-cover-board" aria-hidden />
+              <span className="course-book-spine" aria-hidden />
+              <span className="course-book-binding" aria-hidden />
+              <span className="course-book-edges is-read" aria-hidden />
+              <span className="course-book-edges is-unread" aria-hidden />
+              {spread && !viewSolo ? (
+                <div className="course-book-open" style={{ width: a4.w * 2 + 14, height: a4.h }}>
+                  {renderSheet(viewLeft, 'verso')}
+                  <div className="course-book-gutter" aria-hidden />
+                  {renderSheet(viewRight, 'recto')}
+                </div>
+              ) : (
+                <div className="course-book-solo" style={{ width: a4.w, height: a4.h }}>
+                  {renderSheet(viewLeft)}
+                </div>
+              )}
+              {flip ? (
+                <div
+                  className={`course-book-flip ${flip.dir === 1 ? 'is-next' : 'is-prev'}${
+                    flip.solo ? ' is-solo-flip' : ''
+                  }${isCoverHtml(markedPages[flip.frontIndex] || '') ? ' is-cover' : ''}`}
+                  aria-hidden="true"
+                >
+                  {renderFlipFace(flip.frontIndex, 'front')}
+                  {renderFlipFace(flip.backIndex, 'back')}
+                </div>
+              ) : null}
+            </div>
+            </div>
+            </div>
+            {selRects.length ? (
+              <div className="course-sel-paint-layer" aria-hidden="true">
+                {selRects.map((box, i) => (
+                  <i
+                    key={`${box.left}-${box.top}-${box.width}-${i}`}
+                    className="course-sel-paint"
+                    style={{
+                      left: box.left,
+                      top: box.top,
+                      width: box.width,
+                      height: box.height,
+                    }}
+                  />
+                ))}
               </div>
-            ) : (
-              <div className="course-book-solo" style={{ width: a4.w, height: a4.h }}>
-                {renderSheet(spread ? (openSpread.left ?? openSpread.right ?? index) : index)}
-              </div>
-            )}
+            ) : null}
             {picked.length >= 2 ? (
               <div className="course-selection-bar">
                 <div className="course-ink-row">
@@ -1802,29 +3635,238 @@ export default function CourseBookReader({
             ) : null}
           </div>
         </div>
-        <button
-          type="button"
-          className="course-book-side-btn is-next"
-          disabled={atEnd}
-          aria-label="Next pages"
-          onClick={() => goSpread(1)}
-        >
-          <span>→</span>
-        </button>
+        {practiceFullscreen ? (
+          <div
+            className="course-practice-popup"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-practice-overlay-title"
+          >
+            <button
+              type="button"
+              className="course-practice-popup-backdrop"
+              aria-label="Close practice"
+              onClick={() => setPracticeFullscreen(false)}
+            />
+            <div className="course-practice-popup-card">
+              <button
+                type="button"
+                className="course-practice-popup-close"
+                aria-label="Close practice"
+                onClick={() => setPracticeFullscreen(false)}
+              >
+                ×
+              </button>
+              <CoursePracticeQuiz
+                activity={practiceActivity}
+                chapterId={chapterId}
+                chapterTitle={chapterTitle}
+                subjectTitle={subjectTitle}
+                kicker={header ? `${header.split('·')[0].trim()} · ${chapterTitle}` : chapterTitle}
+                closeLabel="Close"
+                embedded
+                onClose={() => setPracticeFullscreen(false)}
+              />
+            </div>
+          </div>
+        ) : null}
+        {flashDeckOpen ? (
+          <div
+            className="course-practice-popup course-flash-deck-popup"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Flashcards"
+          >
+            <button
+              type="button"
+              className="course-practice-popup-backdrop"
+              aria-label="Close flashcards"
+              onClick={() => setFlashDeckOpen(false)}
+            />
+            <div className="course-practice-popup-card course-flash-deck-popup-card">
+              <button
+                type="button"
+                className="course-practice-popup-close"
+                aria-label="Close flashcards"
+                onClick={() => setFlashDeckOpen(false)}
+              >
+                ×
+              </button>
+              <CourseFlashcards
+                cards={chapterFlashcards}
+                onDelete={
+                  chapterId
+                    ? async (id) => {
+                        await deleteCourseFlashcard(id);
+                        loadStudy();
+                      }
+                    : undefined
+                }
+              />
+            </div>
+          </div>
+        ) : null}
+        {openFlash ? (
+          <div
+            className="course-practice-popup course-flash-popup"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Flashcard"
+          >
+            <button
+              type="button"
+              className="course-practice-popup-backdrop"
+              aria-label="Close flashcard"
+              onClick={() => {
+                setOpenFlash(null);
+                setFlashFlipped(false);
+                setFlashEntering(false);
+              }}
+            />
+            <div className="course-flash-popup-stage">
+              <button
+                type="button"
+                className="course-practice-popup-close"
+                aria-label="Close flashcard"
+                onClick={() => {
+                  setOpenFlash(null);
+                  setFlashFlipped(false);
+                  setFlashEntering(false);
+                }}
+              >
+                ×
+              </button>
+              <p className="course-flash-popup-kicker">Flashcard</p>
+              <button
+                type="button"
+                className={`course-flash-3d${flashEntering ? ' is-enter' : ''}${flashFlipped ? ' is-flipped' : ''}`}
+                aria-pressed={flashFlipped}
+                onClick={() => {
+                  if (flashEntering) return;
+                  setFlashFlipped((v) => !v);
+                }}
+              >
+                <span className="course-flash-3d-inner">
+                  <span className="course-flash-3d-face is-front">
+                    <small>Term</small>
+                    <strong>{openFlash.front}</strong>
+                    <em>Tap to see answer</em>
+                  </span>
+                  <span className="course-flash-3d-face is-back">
+                    <small>Answer</small>
+                    <strong>{openFlash.back}</strong>
+                    <em>Tap to see term</em>
+                  </span>
+                </span>
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {openQuick ? (
+          <div
+            className="course-practice-popup course-quick-popup"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Quiz"
+          >
+            <button
+              type="button"
+              className="course-practice-popup-backdrop"
+              aria-label="Close quiz"
+              onClick={() => setOpenQuick(null)}
+            />
+            <div className="course-practice-popup-card course-quick-popup-card">
+              <button
+                type="button"
+                className="course-practice-popup-close"
+                aria-label="Close quiz"
+                onClick={() => setOpenQuick(null)}
+              >
+                ×
+              </button>
+              {openQuick.items.length > 1 ? (
+                <p className="course-quick-popup-kicker">
+                  Quiz {openQuick.index + 1} of {openQuick.items.length}
+                </p>
+              ) : null}
+              <CourseQuizPrompt
+                html={openQuick.items[openQuick.index]?.html || ''}
+                fallbackAnswer={openQuick.items[openQuick.index]?.answer ?? 0}
+                picked={
+                  openQuick.items[openQuick.index]?.checked
+                    ? Number(openQuick.items[openQuick.index]?.picked)
+                    : null
+                }
+                onPick={(choice) => {
+                  const current = openQuick.items[openQuick.index];
+                  if (!current || current.checked) return;
+                  const id = current.id;
+                  if (id && bookRef.current) {
+                    bookRef.current
+                      .querySelectorAll(`.course-quick-block[data-quick-id="${id}"]`)
+                      .forEach((src) => {
+                        src.classList.add('is-checked');
+                        src.setAttribute('data-picked', String(choice));
+                      });
+                  }
+                  setOpenQuick((prev) => {
+                    if (!prev) return prev;
+                    return {
+                      ...prev,
+                      items: prev.items.map((item) =>
+                        item.id === id ? { ...item, checked: true, picked: String(choice) } : item,
+                      ),
+                    };
+                  });
+                }}
+              />
+              {openQuick.items.length > 1 ? (
+                <div className="course-quick-nav">
+                  <button
+                    type="button"
+                    className="is-prev"
+                    disabled={openQuick.index <= 0}
+                    onClick={() =>
+                      setOpenQuick((prev) =>
+                        prev && prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev,
+                      )
+                    }
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="is-next"
+                    disabled={openQuick.index >= openQuick.items.length - 1}
+                    onClick={() =>
+                      setOpenQuick((prev) =>
+                        prev && prev.index < prev.items.length - 1
+                          ? { ...prev, index: prev.index + 1 }
+                          : prev,
+                      )
+                    }
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </div>
       {chapterId ? (
         <aside
-          className={`course-notes-section course-reader-rail is-tools${wide || sheetOpen ? ' is-open' : ''}`}
+          className={`course-notes-section course-reader-rail is-tools${wide || tablet || sheetOpen ? ' is-open' : ''}`}
           id="course-notes"
         >
-          {!wide ? (
+          {layout === 'phone' ? (
             <button
               type="button"
               className="course-reader-sheet-close"
-              aria-label="Close panel"
+              aria-label="Back"
               onClick={() => setSheetOpen(false)}
             >
-              ×
+              <ReaderBackIcon />
             </button>
           ) : null}
           <div className="course-reader-toolbar-actions is-rail">
@@ -1844,26 +3886,48 @@ export default function CourseBookReader({
               ◐<span>Theme</span>
             </button>
           </div>
-          {wide ? (
+          {shelf ? (
             <div className="course-page-view-row" aria-label="Page view">
               <button
                 type="button"
                 className={wantSpread ? 'is-on' : ''}
-                onClick={() => setWantSpread(true)}
+                onClick={() => {
+                  setPracticeFullscreen(false);
+                  setWantSpread(true);
+                }}
               >
                 Open book
               </button>
               <button
                 type="button"
-                className={!wantSpread ? 'is-on' : ''}
-                onClick={() => setWantSpread(false)}
+                className={!wantSpread && !practiceFullscreen ? 'is-on' : ''}
+                onClick={() => {
+                  setPracticeFullscreen(false);
+                  setWantSpread(false);
+                }}
               >
                 One page
+              </button>
+              <button
+                type="button"
+                className={bookFullscreen ? 'is-on' : ''}
+                onClick={() => void toggleBookFullscreen()}
+              >
+                {bookFullscreen ? 'Exit full screen' : 'Full screen'}
               </button>
             </div>
           ) : null}
           <div className="course-study-tools">
             <h2>Study Tools</h2>
+            {!shelf ? (
+              <button
+                type="button"
+                className={panel === 'contents' ? 'is-on' : ''}
+                onClick={() => openPanel('contents')}
+              >
+                Contents
+              </button>
+            ) : null}
             <button
               type="button"
               className={panel === 'highlights' ? 'is-on' : ''}
@@ -1880,24 +3944,33 @@ export default function CourseBookReader({
                 Interact
               </button>
             ) : null}
-            {!wide && chapterId ? (
+            <button
+              type="button"
+              className={flashDeckOpen ? 'is-on' : ''}
+              onClick={() => {
+                if (flashDeckOpen) setFlashDeckOpen(false);
+                else openFlashDeck();
+              }}
+            >
+              Flashcards
+            </button>
+            {!shelf && chapterId ? (
               <button
                 type="button"
-                className={panel === 'notes' ? 'is-on' : ''}
-                onClick={() => openPanel('notes')}
+                className={notesFullscreen ? 'is-on' : ''}
+                onClick={() => void openNotesFullscreen()}
               >
                 Notes
               </button>
             ) : null}
-            {practiceHref ? (
-              <Link href={practiceHref} className="course-study-practice">
-                Practice
-              </Link>
-            ) : quickChecks.length ? (
+            {chapterId || practiceActivity || practiceHref || quickChecks.length ? (
               <button
                 type="button"
-                className={panel === 'check' ? 'is-on' : ''}
-                onClick={() => openPanel('check')}
+                className={`course-study-practice${practiceFullscreen ? ' is-on' : ''}`}
+                onClick={() => {
+                  if (practiceFullscreen) setPracticeFullscreen(false);
+                  else openPracticePopup();
+                }}
               >
                 Practice
               </button>
@@ -1937,11 +4010,11 @@ export default function CourseBookReader({
                   <div className="course-kebab-menu" role="menu">
                     {(
                       [
-                        ...(!wide ? [['contents', 'Contents'] as [typeof panel, string]] : []),
-                        ...(!wide ? [['notes', 'Notes'] as [typeof panel, string]] : []),
+                        ...(!shelf ? [['contents', 'Contents'] as [typeof panel, string]] : []),
+                        ...(!shelf ? [['notes', 'Notes'] as [typeof panel, string]] : []),
                         ['search', 'Search'],
                         ['highlights', 'Highlights'],
-                        ...(!wide ? [['bookmarks', 'Bookmarks'] as [typeof panel, string]] : []),
+                        ...(!shelf ? [['bookmarks', 'Bookmarks'] as [typeof panel, string]] : []),
                         ['progress', 'Progress'],
                         ['display', 'Display'],
                         ...(interactives.length
@@ -1991,19 +4064,18 @@ export default function CourseBookReader({
                           )}
                           {current
                             ? toc.map((item, ti) => (
-                                <button
+                                <TocTopicRow
                                   key={`${item.page}-${ti}`}
-                                  type="button"
-                                  className={`course-toc-item${item.page === printed ? ' is-on' : ''}`}
-                                  style={{ paddingLeft: 18 + (item.level - 1) * 12 }}
-                                  onClick={() => {
+                                  item={item}
+                                  current={item.page === printed}
+                                  done={covered.has(tocCoverKey(item))}
+                                  onOpen={() => {
+                                    setPracticeFullscreen(false);
                                     setIndex(indexFromPrinted(item.page));
                                     setSheetOpen(false);
                                   }}
-                                >
-                                  <span>{item.title}</span>
-                                  <span>p.{item.page}</span>
-                                </button>
+                                  onToggleCovered={() => toggleCovered(item)}
+                                />
                               ))
                             : null}
                         </div>
@@ -2015,16 +4087,17 @@ export default function CourseBookReader({
                 ) : null}
                 {!chapters.length
                   ? toc.map((item, i) => (
-                      <button
+                      <TocTopicRow
                         key={`${item.page}-${i}`}
-                        type="button"
-                        className="course-toc-item"
-                        style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
-                        onClick={() => setIndex(indexFromPrinted(item.page))}
-                      >
-                        <span>{item.title}</span>
-                        <span>p.{item.page}</span>
-                      </button>
+                        item={item}
+                        current={item.page === printed}
+                        done={covered.has(tocCoverKey(item))}
+                        onOpen={() => {
+                          setPracticeFullscreen(false);
+                          setIndex(indexFromPrinted(item.page));
+                        }}
+                        onToggleCovered={() => toggleCovered(item)}
+                      />
                     ))
                   : null}
               </>
@@ -2157,9 +4230,19 @@ export default function CourseBookReader({
                     A+
                   </button>
                 </div>
+                <p className="course-notes-kicker">View</p>
+                <div className="course-theme-row">
+                  <button
+                    type="button"
+                    className={bookFullscreen ? 'is-on' : ''}
+                    onClick={() => void toggleBookFullscreen()}
+                  >
+                    {bookFullscreen ? 'Exit full screen' : 'Full screen'}
+                  </button>
+                </div>
               </>
             ) : null}
-            {panel === 'bookmarks' && !wide ? (
+            {panel === 'bookmarks' && !shelf ? (
               <>
                 {study.bookmarks.length === 0 ? (
                   <p className="course-notes-empty">
@@ -2189,7 +4272,7 @@ export default function CourseBookReader({
                 })}
               </>
             ) : null}
-            {panel === 'notes' && !wide ? (
+            {panel === 'notes' && !shelf ? (
               <div className="course-notes-rail">{notesPanel}</div>
             ) : null}
             {panel === 'progress' ? (
@@ -2211,19 +4294,17 @@ export default function CourseBookReader({
                   <p className="course-notes-empty">No section headings in this chapter yet.</p>
                 ) : null}
                 {toc.map((item, i) => (
-                  <button
+                  <TocTopicRow
                     key={`${item.page}-${i}`}
-                    type="button"
-                    className={`course-toc-item${i === topicIndex ? ' is-on' : ''}`}
-                    style={{ paddingLeft: 8 + (item.level - 1) * 14 }}
-                    onClick={() => setIndex(indexFromPrinted(item.page))}
-                  >
-                    <span>
-                      {item.page <= printed ? '✓ ' : ''}
-                      {item.title}
-                    </span>
-                    <span>p.{item.page}</span>
-                  </button>
+                    item={item}
+                    current={i === topicIndex}
+                    done={covered.has(tocCoverKey(item))}
+                    onOpen={() => {
+                      setPracticeFullscreen(false);
+                      setIndex(indexFromPrinted(item.page));
+                    }}
+                    onToggleCovered={() => toggleCovered(item)}
+                  />
                 ))}
               </>
             ) : null}
@@ -2266,7 +4347,7 @@ export default function CourseBookReader({
           </div>
         </aside>
       ) : null}
-      {!wide && sheetOpen ? (
+      {layout === 'phone' && sheetOpen ? (
         <button
           type="button"
           className="course-reader-sheet-mask"
@@ -2275,6 +4356,15 @@ export default function CourseBookReader({
         />
       ) : null}
       <footer className="course-reader-dock">
+        <button
+          type="button"
+          className="course-dock-turn"
+          aria-label="Previous page"
+          disabled={atStart}
+          onClick={() => turnByDelta(-1)}
+        >
+          ‹
+        </button>
         <div className="course-dock-track">
           <input
             type="range"
@@ -2290,7 +4380,36 @@ export default function CourseBookReader({
               : `Page ${index + 1} of ${pages.length}`}
           </span>
         </div>
+        <button
+          type="button"
+          className="course-dock-turn"
+          aria-label="Next page"
+          disabled={atEnd}
+          onClick={() => turnByDelta(1)}
+        >
+          ›
+        </button>
       </footer>
     </div>
+    {notesFullscreen ? (
+      <div
+        className="course-notes-overlay onenote-read-notes"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="course-notes-overlay-title"
+      >
+        <NotesWorkspace
+          initialBookKey={bookKey || ''}
+          initialChapterSlug={chapterSlug}
+          onClose={(nextBookKey, nextChapterSlug) => {
+            setNotesFullscreen(false);
+            if (nextChapterSlug && nextChapterSlug !== chapterSlug && readBase) {
+              window.location.href = `${readBase}/read?chapter=${encodeURIComponent(nextChapterSlug)}`;
+            }
+          }}
+        />
+      </div>
+    ) : null}
+    </>
   );
 }

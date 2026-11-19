@@ -37,6 +37,7 @@ router.put('/', async (req, res) => {
       imapPort,
       imapSsl,
       fromName,
+      upiVpa,
     } = req.body || {};
 
     if (emailId && !EMAIL_RE.test(String(emailId).trim())) {
@@ -53,9 +54,13 @@ router.put('/', async (req, res) => {
       imapPort: imapPort != null ? Number(imapPort) : undefined,
       imapSsl,
       fromName,
+      upiVpa,
     });
     res.json(toPublicEmailSettings(settings));
   } catch (e: any) {
+    if (e?.status === 400) {
+      return res.status(400).json({ error: e.code || 'invalid_email_settings', message: e.message });
+    }
     console.error(e);
     res.status(500).json({ error: 'email_settings_update_failed', message: e?.message });
   }

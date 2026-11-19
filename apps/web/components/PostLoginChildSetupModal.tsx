@@ -220,28 +220,28 @@ export default function PostLoginChildSetupModal() {
         {step === 'product' ? (
           <>
             <p style={{ color: '#666', marginBottom: 24, textAlign: 'center' }}>
-              Choose one. Magazines are for families. Courses are for college textbooks.
+              Choose Higher Education for university textbooks, or Fun Learning for magazines and kids.
             </p>
             <div className="vv-product-chooser">
               <button
                 type="button"
                 className="vv-product-circle"
                 disabled={loading}
-                onClick={() => chooseProduct('magazine')}
+                onClick={() => chooseProduct('course')}
               >
-                <span className="vv-product-circle-face is-magazine">M</span>
-                <strong>Magazine</strong>
-                <span>Stories and issues</span>
+                <span className="vv-product-circle-face is-course">H</span>
+                <strong>Higher Education</strong>
+                <span>University textbooks</span>
               </button>
               <button
                 type="button"
                 className="vv-product-circle"
                 disabled={loading}
-                onClick={() => chooseProduct('course')}
+                onClick={() => chooseProduct('magazine')}
               >
-                <span className="vv-product-circle-face is-course">C</span>
-                <strong>Course</strong>
-                <span>Books and notes</span>
+                <span className="vv-product-circle-face is-magazine">F</span>
+                <strong>Fun Learning</strong>
+                <span>Magazines and stories</span>
               </button>
             </div>
           </>

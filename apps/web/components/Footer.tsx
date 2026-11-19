@@ -34,7 +34,7 @@ const Footer = () => {
         }}
       >
         <div style={{ whiteSpace: 'nowrap' }}>
-          &copy; {new Date().getFullYear()} VidhyaVibe Magazine. All rights reserved.
+          &copy; {new Date().getFullYear()} VidhyaVibe. All rights reserved.
         </div>
 
         <div style={{ display: 'flex', gap: 16, whiteSpace: 'nowrap' }}>

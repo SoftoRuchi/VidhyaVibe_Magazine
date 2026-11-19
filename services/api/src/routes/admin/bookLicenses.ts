@@ -21,8 +21,11 @@ function n(v: unknown): number {
 
 router.get('/subjects', async (_req, res) => {
   try {
+    await ensureBookAccessTables();
     const [rows]: any = await query(
-      `SELECT s.id, s.name, sem.number AS semesterNumber, c.name AS courseName, c.id AS courseId
+      `SELECT s.id, s.name, sem.number AS semesterNumber, c.name AS courseName, c.id AS courseId,
+              s.price, s.book_bank_price AS bookBankPrice, s.library_price AS libraryPrice,
+              s.discount_pct AS discountPct
        FROM course_subjects s
        INNER JOIN course_semesters sem ON sem.id = s.semester_id
        INNER JOIN courses c ON c.id = sem.course_id
@@ -36,6 +39,10 @@ router.get('/subjects', async (_req, res) => {
         courseName: r.courseName,
         semesterNumber: n(r.semesterNumber),
         label: `${r.courseName} · Sem ${n(r.semesterNumber)} · ${r.name}`,
+        price: r.price != null ? Number(r.price) : null,
+        bookBankPrice: r.bookBankPrice != null ? Number(r.bookBankPrice) : null,
+        libraryPrice: r.libraryPrice != null ? Number(r.libraryPrice) : null,
+        discountPct: r.discountPct != null ? Number(r.discountPct) : null,
       })),
     );
   } catch (e: any) {

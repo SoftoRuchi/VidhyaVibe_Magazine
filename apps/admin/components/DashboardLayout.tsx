@@ -40,11 +40,12 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const isLoginRoute =
     pathname?.startsWith('/admin/login') || pathname === '/login' || pathname?.startsWith('/login');
+  const isReaderRoute = pathname?.includes('/read');
   const {
     token: { colorBgContainer, borderRadiusLG },
   } = theme.useToken();
 
-  if (isLoginRoute) {
+  if (isLoginRoute || isReaderRoute) {
     return <>{children}</>;
   }
 
@@ -55,6 +56,7 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
     if (pathname.includes('/institutes')) return 'institutes';
     if (pathname.includes('/users')) return 'users';
     if (pathname.includes('/magazines')) return 'magazines';
+    if (pathname.includes('/books')) return 'books';
     if (pathname.includes('/courses')) return 'courses';
     if (pathname.includes('/age-groups')) return 'age-groups';
     if (pathname.includes('/plans')) return 'plans';
@@ -81,8 +83,13 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
       label: <Link href="/admin/magazines">Magazines</Link>,
     },
     {
-      key: 'courses',
+      key: 'books',
       icon: <BookOutlined />,
+      label: <Link href="/admin/books">Books</Link>,
+    },
+    {
+      key: 'courses',
+      icon: <AppstoreOutlined />,
       label: <Link href="/admin/courses">Courses</Link>,
     },
     {
@@ -306,7 +313,28 @@ const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
             <Button
               type="text"
               icon={<ArrowLeftOutlined />}
-              onClick={() => router.back()}
+              onClick={() => {
+                const chapterMatch = pathname?.match(/^\/admin\/courses\/(\d+)\/chapters\/(\d+)/);
+                if (chapterMatch) {
+                  const courseId = chapterMatch[1];
+                  const savedState =
+                    typeof window !== 'undefined'
+                      ? sessionStorage.getItem(`admin_course_${courseId}_view`)
+                      : null;
+                  let target = `/admin/courses/${courseId}?tab=chapter`;
+                  if (savedState) {
+                    try {
+                      const parsed = JSON.parse(savedState);
+                      if (parsed.semesterId) target += `&semesterId=${parsed.semesterId}`;
+                      if (parsed.subjectId) target += `&subjectId=${parsed.subjectId}`;
+                      if (parsed.chapterId) target += `&chapterId=${parsed.chapterId}`;
+                    } catch {}
+                  }
+                  router.push(target);
+                  return;
+                }
+                router.back();
+              }}
               style={{
                 fontSize: '16px',
                 width: 42,

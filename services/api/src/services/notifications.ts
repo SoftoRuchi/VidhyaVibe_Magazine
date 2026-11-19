@@ -15,6 +15,14 @@ type NotifyChannelResult = {
   detail?: string;
 };
 
+export type EmailAttachment = {
+  filename: string;
+  content: Buffer;
+  cid?: string;
+  contentType?: string;
+  contentDisposition?: 'inline' | 'attachment';
+};
+
 function normalizePhone(phone: string): string {
   const digits = String(phone || '').replace(/\D/g, '');
   if (digits.length === 10) return `91${digits}`;
@@ -28,18 +36,34 @@ function e164(phone: string): string {
   return n.startsWith('+') ? n : `+${n}`;
 }
 
-async function sendEmailViaResend(to: string, subject: string, text: string): Promise<boolean> {
+async function sendEmailViaResend(
+  to: string,
+  subject: string,
+  text: string,
+  opts?: { html?: string; attachments?: EmailAttachment[] },
+): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return false;
   const cfg = await resolveSmtpConfig();
   const from = `${cfg.fromName} <${cfg.fromEmail}>`;
+  const attachments = (opts?.attachments || []).map((a) => ({
+    filename: a.filename,
+    content: a.content.toString('base64'),
+  }));
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ from, to: [to], subject, text }),
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject,
+      text,
+      html: opts?.html,
+      attachments: attachments.length ? attachments : undefined,
+    }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -48,14 +72,18 @@ async function sendEmailViaResend(to: string, subject: string, text: string): Pr
   return true;
 }
 
-async function sendEmailViaSmtp(to: string, subject: string, text: string): Promise<boolean> {
+async function sendEmailViaSmtp(
+  to: string,
+  subject: string,
+  text: string,
+  opts?: { html?: string; attachments?: EmailAttachment[] },
+): Promise<boolean> {
   const cfg = await resolveSmtpConfig();
   if (!cfg.host || !cfg.user || !cfg.pass) return false;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const nodemailer = require('nodemailer');
-    // Port 465 = SSL; 587 = STARTTLS when smtpTls is on
     const transporter = nodemailer.createTransport({
       host: cfg.host,
       port: cfg.port,
@@ -64,8 +92,20 @@ async function sendEmailViaSmtp(to: string, subject: string, text: string): Prom
       auth: { user: cfg.user, pass: cfg.pass },
     });
     const from = `${cfg.fromName} <${cfg.fromEmail}>`;
-    // Always send TO the customer's email; From = configured Email ID
-    await transporter.sendMail({ from, to, subject, text });
+    await transporter.sendMail({
+      from,
+      to,
+      subject,
+      text,
+      html: opts?.html,
+      attachments: opts?.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        cid: a.cid,
+        contentType: a.contentType,
+        contentDisposition: a.contentDisposition || (a.cid ? 'inline' : 'attachment'),
+      })),
+    });
     return true;
   } catch (e: any) {
     if (e?.code === 'MODULE_NOT_FOUND') {
@@ -184,13 +224,14 @@ export async function sendEmail(
   to: string,
   subject: string,
   text: string,
+  opts?: { html?: string; attachments?: EmailAttachment[] },
 ): Promise<NotifyChannelResult> {
-  console.info('[notifications:email]', { to, subject, text: text.slice(0, 240) });
+  console.info('[notifications:email]', { to, subject, text: text.slice(0, 900) });
   try {
-    if (await sendEmailViaSmtp(to, subject, text)) {
+    if (await sendEmailViaSmtp(to, subject, text, opts)) {
       return { channel: 'email', ok: true, detail: 'smtp_db' };
     }
-    if (await sendEmailViaResend(to, subject, text)) {
+    if (await sendEmailViaResend(to, subject, text, opts)) {
       return { channel: 'email', ok: true, detail: 'resend' };
     }
     console.warn(
@@ -472,4 +513,102 @@ export async function sendPurchaseConfirmation(params: {
   }
   await Promise.all(tasks);
   return { ok: true };
+}
+
+function escapeHtml(value: string) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function upiQrPng(upi: string): Promise<Buffer | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const QRCode = require('qrcode');
+    return await QRCode.toBuffer(upi, { type: 'png', width: 280, margin: 1, errorCorrectionLevel: 'M' });
+  } catch (e) {
+    console.error('[notifications] QR PNG failed', (e as Error)?.message || e);
+    return null;
+  }
+}
+
+export async function sendInstituteLicensePayment(params: {
+  to: string;
+  collegeName: string;
+  bookName: string;
+  courseName: string;
+  accessModel: string;
+  seatCount: number;
+  amount: number;
+  payUrl: string;
+  upi: string;
+  upiVpa: string;
+  qrPngUrl?: string;
+  purchaseCode: string;
+}) {
+  const amountLabel = `₹${Number(params.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const model = params.accessModel === 'LIBRARY' ? 'Library (concurrent seats)' : 'Book bank (named students)';
+  const hasUpi = Boolean(params.upiVpa && params.upi && !/^merchant@/i.test(params.upiVpa));
+  const qrPayload = hasUpi ? params.upi : params.payUrl;
+  const qr = qrPayload ? await upiQrPng(qrPayload) : null;
+  const qrRemote =
+    params.qrPngUrl && params.qrPngUrl.startsWith('https://') ? params.qrPngUrl : '';
+  const text =
+    `Hello ${params.collegeName},\n\n` +
+    `Please pay ${amountLabel} to VidhyaVibe for textbook licenses.\n\n` +
+    `Book: ${params.bookName}\n` +
+    (params.courseName ? `Course: ${params.courseName}\n` : '') +
+    `Access: ${model}\n` +
+    `Licenses: ${params.seatCount}\n` +
+    `Reference: ${params.purchaseCode}\n\n` +
+    `Pay here:\n${params.payUrl}\n\n` +
+    (hasUpi ? `VidhyaVibe UPI ID: ${params.upiVpa}\nUPI app: ${params.upi}\n\n` : '') +
+    `Scan the attached VidhyaVibe-QR.png to pay.\n\n` +
+    `— VidhyaVibe`;
+  const html =
+    `<div style="font-family:Arial,sans-serif;max-width:560px;color:#111">` +
+    `<p>Hello ${escapeHtml(params.collegeName)},</p>` +
+    `<p>Please pay <strong>${escapeHtml(amountLabel)}</strong> to <strong>VidhyaVibe</strong> for textbook licenses.</p>` +
+    `<p>` +
+    `Book: ${escapeHtml(params.bookName)}<br/>` +
+    (params.courseName ? `Course: ${escapeHtml(params.courseName)}<br/>` : '') +
+    `Access: ${escapeHtml(model)}<br/>` +
+    `Licenses: ${params.seatCount}<br/>` +
+    `Reference: ${escapeHtml(params.purchaseCode)}` +
+    `</p>` +
+    `<p><a href="${escapeHtml(params.payUrl)}" style="display:inline-block;background:#2d7a3e;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">Pay on VidhyaVibe</a></p>` +
+    `<p style="word-break:break-all;font-size:13px">${escapeHtml(params.payUrl)}</p>` +
+    (hasUpi ? `<p>VidhyaVibe UPI ID: <strong>${escapeHtml(params.upiVpa)}</strong></p>` : '') +
+    `<p>Scan this VidhyaVibe QR:</p>` +
+    (qrRemote
+      ? `<p><img src="${escapeHtml(qrRemote)}" alt="VidhyaVibe QR" width="220" height="220" style="display:block;border:0" /></p>`
+      : '') +
+    (qr
+      ? `<p><img src="cid:vv-qr" alt="VidhyaVibe QR" width="220" height="220" style="display:block;border:0" /></p>`
+      : '') +
+    `<p>If the QR is hidden, open the attached <strong>VidhyaVibe-QR.png</strong>.</p>` +
+    `<p>— VidhyaVibe</p></div>`;
+  const attachments = qr
+    ? [
+        {
+          filename: 'VidhyaVibe-QR.png',
+          content: qr,
+          cid: 'vv-qr',
+          contentType: 'image/png',
+          contentDisposition: 'inline' as const,
+        },
+        {
+          filename: 'VidhyaVibe-QR-scan.png',
+          content: qr,
+          contentType: 'image/png',
+          contentDisposition: 'attachment' as const,
+        },
+      ]
+    : undefined;
+  return sendEmail(params.to, `VidhyaVibe — pay ${amountLabel} for ${params.bookName}`, text, {
+    html,
+    attachments,
+  });
 }

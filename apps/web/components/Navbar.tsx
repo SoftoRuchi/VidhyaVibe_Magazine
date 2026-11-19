@@ -17,10 +17,29 @@ import brandLogo from './images/logo_rmbg.png';
 
 const Navbar = () => {
   const { loggedIn, welcomeName: authWelcomeName, clearAuth } = useAuth();
-  const { mode, canUseCourses } = useProductMode();
+  const { mode, setMode, canUseCourses } = useProductMode();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [collegeAdmin, setCollegeAdmin] = React.useState(false);
   const pathname = usePathname();
+  const [readerNotesOpen, setReaderNotesOpen] = React.useState(false);
+  const isReaderPage = Boolean(pathname && pathname.includes('/read'));
+
+  React.useEffect(() => {
+    const handleReaderNotesState = (e: Event) => {
+      const custom = e as CustomEvent<{ open?: boolean }>;
+      setReaderNotesOpen(Boolean(custom.detail?.open));
+    };
+    window.addEventListener('vv-reader-notes-state', handleReaderNotesState);
+    return () => {
+      window.removeEventListener('vv-reader-notes-state', handleReaderNotesState);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!isReaderPage) {
+      setReaderNotesOpen(false);
+    }
+  }, [isReaderPage, pathname]);
 
   const hideOnAuthPages = pathname === '/login' || pathname === '/signup';
   const welcomeName = isChildAudience() ? getSelectedReaderName() || 'Reader' : authWelcomeName;
@@ -56,6 +75,14 @@ const Navbar = () => {
     window.location.href = '/login';
   };
 
+  const brandLabel = 'VidhyaVibe';
+  const showProductToggle = canUseCourses && !childMode;
+
+  const switchProduct = (next: 'course' | 'magazine') => {
+    setMode(next);
+    setMobileOpen(false);
+  };
+
   const navLinks =
     mode === 'course' && canUseCourses
       ? [
@@ -81,6 +108,8 @@ const Navbar = () => {
     return tab.href;
   };
 
+  const visibleNavLinks = navLinks.filter((tab) => loggedIn || !tab.requiresAuth);
+
   const prefetchNav = (href: string) => {
     prefetchRouteData(api, href);
   };
@@ -91,7 +120,7 @@ const Navbar = () => {
         <Link
           href="/"
           className="vv-navbar-brand"
-          aria-label={mode === 'course' ? 'VidhyaVibe Courses' : 'VidhyaVibe Magazine'}
+          aria-label={brandLabel}
         >
           <Image
             src={brandLogo}
@@ -106,7 +135,7 @@ const Navbar = () => {
               ★
             </span>
             <span className="vv-navbar-brandText">
-              {mode === 'course' ? 'VidhyaVibe Courses' : 'VidhyaVibe Magazine'}
+              {brandLabel}
             </span>
             <span
               className="vv-navbar-titleIcon"
@@ -119,7 +148,20 @@ const Navbar = () => {
         </Link>
 
         <div className="vv-navbar-center">
-          {navLinks.map((tab) => {
+          {visibleNavLinks.map((tab) => {
+            if (tab.href === '/notes' && isReaderPage) {
+              const active = readerNotesOpen;
+              return (
+                <button
+                  key={tab.href}
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('vv-toggle-reader-notes'))}
+                  className={`vv-navbar-tab${active ? ' vv-navbar-tab--active' : ''}`}
+                >
+                  {tab.label}
+                </button>
+              );
+            }
             const href = resolveHref(tab);
             const active = tab.href === '/' ? pathname === '/' : pathname.startsWith(tab.href);
             return (
@@ -138,6 +180,24 @@ const Navbar = () => {
         </div>
 
         <div className="vv-navbar-end">
+          {showProductToggle ? (
+            <div className="vv-mode-switch" role="tablist" aria-label="Switch product">
+              <button
+                type="button"
+                className={mode === 'course' ? 'is-on' : ''}
+                onClick={() => switchProduct('course')}
+              >
+                Higher Education
+              </button>
+              <button
+                type="button"
+                className={mode === 'magazine' ? 'is-on' : ''}
+                onClick={() => switchProduct('magazine')}
+              >
+                Fun Learning
+              </button>
+            </div>
+          ) : null}
           {loggedIn && <span className="vv-navbar-user">Welcome, {welcomeName}</span>}
 
           <Button
@@ -204,8 +264,42 @@ const Navbar = () => {
         <div className="vv-mobile-panel-inner">
           {loggedIn && <div className="vv-mobile-welcome">Welcome, {welcomeName}</div>}
 
+          {showProductToggle ? (
+            <div className="vv-mode-switch vv-mode-switch--mobile" role="tablist" aria-label="Switch product">
+              <button
+                type="button"
+                className={mode === 'course' ? 'is-on' : ''}
+                onClick={() => switchProduct('course')}
+              >
+                Higher Education
+              </button>
+              <button
+                type="button"
+                className={mode === 'magazine' ? 'is-on' : ''}
+                onClick={() => switchProduct('magazine')}
+              >
+                Fun Learning
+              </button>
+            </div>
+          ) : null}
+
           <div className="vv-mobile-menu">
-            {navLinks.map((tab) => {
+            {visibleNavLinks.map((tab) => {
+              if (tab.href === '/notes' && isReaderPage) {
+                return (
+                  <button
+                    key={tab.href}
+                    type="button"
+                    onClick={() => {
+                      setMobileOpen(false);
+                      window.dispatchEvent(new CustomEvent('vv-toggle-reader-notes'));
+                    }}
+                    className="vv-mobile-menu-item"
+                  >
+                    {tab.label}
+                  </button>
+                );
+              }
               const href = resolveHref(tab);
               return (
                 <Link

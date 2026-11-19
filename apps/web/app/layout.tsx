@@ -3,9 +3,9 @@ import './globals.css';
 import AppProviders from '../components/AppProviders';
 
 export const metadata = {
-  title: 'VidhyaVibe Magazine',
+  title: 'VidhyaVibe',
   description:
-    'Digital and print magazines for readers of all ages — stories, learning, and discovery.',
+    'Higher Education textbooks and Fun Learning magazines from VidhyaVibe.',
   icons: {
     icon: '/images/brand/logonew.png',
     apple: '/images/brand/logonew.png',

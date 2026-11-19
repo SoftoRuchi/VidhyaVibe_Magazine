@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { hashPassword } from '../auth/password';
 import { getPool, query } from '../db';
+import { resolveUpiVpa } from './emailSettings';
 import { sendStudentLoginCredentials } from './notifications';
 
 export type AccessModel = 'BOOK_BANK' | 'LIBRARY' | 'INDIVIDUAL' | 'ADMIN' | 'OPEN';
@@ -22,8 +23,33 @@ function n(v: unknown): number {
 }
 
 let tablesReady = false;
+let tablesPromise: Promise<void> | null = null;
 
 export async function ensureBookAccessTables() {
+  if (tablesReady) return;
+  if (!tablesPromise) {
+    tablesPromise = ensureBookAccessTablesInner()
+      .then(() => {
+        tablesReady = true;
+      })
+      .catch((err) => {
+        tablesPromise = null;
+        throw err;
+      });
+  }
+  await tablesPromise;
+}
+
+async function columnExists(table: string, column: string) {
+  const [cols]: any = await query(
+    `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [table, column],
+  );
+  return n(cols?.[0]?.c) > 0;
+}
+
+async function ensureBookAccessTablesInner() {
   if (tablesReady) return;
   await query(`
     CREATE TABLE IF NOT EXISTS institutes (
@@ -111,16 +137,12 @@ export async function ensureBookAccessTables() {
       KEY book_reading_sessions_live (subject_id, ended_at, last_heartbeat_at)
     ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
   `);
-  try {
-    const [cols]: any = await query(
-      `SELECT COUNT(*) AS c FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'course_subjects' AND COLUMN_NAME = 'price'`,
-    );
-    if (!n(cols?.[0]?.c)) {
+  if (!(await columnExists('course_subjects', 'price'))) {
+    try {
       await query('ALTER TABLE course_subjects ADD COLUMN price DECIMAL(10,2) NULL');
+    } catch (e) {
+      console.warn('[bookAccess] price column ensure failed', e);
     }
-  } catch (e) {
-    console.warn('[bookAccess] price column ensure failed', e);
   }
   await query(`
     CREATE TABLE IF NOT EXISTS book_orders (
@@ -157,14 +179,32 @@ export async function ensureBookAccessTables() {
       KEY book_order_proofs_pending (verified)
     ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
   `);
-  for (const sql of [
-    'ALTER TABLE sessions ADD COLUMN logged_out_at DATETIME NULL',
-    'ALTER TABLE sessions ADD COLUMN last_seen_at DATETIME NULL',
-  ]) {
+  const extraColumns: Array<[string, string, string]> = [
+    ['sessions', 'logged_out_at', 'DATETIME NULL'],
+    ['sessions', 'last_seen_at', 'DATETIME NULL'],
+    ['course_subjects', 'book_bank_price', 'DECIMAL(10,2) NULL'],
+    ['course_subjects', 'library_price', 'DECIMAL(10,2) NULL'],
+    ['course_subjects', 'discount_pct', 'DECIMAL(5,2) NULL'],
+    ['course_subjects', 'physical_price', 'DECIMAL(10,2) NULL'],
+    ['course_subjects', 'both_price', 'DECIMAL(10,2) NULL'],
+    ['course_subjects', 'isbn', 'VARCHAR(32) NULL'],
+    ['book_license_lots', 'amount', 'DECIMAL(10,2) NULL'],
+    ['book_license_lots', 'discount_pct', 'DECIMAL(5,2) NULL'],
+    ['book_license_lots', 'payment_status', 'VARCHAR(16) NULL'],
+    ['book_license_lots', 'payment_sent_at', 'DATETIME(3) NULL'],
+    ['book_license_lots', 'rp_order_id', 'VARCHAR(64) NULL'],
+    ['book_orders', 'delivery_format', "VARCHAR(16) NULL"],
+    ['book_orders', 'ship_line', 'VARCHAR(500) NULL'],
+    ['book_orders', 'ship_city', 'VARCHAR(120) NULL'],
+    ['book_orders', 'ship_state', 'VARCHAR(120) NULL'],
+    ['book_orders', 'ship_pincode', 'VARCHAR(16) NULL'],
+  ];
+  for (const [table, column, def] of extraColumns) {
     try {
-      await query(sql);
+      if (await columnExists(table, column)) continue;
+      await query(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
     } catch {
-      // column already exists
+      // table or column may not exist yet / already exists
     }
   }
   tablesReady = true;
@@ -175,6 +215,21 @@ export function parseBookPrice(v: unknown): number | null {
   const amount = Number(v);
   if (!Number.isFinite(amount) || amount < 0) return null;
   return Math.round(amount * 100) / 100;
+}
+
+export function parseDiscountPct(v: unknown): number | null {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const pct = Number(v);
+  if (!Number.isFinite(pct) || pct <= 0) return null;
+  return Math.round(Math.min(100, pct) * 100) / 100;
+}
+
+export function applyListDiscount(list: number | null | undefined, discountPct?: number | null): number | null {
+  if (list == null || !Number.isFinite(list)) return null;
+  const pct = Number(discountPct);
+  if (!Number.isFinite(pct) || pct <= 0) return Math.round(list * 100) / 100;
+  const cut = Math.min(100, Math.max(0, pct));
+  return Math.round(list * (1 - cut / 100) * 100) / 100;
 }
 
 export async function grantIndividualLicense(opts: {
@@ -221,11 +276,30 @@ export type BookCheckout = {
   upi?: string | null;
 };
 
-function bookUpiLink(orderId: number, amount: number, currency: string) {
-  const pa = encodeURIComponent(process.env.UPI_VPA || 'merchant@upi');
+async function bookUpiLink(orderId: number, amount: number, currency: string) {
+  const vpa = await resolveUpiVpa();
+  if (!vpa) return null;
+  const pa = encodeURIComponent(vpa);
   const pn = encodeURIComponent('VidhyaVibe');
   const tn = encodeURIComponent(`Book ${orderId}`);
   return `upi://pay?pa=${pa}&pn=${pn}&tn=${tn}&am=${amount.toFixed(2)}&cu=${currency}`;
+}
+
+async function checkoutPayload(row: any): Promise<BookCheckout> {
+  const amount = Number(row.amount);
+  const currency = String(row.currency || 'INR');
+  const provider = row.provider === 'razorpay' && row.rp_order_id ? 'razorpay' : 'upi';
+  return {
+    needsPayment: true,
+    orderId: n(row.id),
+    amount,
+    currency,
+    provider,
+    status: String(row.status || 'PENDING'),
+    rpOrderId: row.rp_order_id || null,
+    razorpayKeyId: provider === 'razorpay' ? process.env.RAZORPAY_KEY_ID || null : null,
+    upi: provider === 'upi' ? await bookUpiLink(n(row.id), amount, currency) : null,
+  };
 }
 
 async function createRazorpayBookOrder(amount: number, currency: string, receipt: string) {
@@ -250,21 +324,31 @@ async function createRazorpayBookOrder(amount: number, currency: string, receipt
   return { id: String(data.id), keyId };
 }
 
-function checkoutPayload(row: any): BookCheckout {
-  const amount = Number(row.amount);
-  const currency = String(row.currency || 'INR');
-  const provider = row.provider === 'razorpay' && row.rp_order_id ? 'razorpay' : 'upi';
-  return {
-    needsPayment: true,
-    orderId: n(row.id),
-    amount,
-    currency,
-    provider,
-    status: String(row.status || 'PENDING'),
-    rpOrderId: row.rp_order_id || null,
-    razorpayKeyId: provider === 'razorpay' ? process.env.RAZORPAY_KEY_ID || null : null,
-    upi: provider === 'upi' ? bookUpiLink(n(row.id), amount, currency) : null,
-  };
+export type BookOrderShipping = {
+  line1: string;
+  city: string;
+  state?: string;
+  pincode: string;
+};
+
+async function saveBookOrderFulfillment(
+  orderId: number,
+  format: 'EBOOK' | 'POD' | 'BOTH',
+  shipping?: BookOrderShipping | null,
+) {
+  await query(
+    `UPDATE book_orders
+     SET delivery_format = ?, ship_line = ?, ship_city = ?, ship_state = ?, ship_pincode = ?
+     WHERE id = ?`,
+    [
+      format,
+      shipping?.line1 || null,
+      shipping?.city || null,
+      shipping?.state || null,
+      shipping?.pincode || null,
+      orderId,
+    ],
+  );
 }
 
 export async function createBookCheckout(opts: {
@@ -272,6 +356,8 @@ export async function createBookCheckout(opts: {
   subjectId: number;
   price: number;
   currency?: string;
+  format?: 'EBOOK' | 'POD' | 'BOTH';
+  shipping?: BookOrderShipping | null;
 }): Promise<BookCheckout> {
   await ensureBookAccessTables();
   const currency = opts.currency || 'INR';
@@ -282,9 +368,11 @@ export async function createBookCheckout(opts: {
      ORDER BY id DESC LIMIT 1`,
     [opts.userId, opts.subjectId],
   );
+  const format = opts.format === 'POD' ? 'POD' : 'EBOOK';
   if (existing?.[0]) {
     const row = existing[0];
-    if (row.provider === 'razorpay' && row.rp_order_id) return checkoutPayload(row);
+    await saveBookOrderFulfillment(n(row.id), format, opts.shipping);
+    if (row.provider === 'razorpay' && row.rp_order_id) return await checkoutPayload(row);
     const rp = await createRazorpayBookOrder(
       Number(row.amount),
       String(row.currency || currency),
@@ -298,7 +386,7 @@ export async function createBookCheckout(opts: {
       row.provider = 'razorpay';
       row.rp_order_id = rp.id;
     }
-    return checkoutPayload(row);
+    return await checkoutPayload(row);
   }
 
   const [ins]: any = await query(
@@ -314,11 +402,12 @@ export async function createBookCheckout(opts: {
       orderId,
     ]);
   }
+  await saveBookOrderFulfillment(orderId, format, opts.shipping);
   const [rows]: any = await query(
     `SELECT id, amount, currency, status, provider, rp_order_id FROM book_orders WHERE id = ? LIMIT 1`,
     [orderId],
   );
-  return checkoutPayload(rows[0]);
+  return await checkoutPayload(rows[0]);
 }
 
 export async function confirmBookRazorpayPayment(opts: {

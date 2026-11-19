@@ -19,6 +19,7 @@ import {
   saveCourseProgress,
   type CourseQuickCheckItem,
 } from '../../../../../../lib/coursesApi';
+import { compareChapters } from '../../../../../../lib/courseChapters';
 import CourseBookReader from './CourseBookReader';
 
 export default function CourseReadPage() {
@@ -66,7 +67,8 @@ export default function CourseReadPage() {
         if (!match) return;
         try {
           const sub = await fetchSubject(match.id);
-          const chapters = sub.chapters || [];
+          const chapters = [...(sub.chapters || [])].sort(compareChapters);
+          sub.chapters = chapters;
           const chMeta = chapters.find((c: any) => c.slug === chapterSlug) || chapters[0];
           if (!chMeta) {
             if (!cancelled) setSubject(sub);
@@ -198,7 +200,7 @@ export default function CourseReadPage() {
   }
 
   const base = `/courses/${slug}/sem-${subject.semester.number}/${subject.slug}`;
-  const chapters = subject.chapters || [];
+  const chapters = [...(subject.chapters || [])].sort(compareChapters);
   const idx = chapters.findIndex((c: any) => c.id === chapter.id);
   const prev = idx > 0 ? chapters[idx - 1] : null;
   const next = idx >= 0 && idx < chapters.length - 1 ? chapters[idx + 1] : null;
@@ -221,12 +223,19 @@ export default function CourseReadPage() {
         closeHref={base}
         readBase={base}
         chapterSlug={chapter.slug}
+        bookKey={`${slug}:${number}:${subject.slug}`}
         chapters={(chapters as { slug: string; title: string }[]).map((c) => ({
           slug: c.slug,
           title: c.title,
         }))}
         notesHref={`${base}/notes?chapter=${encodeURIComponent(chapter.slug)}`}
         practiceHref={practiceActs.length > 0 ? `${base}/quiz?chapter=${chapter.slug}` : null}
+        practiceActivity={
+          practiceActs.find((a: any) => a.activityType === 'QUIZ' && a.placement === 'PRACTICE') ||
+          practiceActs.find((a: any) => a.activityType === 'QUIZ') ||
+          practiceActs.find((a: any) => a.placement === 'PRACTICE') ||
+          null
+        }
         prevChapter={prev ? { slug: prev.slug, title: prev.title } : null}
         nextChapter={next ? { slug: next.slug, title: next.title } : null}
         startPage={chapter.startPage || 1}
@@ -237,6 +246,7 @@ export default function CourseReadPage() {
         frontCoverUrl={subject.frontCoverUrl || chapter.subject?.frontCoverUrl}
         backCoverUrl={subject.backCoverUrl || chapter.subject?.backCoverUrl}
         onReadingPage={onReadingPage}
+        initialNotesOpen={search.get('notes') === '1'}
       />
     </main>
   );

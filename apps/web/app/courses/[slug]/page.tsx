@@ -61,11 +61,6 @@ export default function CourseDetailPage() {
           courseCountLabel(semesters.length, 'semester'),
           courseCountLabel(subjectTotal, 'subject'),
         ]}
-        actions={
-          <Link href={`/courses/${slug}/subscribe`} className="vv-course-btn is-subscribe">
-            Subscribe
-          </Link>
-        }
       />
       <CourseSection title={semesters.length ? 'Choose a semester' : 'Semesters'} />
       {semesters.length === 0 ? (

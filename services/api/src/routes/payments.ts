@@ -6,8 +6,15 @@ import { requireAuth } from '../middleware/auth';
 import { guestCheckoutRateLimiter } from '../middleware/rateLimiter';
 import { memoryUpload } from '../middleware/upload';
 import { getStorageAdapter } from '../providers/storage';
+import { BookAccessError } from '../services/bookAccess';
 import { previewCouponDiscount, normalizeCouponCode } from '../services/coupons';
 import { upsertGuestBuyer, ensureShippingAddress } from '../services/guestBuyer';
+import {
+  confirmInstituteLotRazorpay,
+  instituteLotQrPng,
+  loadInstituteLotPay,
+  startInstituteLotRazorpay,
+} from '../services/instituteLotPay';
 import {
   AlreadyPurchasedError,
   assertMagazineNotAlreadyPurchased,
@@ -375,6 +382,65 @@ router.post('/razorpay/guest-confirm', async (req, res) => {
     });
     res.json(result);
   } catch (e: any) {
+    console.error(e);
+    res.status(400).json({ error: 'confirm_failed', message: e.message });
+  }
+});
+
+router.get('/institute-lot/:code', async (req, res) => {
+  try {
+    const offer = await loadInstituteLotPay(String(req.params.code || ''));
+    res.json(offer);
+  } catch (e: any) {
+    if (e instanceof BookAccessError) {
+      return res.status(e.status).json({ error: e.code, message: e.message });
+    }
+    console.error(e);
+    res.status(500).json({ error: 'lookup_failed' });
+  }
+});
+
+router.get('/institute-lot/:code/qr.png', async (req, res) => {
+  try {
+    const png = await instituteLotQrPng(String(req.params.code || ''));
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(png);
+  } catch (e: any) {
+    if (e instanceof BookAccessError) {
+      return res.status(e.status).json({ error: e.code, message: e.message });
+    }
+    console.error(e);
+    res.status(500).json({ error: 'qr_failed' });
+  }
+});
+
+router.post('/institute-lot/:code/razorpay', guestCheckoutRateLimiter, async (req, res) => {
+  try {
+    const result = await startInstituteLotRazorpay(String(req.params.code || ''));
+    res.json(result);
+  } catch (e: any) {
+    if (e instanceof BookAccessError) {
+      return res.status(e.status).json({ error: e.code, message: e.message });
+    }
+    console.error(e);
+    res.status(500).json({ error: 'razorpay_failed' });
+  }
+});
+
+router.post('/institute-lot/:code/confirm', guestCheckoutRateLimiter, async (req, res) => {
+  try {
+    const result = await confirmInstituteLotRazorpay({
+      code: String(req.params.code || ''),
+      razorpay_payment_id: String(req.body?.razorpay_payment_id || ''),
+      razorpay_order_id: String(req.body?.razorpay_order_id || ''),
+      razorpay_signature: String(req.body?.razorpay_signature || ''),
+    });
+    res.json(result);
+  } catch (e: any) {
+    if (e instanceof BookAccessError) {
+      return res.status(e.status).json({ error: e.code, message: e.message });
+    }
     console.error(e);
     res.status(400).json({ error: 'confirm_failed', message: e.message });
   }

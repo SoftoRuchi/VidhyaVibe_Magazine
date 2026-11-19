@@ -1,11 +1,13 @@
 import { Router } from 'express';
+import type { NextFunction, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getPool, query } from '../../db';
 import { requireAdmin } from '../../middleware/admin';
 import { requireAuth, type AuthRequest } from '../../middleware/auth';
 import { memoryUpload } from '../../middleware/upload';
 import { getStorageAdapter } from '../../providers/storage';
-import { ensureBookAccessTables, parseBookPrice } from '../../services/bookAccess';
+import { ensureBookAccessTables, parseBookPrice, parseDiscountPct } from '../../services/bookAccess';
+import { compareChapters, extractChapterNumber } from '../../utils/courseChapters';
 import { publicFileUrlForKey } from '../../utils/courseAssets';
 import { slugify } from '../../utils/slugify';
 import { asDoc, htmlToJson, jsonToHtml } from '../../utils/textbookContent';
@@ -15,13 +17,40 @@ router.use(requireAuth);
 router.use(requireAdmin);
 
 const upload = memoryUpload;
-const subjectUpload = upload.fields([
-  { name: 'cover', maxCount: 1 },
-  { name: 'frontCover', maxCount: 1 },
-  { name: 'backCover', maxCount: 1 },
-  { name: 'bookPdf', maxCount: 1 },
-]);
-const imageUpload = upload.single('image');
+const subjectUpload = runUpload(
+  upload.fields([
+    { name: 'cover', maxCount: 1 },
+    { name: 'frontCover', maxCount: 1 },
+    { name: 'backCover', maxCount: 1 },
+    { name: 'bookPdf', maxCount: 1 },
+  ]),
+);
+const subjectCoverUpload = runUpload(
+  upload.fields([
+    { name: 'cover', maxCount: 1 },
+    { name: 'frontCover', maxCount: 1 },
+    { name: 'backCover', maxCount: 1 },
+  ]),
+);
+const imageUpload = runUpload(upload.single('image'));
+
+function runUpload(mw: (req: AuthRequest, res: Response, cb: (err?: unknown) => void) => void) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    mw(req, res, (err?: unknown) => {
+      if (!err) return next();
+      const code = (err as { code?: string })?.code;
+      const message = (err as { message?: string })?.message || 'Upload failed';
+      if (code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: 'file_too_large',
+          message: 'Image is too large (max 50 MB). Try a smaller JPG or PNG.',
+        });
+      }
+      console.error('[courses upload]', err);
+      return res.status(400).json({ error: 'upload_rejected', message });
+    });
+  };
+}
 
 function n(v: unknown): number {
   return Number(v);
@@ -40,6 +69,48 @@ async function nextChapterSortOrder(subjectId: number): Promise<number> {
   );
   const next = n(rows?.[0]?.nextSort);
   return Number.isFinite(next) && next > 0 ? next : 10;
+}
+
+export async function resequenceSubjectChapters(subjectId: number): Promise<void> {
+  if (!subjectId) return;
+  const [rows]: any = await query(
+    'SELECT id, title, sort_order AS sortOrder FROM course_chapters WHERE subject_id = ?',
+    [subjectId],
+  );
+  if (!rows || rows.length === 0) return;
+  const sorted = [...rows].sort(compareChapters);
+  for (let i = 0; i < sorted.length; i++) {
+    const expectedSort = (i + 1) * 10;
+    if (Number(sorted[i].sortOrder) !== expectedSort) {
+      await query('UPDATE course_chapters SET sort_order = ? WHERE id = ?', [
+        expectedSort,
+        sorted[i].id,
+      ]);
+    }
+  }
+}
+
+function jsonCol(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return null;
+  }
+}
+
+async function uniqueSubjectSlug(conn: any, semesterId: number, base: string): Promise<string> {
+  const root = slugify(base) || 'book';
+  for (let i = 0; i < 80; i += 1) {
+    const trySlug = i === 0 ? root : `${root}-${i + 1}`;
+    const [rows]: any = await conn.query(
+      'SELECT id FROM course_subjects WHERE semester_id = ? AND slug = ? LIMIT 1',
+      [semesterId, trySlug],
+    );
+    if (!rows?.[0]) return trySlug;
+  }
+  return `${root}-${Date.now()}`;
 }
 
 function chapterDoc(row: {
@@ -87,8 +158,13 @@ router.post('/images', imageUpload, async (req: AuthRequest, res) => {
     const url = publicFileUrlForKey(up.key);
     res.status(201).json({ key: up.key, url });
   } catch (e: any) {
-    console.error(e);
-    res.status(500).json({ error: 'upload_failed' });
+    console.error('[courses/images]', e);
+    const code = String(e?.code || e?.name || '');
+    const message =
+      code === 'EACCES' || code === 'EPERM'
+        ? 'Server cannot save the picture (storage folder is not writable).'
+        : e?.message || 'Upload failed';
+    res.status(500).json({ error: 'upload_failed', message, details: code || undefined });
   }
 });
 
@@ -149,6 +225,197 @@ router.get('/', async (_req, res) => {
   }
 });
 
+/** GET /api/admin/courses/book-catalog — books and destination semesters for copy */
+router.get('/book-catalog', async (_req, res) => {
+  try {
+    await ensureBookAccessTables();
+    const [courses]: any = await query(
+      `SELECT id, name FROM courses ORDER BY sort_order ASC, name ASC`,
+    );
+    const [semesters]: any = await query(
+      `SELECT id, course_id AS courseId, number, title
+       FROM course_semesters ORDER BY number ASC, id ASC`,
+    );
+    const [books]: any = await query(
+      `SELECT s.id AS subjectId, s.name, s.slug, s.semester_id AS semesterId,
+              sem.course_id AS courseId, sem.number AS semesterNumber, sem.title AS semesterTitle,
+              c.name AS courseName,
+              (SELECT COUNT(*) FROM course_chapters ch WHERE ch.subject_id = s.id) AS chapterCount
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       JOIN courses c ON c.id = sem.course_id
+       ORDER BY c.sort_order ASC, c.name ASC, sem.number ASC, s.sort_order ASC, s.name ASC`,
+    );
+    res.json({
+      courses: (courses || []).map((c: any) => ({
+        id: n(c.id),
+        name: c.name,
+        semesters: (semesters || [])
+          .filter((s: any) => n(s.courseId) === n(c.id))
+          .map((s: any) => ({
+            id: n(s.id),
+            number: n(s.number),
+            title: s.title || `Semester ${s.number}`,
+          })),
+      })),
+      books: (books || []).map((b: any) => ({
+        subjectId: n(b.subjectId),
+        name: b.name,
+        slug: b.slug,
+        semesterId: n(b.semesterId),
+        courseId: n(b.courseId),
+        courseName: b.courseName,
+        semesterNumber: n(b.semesterNumber),
+        semesterTitle: b.semesterTitle || `Semester ${b.semesterNumber}`,
+        chapterCount: n(b.chapterCount),
+      })),
+    });
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).json({ error: 'catalog_failed' });
+  }
+});
+
+/** GET /api/admin/courses/books — all books/subjects across courses with full metadata */
+router.get('/books', async (_req, res) => {
+  try {
+    await ensureBookAccessTables();
+    const [books]: any = await query(
+      `SELECT s.id, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
+              s.cover_key AS coverKey, s.back_cover_key AS backCoverKey, s.file_key AS fileKey,
+              s.pages, s.price, s.physical_price AS physicalPrice, s.both_price AS bothPrice,
+              s.book_bank_price AS bookBankPrice, s.library_price AS libraryPrice,
+              s.discount_pct AS discountPct, s.isbn, s.sort_order AS sortOrder,
+              s.status, s.published_at AS publishedAt, s.created_at AS createdAt, s.updated_at AS updatedAt,
+              sem.id AS semesterId, sem.number AS semesterNumber, sem.title AS semesterTitle,
+              c.id AS courseId, c.name AS courseName, c.slug AS courseSlug, c.university,
+              (SELECT COUNT(*) FROM course_chapters ch WHERE ch.subject_id = s.id) AS chapterCount
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       JOIN courses c ON c.id = sem.course_id
+       ORDER BY c.sort_order ASC, c.name ASC, sem.number ASC, s.sort_order ASC, s.name ASC`,
+    );
+    res.json(
+      (books || []).map((b: any) => ({
+        id: n(b.id),
+        name: b.name,
+        slug: b.slug,
+        description: b.description || null,
+        syllabusCode: b.syllabusCode || null,
+        pages: b.pages != null ? n(b.pages) : null,
+        price: b.price != null ? Number(b.price) : null,
+        physicalPrice: b.physicalPrice != null ? Number(b.physicalPrice) : null,
+        bothPrice: b.bothPrice != null ? Number(b.bothPrice) : null,
+        bookBankPrice: b.bookBankPrice != null ? Number(b.bookBankPrice) : null,
+        libraryPrice: b.libraryPrice != null ? Number(b.libraryPrice) : null,
+        discountPct: b.discountPct != null ? Number(b.discountPct) : null,
+        isbn: b.isbn || null,
+        sortOrder: n(b.sortOrder),
+        status: b.status || 'DRAFT',
+        publishedAt: b.publishedAt || null,
+        createdAt: b.createdAt || null,
+        updatedAt: b.updatedAt || null,
+        hasBookPdf: !!b.fileKey,
+        courseId: n(b.courseId),
+        courseName: b.courseName,
+        courseSlug: b.courseSlug,
+        university: b.university || null,
+        semesterId: n(b.semesterId),
+        semesterNumber: n(b.semesterNumber),
+        semesterTitle: b.semesterTitle || `Semester ${b.semesterNumber}`,
+        chapterCount: n(b.chapterCount),
+        ...coverUrls(b.coverKey, b.backCoverKey),
+      })),
+    );
+  } catch (e: any) {
+    console.error('[courses/books]', e);
+    res.status(500).json({ error: 'fetch_failed' });
+  }
+});
+
+/** GET /api/admin/courses/subjects/:id — subject details and chapter list for admin */
+router.get('/subjects/:id', async (req, res) => {
+  const id = n(req.params.id);
+  if (!id) return res.status(400).json({ error: 'invalid_id' });
+  try {
+    await ensureBookAccessTables();
+    const [rows]: any = await query(
+      `SELECT s.id, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
+              s.cover_key AS coverKey, s.back_cover_key AS backCoverKey, s.file_key AS fileKey,
+              s.pages, s.price, s.physical_price AS physicalPrice, s.both_price AS bothPrice,
+              s.book_bank_price AS bookBankPrice, s.library_price AS libraryPrice,
+              s.discount_pct AS discountPct, s.isbn, s.sort_order AS sortOrder,
+              s.status, s.published_at AS publishedAt,
+              sem.id AS semesterId, sem.number AS semesterNumber, sem.title AS semesterTitle,
+              c.id AS courseId, c.name AS courseName, c.slug AS courseSlug, c.university
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       JOIN courses c ON c.id = sem.course_id
+       WHERE s.id = ?
+       LIMIT 1`,
+      [id],
+    );
+    const s = rows?.[0];
+    if (!s) return res.status(404).json({ error: 'not_found' });
+
+    const [chapters]: any = await query(
+      `SELECT ch.id, ch.title, ch.slug, ch.sort_order AS sortOrder, ch.start_page AS startPage,
+              ch.end_page AS endPage,
+              (SELECT COUNT(*) FROM course_chapter_activities a WHERE a.chapter_id = ch.id) AS activityCount,
+              (SELECT COUNT(*) FROM course_flashcards f WHERE f.chapter_id = ch.id AND f.user_id IS NULL) AS flashcardCount
+       FROM course_chapters ch
+       WHERE ch.subject_id = ?
+       ORDER BY ch.sort_order ASC, ch.id ASC`,
+      [id],
+    );
+
+    res.json({
+      id: n(s.id),
+      name: s.name,
+      slug: s.slug,
+      description: s.description || null,
+      syllabusCode: s.syllabusCode || null,
+      pages: s.pages != null ? n(s.pages) : null,
+      price: s.price != null ? Number(s.price) : null,
+      physicalPrice: s.physicalPrice != null ? Number(s.physicalPrice) : null,
+      bothPrice: s.bothPrice != null ? Number(s.bothPrice) : null,
+      bookBankPrice: s.bookBankPrice != null ? Number(s.bookBankPrice) : null,
+      libraryPrice: s.libraryPrice != null ? Number(s.libraryPrice) : null,
+      discountPct: s.discountPct != null ? Number(s.discountPct) : null,
+      isbn: s.isbn || null,
+      sortOrder: n(s.sortOrder),
+      status: s.status || 'DRAFT',
+      publishedAt: s.publishedAt || null,
+      hasBookPdf: !!s.fileKey,
+      course: {
+        id: n(s.courseId),
+        name: s.courseName,
+        slug: s.courseSlug,
+        university: s.university || null,
+      },
+      semester: {
+        id: n(s.semesterId),
+        number: n(s.semesterNumber),
+        title: s.semesterTitle || `Semester ${s.semesterNumber}`,
+      },
+      ...coverUrls(s.coverKey, s.backCoverKey),
+      chapters: (chapters || []).sort(compareChapters).map((ch: any) => ({
+        id: n(ch.id),
+        title: ch.title,
+        slug: ch.slug,
+        sortOrder: n(ch.sortOrder),
+        startPage: ch.startPage != null ? n(ch.startPage) : null,
+        endPage: ch.endPage != null ? n(ch.endPage) : null,
+        activityCount: n(ch.activityCount),
+        flashcardCount: n(ch.flashcardCount),
+      })),
+    });
+  } catch (e: any) {
+    console.error('[courses/subjects/:id]', e);
+    res.status(500).json({ error: 'fetch_failed' });
+  }
+});
+
 /** POST /api/admin/courses */
 router.post('/', async (req, res) => {
   const { name, slug, university, description, sortOrder, status } = req.body || {};
@@ -201,7 +468,11 @@ router.get('/:id', async (req, res) => {
     for (const sem of sems || []) {
       const [subjects]: any = await query(
         `SELECT id, name, slug, description, syllabus_code AS syllabusCode, cover_key AS coverKey,
-                back_cover_key AS backCoverKey, file_key AS fileKey, pages, price, sort_order AS sortOrder, status, published_at AS publishedAt
+                back_cover_key AS backCoverKey, file_key AS fileKey, pages, price,
+                physical_price AS physicalPrice, both_price AS bothPrice, isbn,
+                book_bank_price AS bookBankPrice, library_price AS libraryPrice,
+                discount_pct AS discountPct,
+                sort_order AS sortOrder, status, published_at AS publishedAt
          FROM course_subjects WHERE semester_id = ? ORDER BY sort_order ASC, id ASC`,
         [sem.id],
       );
@@ -221,9 +492,15 @@ router.get('/:id', async (req, res) => {
           sortOrder: n(s.sortOrder),
           pages: s.pages != null ? n(s.pages) : null,
           price: s.price != null ? Number(s.price) : null,
+          physicalPrice: s.physicalPrice != null ? Number(s.physicalPrice) : null,
+          bothPrice: s.bothPrice != null ? Number(s.bothPrice) : null,
+          isbn: s.isbn || null,
+          bookBankPrice: s.bookBankPrice != null ? Number(s.bookBankPrice) : null,
+          libraryPrice: s.libraryPrice != null ? Number(s.libraryPrice) : null,
+          discountPct: s.discountPct != null ? Number(s.discountPct) : null,
           hasBookPdf: !!s.fileKey,
           ...coverUrls(s.coverKey, s.backCoverKey),
-          chapters: (chapters || []).map((ch: any) => ({
+          chapters: (chapters || []).sort(compareChapters).map((ch: any) => ({
             id: n(ch.id),
             title: ch.title,
             slug: ch.slug,
@@ -403,8 +680,8 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
 
     const [r]: any = await conn.query(
       `INSERT INTO course_subjects
-        (semester_id, name, slug, description, syllabus_code, cover_key, back_cover_key, file_key, pages, price, sort_order, status, published_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${published ? 'NOW(3)' : 'NULL'}, NOW(3), NOW(3))`,
+        (semester_id, name, slug, description, syllabus_code, cover_key, back_cover_key, file_key, pages, price, physical_price, both_price, isbn, book_bank_price, library_price, discount_pct, sort_order, status, published_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${published ? 'NOW(3)' : 'NULL'}, NOW(3), NOW(3))`,
       [
         semesterId,
         name,
@@ -416,6 +693,12 @@ router.post('/semesters/:id/subjects', subjectUpload, async (req: AuthRequest, r
         fileKey,
         req.body?.pages ? n(req.body.pages) : null,
         parseBookPrice(req.body?.price),
+        parseBookPrice(req.body?.physicalPrice),
+        parseBookPrice(req.body?.bothPrice),
+        String(req.body?.isbn || '').trim() || null,
+        parseBookPrice(req.body?.bookBankPrice),
+        parseBookPrice(req.body?.libraryPrice),
+        parseDiscountPct(req.body?.discountPct),
         n(req.body?.sortOrder ?? 0),
         published ? 'PUBLISHED' : 'DRAFT',
       ],
@@ -469,7 +752,9 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
 
     await conn.query(
       `UPDATE course_subjects SET
-         name = ?, slug = ?, description = ?, syllabus_code = ?, pages = ?, price = ?, sort_order = ?,
+         name = ?, slug = ?, description = ?, syllabus_code = ?, pages = ?, price = ?,
+         physical_price = ?, both_price = ?, isbn = ?,
+         book_bank_price = ?, library_price = ?, discount_pct = ?, sort_order = ?,
          status = ?,
          published_at = CASE
            WHEN ? = 1 AND published_at IS NULL THEN NOW(3)
@@ -487,6 +772,12 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
         req.body?.syllabusCode || null,
         req.body?.pages ? n(req.body.pages) : null,
         parseBookPrice(req.body?.price),
+        parseBookPrice(req.body?.physicalPrice),
+        parseBookPrice(req.body?.bothPrice),
+        String(req.body?.isbn || '').trim().slice(0, 32) || null,
+        parseBookPrice(req.body?.bookBankPrice),
+        parseBookPrice(req.body?.libraryPrice),
+        parseDiscountPct(req.body?.discountPct),
         n(req.body?.sortOrder ?? 0),
         published ? 'PUBLISHED' : 'DRAFT',
         published ? 1 : 0,
@@ -502,6 +793,261 @@ router.put('/subjects/:id', subjectUpload, async (req: AuthRequest, res) => {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'slug_exists' });
     console.error(e);
     res.status(500).json({ error: 'update_failed', details: e.message });
+  } finally {
+    conn.release();
+  }
+});
+
+/** POST /api/admin/courses/subjects/:id/covers — replace front and/or back cover */
+router.post('/subjects/:id/covers', subjectCoverUpload, async (req: AuthRequest, res) => {
+  const id = n(req.params.id);
+  const cover = filesOf(req, 'frontCover')[0] || filesOf(req, 'cover')[0];
+  const backCover = filesOf(req, 'backCover')[0];
+  if (!cover && !backCover) return res.status(400).json({ error: 'image_required' });
+  try {
+    const [rows]: any = await query(
+      `SELECT s.id, s.slug, c.slug AS courseSlug
+       FROM course_subjects s
+       JOIN course_semesters sem ON sem.id = s.semester_id
+       JOIN courses c ON c.id = sem.course_id
+       WHERE s.id = ? LIMIT 1`,
+      [id],
+    );
+    if (!rows?.[0]) return res.status(404).json({ error: 'not_found' });
+    let coverKey: string | null = null;
+    let backCoverKey: string | null = null;
+    if (cover) coverKey = await uploadSubjectImage(rows[0].courseSlug, rows[0].slug, 'cover', cover);
+    if (backCover)
+      backCoverKey = await uploadSubjectImage(rows[0].courseSlug, rows[0].slug, 'back', backCover);
+    await query(
+      `UPDATE course_subjects SET
+         cover_key = COALESCE(?, cover_key),
+         back_cover_key = COALESCE(?, back_cover_key),
+         updated_at = NOW(3)
+       WHERE id = ?`,
+      [coverKey, backCoverKey, id],
+    );
+    const [next]: any = await query(
+      `SELECT cover_key AS coverKey, back_cover_key AS backCoverKey FROM course_subjects WHERE id = ? LIMIT 1`,
+      [id],
+    );
+    res.json({ ok: true, ...coverUrls(next?.[0]?.coverKey, next?.[0]?.backCoverKey) });
+  } catch (e: any) {
+    console.error('[subjects/covers]', e);
+    const code = String(e?.code || e?.name || '');
+    const message =
+      code === 'EACCES' || code === 'EPERM'
+        ? 'Server cannot save the picture (storage folder is not writable).'
+        : e?.message || 'Cover upload failed';
+    res.status(500).json({ error: 'upload_failed', message, details: code || undefined });
+  }
+});
+
+/** POST /api/admin/courses/subjects/:id/copy — duplicate a book into another semester/course */
+router.post('/subjects/:id/copy', async (req, res) => {
+  const sourceId = n(req.params.id);
+  if (!sourceId) return res.status(400).json({ error: 'subject_required' });
+
+  const pool = getPool();
+  const conn = await pool.getConnection();
+  try {
+    await ensureBookAccessTables();
+    await conn.beginTransaction();
+
+    const [srcRows]: any = await conn.query(
+      `SELECT s.id, s.semester_id AS semesterId, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
+              s.cover_key AS coverKey, s.back_cover_key AS backCoverKey, s.file_key AS fileKey,
+              s.pages, s.price, s.physical_price AS physicalPrice, s.both_price AS bothPrice, s.isbn,
+              s.book_bank_price AS bookBankPrice, s.library_price AS libraryPrice,
+              s.discount_pct AS discountPct, s.status, s.published_at AS publishedAt
+       FROM course_subjects s WHERE s.id = ? LIMIT 1`,
+      [sourceId],
+    );
+    const src = srcRows?.[0];
+    if (!src) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    let targetSemesterId = n(req.body?.targetSemesterId);
+    let createdSemester = false;
+    const targetCourseId = n(req.body?.targetCourseId);
+    const typedNumber = n(req.body?.semesterNumber);
+    const wantsTypedSemester =
+      Boolean(req.body?.createSemester) ||
+      Boolean(req.body?.semesterTitle) ||
+      (Number.isFinite(typedNumber) && typedNumber > 0);
+
+    if (targetCourseId) {
+      const [courseRows]: any = await conn.query('SELECT id FROM courses WHERE id = ? LIMIT 1', [
+        targetCourseId,
+      ]);
+      if (!courseRows?.[0]) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'course_not_found' });
+      }
+    }
+
+    if (!targetSemesterId && targetCourseId && wantsTypedSemester) {
+      const number = typedNumber > 0 ? typedNumber : 1;
+      const title = String(req.body?.semesterTitle || `Semester ${number}`).trim();
+      const [byNumber]: any = await conn.query(
+        'SELECT id FROM course_semesters WHERE course_id = ? AND number = ? LIMIT 1',
+        [targetCourseId, number],
+      );
+      if (byNumber?.[0]) {
+        targetSemesterId = n(byNumber[0].id);
+      } else {
+        const [semIns]: any = await conn.query(
+          `INSERT INTO course_semesters (course_id, number, title, sort_order, created_at)
+           VALUES (?, ?, ?, ?, NOW(3))`,
+          [targetCourseId, number, title, number * 10],
+        );
+        targetSemesterId = n(semIns.insertId);
+        createdSemester = true;
+      }
+    }
+
+    if (!targetSemesterId && targetCourseId) {
+      const [existingSems]: any = await conn.query(
+        'SELECT id FROM course_semesters WHERE course_id = ? ORDER BY number ASC, id ASC',
+        [targetCourseId],
+      );
+      if (existingSems?.[0] && n(existingSems[0].id) !== n(src.semesterId)) {
+        targetSemesterId = n(existingSems[0].id);
+      } else if (!existingSems?.length) {
+        const number = typedNumber > 0 ? typedNumber : 1;
+        const title = String(req.body?.semesterTitle || `Semester ${number}`).trim();
+        const [semIns]: any = await conn.query(
+          `INSERT INTO course_semesters (course_id, number, title, sort_order, created_at)
+           VALUES (?, ?, ?, ?, NOW(3))`,
+          [targetCourseId, number, title, number * 10],
+        );
+        targetSemesterId = n(semIns.insertId);
+        createdSemester = true;
+      }
+    }
+
+    if (!targetSemesterId) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'target_semester_required' });
+    }
+
+    const [dstRows]: any = await conn.query(
+      `SELECT id, course_id AS courseId FROM course_semesters WHERE id = ? LIMIT 1`,
+      [targetSemesterId],
+    );
+    const dst = dstRows?.[0];
+    if (!dst) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'semester_not_found' });
+    }
+    if (n(dst.id) === n(src.semesterId)) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: 'same_semester',
+        message: 'Pick a different semester or course. This book is already there.',
+      });
+    }
+
+    const name = String(req.body?.name || src.name || '').trim() || src.name;
+    const slug = await uniqueSubjectSlug(
+      conn,
+      targetSemesterId,
+      req.body?.slug ? String(req.body.slug) : name,
+    );
+    const [sortRows]: any = await conn.query(
+      'SELECT COALESCE(MAX(sort_order), 0) + 10 AS nextSort FROM course_subjects WHERE semester_id = ?',
+      [targetSemesterId],
+    );
+    const sortOrder = n(sortRows?.[0]?.nextSort) || 10;
+    const published = String(src.status || '').toUpperCase() === 'PUBLISHED';
+
+    const [ins]: any = await conn.query(
+      `INSERT INTO course_subjects
+        (semester_id, name, slug, description, syllabus_code, cover_key, back_cover_key, file_key, pages, price,
+         physical_price, both_price, isbn, book_bank_price, library_price, discount_pct, sort_order, status, published_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${published ? 'NOW(3)' : 'NULL'}, NOW(3), NOW(3))`,
+      [
+        targetSemesterId,
+        name,
+        slug,
+        src.description || null,
+        src.syllabusCode || null,
+        src.coverKey || null,
+        src.backCoverKey || null,
+        src.fileKey || null,
+        src.pages != null ? n(src.pages) : null,
+        src.price != null ? src.price : null,
+        src.physicalPrice != null ? src.physicalPrice : null,
+        src.bothPrice != null ? src.bothPrice : null,
+        src.isbn || null,
+        src.bookBankPrice != null ? src.bookBankPrice : null,
+        src.libraryPrice != null ? src.libraryPrice : null,
+        src.discountPct != null ? src.discountPct : null,
+        sortOrder,
+        published ? 'PUBLISHED' : 'DRAFT',
+      ],
+    );
+    const newSubjectId = n(ins.insertId);
+
+    const [chapters]: any = await conn.query(
+      `SELECT id, title, slug, sort_order AS sortOrder, start_page AS startPage, end_page AS endPage,
+              content, content_json AS contentJson, content_format AS contentFormat
+       FROM course_chapters WHERE subject_id = ? ORDER BY sort_order ASC, id ASC`,
+      [sourceId],
+    );
+
+    for (const ch of chapters || []) {
+      const [chIns]: any = await conn.query(
+        `INSERT INTO course_chapters
+          (subject_id, title, slug, sort_order, start_page, end_page, content, content_json, content_format, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+        [
+          newSubjectId,
+          ch.title,
+          ch.slug,
+          n(ch.sortOrder),
+          ch.startPage != null ? n(ch.startPage) : null,
+          ch.endPage != null ? n(ch.endPage) : null,
+          ch.content || null,
+          jsonCol(ch.contentJson),
+          ch.contentFormat || 'html',
+        ],
+      );
+      const newChapterId = n(chIns.insertId);
+      await conn.query(
+        `INSERT INTO course_chapter_activities (chapter_id, activity_id, page_number, placement, sort_order, created_at)
+         SELECT ?, activity_id, page_number, placement, sort_order, NOW(3)
+         FROM course_chapter_activities WHERE chapter_id = ?`,
+        [newChapterId, n(ch.id)],
+      );
+      await conn.query(
+        `INSERT INTO course_flashcards (chapter_id, user_id, front, back, page_number, sort_order, created_at, updated_at)
+         SELECT ?, NULL, front, back, page_number, sort_order, NOW(3), NOW(3)
+         FROM course_flashcards WHERE chapter_id = ? AND user_id IS NULL`,
+        [newChapterId, n(ch.id)],
+      );
+    }
+
+    await conn.commit();
+    res.status(201).json({
+      id: newSubjectId,
+      slug,
+      courseId: n(dst.courseId),
+      semesterId: targetSemesterId,
+      chapterCount: (chapters || []).length,
+      createdSemester,
+    });
+  } catch (e: any) {
+    try {
+      await conn.rollback();
+    } catch {
+      /* ignore */
+    }
+    if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'slug_exists' });
+    console.error(e);
+    res.status(500).json({ error: 'copy_failed', details: e.message });
   } finally {
     conn.release();
   }
@@ -543,6 +1089,8 @@ router.post('/subjects/:id/chapters', async (req, res) => {
         req.body?.content || null,
       ],
     );
+    // Keep chapters arranged in natural order starting from Chapter 1
+    await resequenceSubjectChapters(subjectId);
     res.status(201).json({ id: n(r.insertId), slug });
   } catch (e: any) {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'slug_exists' });
@@ -603,10 +1151,11 @@ router.put('/chapters/:id', async (req, res) => {
   if (!title) return res.status(400).json({ error: 'title_required' });
   try {
     const [existing]: any = await query(
-      'SELECT id, slug, title, content, content_json AS contentJson, sort_order AS sortOrder FROM course_chapters WHERE id = ? LIMIT 1',
+      'SELECT id, subject_id AS subjectId, slug, title, content, content_json AS contentJson, sort_order AS sortOrder FROM course_chapters WHERE id = ? LIMIT 1',
       [id],
     );
     if (!existing?.[0]) return res.status(404).json({ error: 'not_found' });
+    const subjectId = n(existing[0].subjectId);
     const slug = req.body?.slug ? slugify(String(req.body.slug)) : existing[0].slug;
     const sortOrder = hasNumeric(req.body?.sortOrder)
       ? n(req.body.sortOrder)
@@ -634,6 +1183,9 @@ router.put('/chapters/:id', async (req, res) => {
         id,
       ],
     );
+    if (subjectId) {
+      await resequenceSubjectChapters(subjectId);
+    }
     res.json({ ok: true, slug });
   } catch (e: any) {
     if (e.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'slug_exists' });
@@ -646,12 +1198,40 @@ router.put('/chapters/:id', async (req, res) => {
 router.delete('/chapters/:id', async (req, res) => {
   const id = n(req.params.id);
   try {
+    const [existing]: any = await query('SELECT subject_id AS subjectId FROM course_chapters WHERE id = ? LIMIT 1', [id]);
+    const subjectId = existing?.[0]?.subjectId ? n(existing[0].subjectId) : null;
     const [r]: any = await query('DELETE FROM course_chapters WHERE id = ?', [id]);
     if (!r.affectedRows) return res.status(404).json({ error: 'not_found' });
+    if (subjectId) {
+      await resequenceSubjectChapters(subjectId);
+    }
     res.json({ ok: true });
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'delete_failed' });
+  }
+});
+
+/** PUT /api/admin/courses/subjects/:id/chapters/reorder */
+router.put('/subjects/:id/chapters/reorder', async (req, res) => {
+  const subjectId = n(req.params.id);
+  if (!subjectId) return res.status(400).json({ error: 'invalid_id' });
+  try {
+    const chapterIds = req.body?.chapterIds;
+    if (Array.isArray(chapterIds) && chapterIds.length > 0) {
+      for (let i = 0; i < chapterIds.length; i++) {
+        await query(
+          'UPDATE course_chapters SET sort_order = ? WHERE id = ? AND subject_id = ?',
+          [(i + 1) * 10, n(chapterIds[i]), subjectId],
+        );
+      }
+    } else {
+      await resequenceSubjectChapters(subjectId);
+    }
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).json({ error: 'reorder_failed' });
   }
 });
 

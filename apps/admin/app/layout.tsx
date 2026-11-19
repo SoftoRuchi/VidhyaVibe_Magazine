@@ -1,6 +1,5 @@
-import { App, ConfigProvider } from 'antd';
 import React from 'react';
-import DashboardLayout from '../components/DashboardLayout';
+import AdminProviders from '../components/AdminProviders';
 import ReaderBaseUrlScript from '../components/ReaderBaseUrlScript';
 import StyledComponentsRegistry from '../lib/AntdRegistry';
 import './globals.css';
@@ -20,18 +19,7 @@ export default function RootLayout({ children }: React.PropsWithChildren) {
       <body>
         <ReaderBaseUrlScript />
         <StyledComponentsRegistry>
-          <ConfigProvider
-            theme={{
-              token: {
-                colorPrimary: '#1890ff',
-              },
-            }}
-          >
-            <App>
-              {/* @ts-ignore */}
-              <DashboardLayout>{children}</DashboardLayout>
-            </App>
-          </ConfigProvider>
+          <AdminProviders>{children}</AdminProviders>
         </StyledComponentsRegistry>
       </body>
     </html>

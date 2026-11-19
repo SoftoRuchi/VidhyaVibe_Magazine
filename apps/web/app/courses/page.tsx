@@ -37,7 +37,7 @@ export default function CoursesPage() {
   return (
     <main className="container" style={{ padding: '24px 16px 64px' }}>
       <CourseHero
-        kicker="VidhyaVibe courses"
+        kicker="Higher Education"
         title="Read. Practise. Revise."
         subtitle="Open a programme, or subscribe to a textbook for individual access."
       />

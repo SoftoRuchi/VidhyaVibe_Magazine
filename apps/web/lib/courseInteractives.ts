@@ -254,7 +254,7 @@ export function injectConceptHotspots(html: string, items: CourseInteractiveItem
         if (!re.test(next)) continue;
         next = next.replace(re, (_m, before, hit) => {
           remaining -= 1;
-          return `${before}<button type="button" class="course-concept-hot" data-concept-id="${row.id}">${hit}</button>`;
+          return `${before}<span role="button" tabindex="0" class="course-concept-hot" data-concept-id="${row.id}">${hit}</span>`;
         });
       }
       return next;

@@ -782,6 +782,12 @@ model CourseSubject {
   sampleKey   String?   @map("sample_key") @db.VarChar(1024)
   pages       Int?
   price       Decimal?  @db.Decimal(10, 2)
+  physicalPrice Decimal? @map("physical_price") @db.Decimal(10, 2)
+  bothPrice     Decimal? @map("both_price") @db.Decimal(10, 2)
+  isbn          String?   @db.VarChar(32)
+  bookBankPrice Decimal? @map("book_bank_price") @db.Decimal(10, 2)
+  libraryPrice  Decimal? @map("library_price") @db.Decimal(10, 2)
+  discountPct   Decimal? @map("discount_pct") @db.Decimal(5, 2)
   sortOrder   Int       @default(0) @map("sort_order")
   status      String    @default("DRAFT") @db.VarChar(32)
   publishedAt DateTime? @map("published_at")
@@ -977,6 +983,8 @@ model BookLicenseLot {
   startsAt     DateTime? @map("starts_at")
   endsAt       DateTime? @map("ends_at")
   notes        String?   @db.VarChar(500)
+  amount       Decimal?  @db.Decimal(10, 2)
+  discountPct  Decimal?  @map("discount_pct") @db.Decimal(5, 2)
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

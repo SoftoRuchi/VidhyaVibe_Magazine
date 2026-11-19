@@ -12,6 +12,7 @@ export type EmailSettings = {
   imapPort: number;
   imapSsl: boolean;
   fromName: string;
+  upiVpa: string;
   updatedAt?: string | Date | null;
 };
 
@@ -25,6 +26,7 @@ const DEFAULTS: Omit<EmailSettings, 'id' | 'updatedAt'> = {
   imapPort: 993,
   imapSsl: true,
   fromName: 'VidhyaVibe',
+  upiVpa: '',
 };
 
 async function ensureTable() {
@@ -40,6 +42,7 @@ async function ensureTable() {
       imap_port INT NOT NULL DEFAULT 993,
       imap_ssl TINYINT(1) NOT NULL DEFAULT 1,
       from_name VARCHAR(255) NOT NULL DEFAULT 'VidhyaVibe',
+      upi_vpa VARCHAR(128) NULL,
       updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
     )
   `);
@@ -101,6 +104,10 @@ async function migrateLegacyColumns() {
         `ALTER TABLE email_settings ADD COLUMN from_name VARCHAR(255) NOT NULL DEFAULT 'VidhyaVibe'`,
       );
     }
+
+    if (!(await columnExists('upi_vpa'))) {
+      await query(`ALTER TABLE email_settings ADD COLUMN upi_vpa VARCHAR(128) NULL`);
+    }
   } catch (e) {
     console.warn('[emailSettings] migrateLegacyColumns:', (e as Error)?.message || e);
   }
@@ -126,6 +133,7 @@ function mapRow(row: any): EmailSettings {
     imapPort: Number(row.imap_port ?? DEFAULTS.imapPort),
     imapSsl: row.imap_ssl != null ? Boolean(row.imap_ssl) : DEFAULTS.imapSsl,
     fromName: row.from_name || DEFAULTS.fromName,
+    upiVpa: row.upi_vpa || '',
     updatedAt: row.updated_at || null,
   };
 }
@@ -144,6 +152,7 @@ export function toPublicEmailSettings(settings: EmailSettings) {
     imapPort: settings.imapPort,
     imapSsl: settings.imapSsl,
     fromName: settings.fromName,
+    upiVpa: settings.upiVpa || '',
     updatedAt: settings.updatedAt,
   };
 }
@@ -187,6 +196,7 @@ export async function updateEmailSettings(input: {
   imapPort?: number;
   imapSsl?: boolean;
   fromName?: string;
+  upiVpa?: string;
 }): Promise<EmailSettings> {
   const current = await getEmailSettings();
   const next = {
@@ -200,12 +210,24 @@ export async function updateEmailSettings(input: {
     imapPort: Number(input.imapPort ?? current.imapPort) || DEFAULTS.imapPort,
     imapSsl: input.imapSsl ?? current.imapSsl,
     fromName: (input.fromName ?? current.fromName).trim() || DEFAULTS.fromName,
+    upiVpa: (input.upiVpa ?? current.upiVpa).trim(),
   };
+
+  if (next.upiVpa) {
+    if (!cleanUpiVpa(next.upiVpa)) {
+      const err: any = new Error(
+        'Enter a real VidhyaVibe UPI ID (example: vidhyavibe@okaxis). Dummy IDs are not allowed.',
+      );
+      err.status = 400;
+      err.code = 'invalid_upi_vpa';
+      throw err;
+    }
+  }
 
   await query(
     `UPDATE email_settings SET
       email_id = ?, smtp_pass = ?, smtp_host = ?, smtp_port = ?, smtp_tls = ?,
-      imap_host = ?, imap_port = ?, imap_ssl = ?, from_name = ?,
+      imap_host = ?, imap_port = ?, imap_ssl = ?, from_name = ?, upi_vpa = ?,
       updated_at = CURRENT_TIMESTAMP(3)
      WHERE id = 1`,
     [
@@ -218,6 +240,7 @@ export async function updateEmailSettings(input: {
       next.imapPort,
       next.imapSsl ? 1 : 0,
       next.fromName,
+      next.upiVpa || null,
     ],
   );
 
@@ -239,6 +262,64 @@ export async function resolveSmtpConfig() {
     fromEmail: emailId,
     fromName: s.fromName || DEFAULTS.fromName,
   };
+}
+
+const DUMMY_UPI = new Set(['', 'merchant@upi', 'merchant@okaxis', 'test@upi']);
+
+function cleanUpiVpa(raw: string): string | null {
+  const v = String(raw || '').trim();
+  if (!v || !v.includes('@') || DUMMY_UPI.has(v.toLowerCase())) return null;
+  return v;
+}
+
+/** Real UPI ID for payment QR — Email Configuration first, then UPI_VPA. Never a dummy VPA. */
+export async function resolveUpiVpa(): Promise<string | null> {
+  try {
+    const s = await getEmailSettings();
+    const fromDb = cleanUpiVpa(s.upiVpa);
+    if (fromDb) return fromDb;
+  } catch {
+    /* table may not be ready */
+  }
+  return cleanUpiVpa(process.env.UPI_VPA || '');
+}
+
+export function readerSiteBase() {
+  const fromEnv = (
+    process.env.READER_BASE_URL ||
+    process.env.NEXT_PUBLIC_READER_URL ||
+    ''
+  ).replace(/\/$/, '');
+  if (fromEnv && !fromEnv.includes('localhost') && !fromEnv.includes('127.0.0.1')) {
+    return fromEnv;
+  }
+  return 'https://reader.vidhyavibe.in';
+}
+
+export function publicApiBase() {
+  const fromEnv = (
+    process.env.API_PUBLIC_URL ||
+    process.env.API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    ''
+  ).replace(/\/$/, '');
+  if (fromEnv && !fromEnv.includes('api:2034')) return fromEnv;
+  return process.env.NODE_ENV === 'production'
+    ? 'https://readerapi.vidhyavibe.in'
+    : 'http://127.0.0.1:2034';
+}
+
+/** HTTPS API host for images inside emails (Gmail will not load localhost). */
+export function mailPublicApiBase() {
+  const fromEnv = publicApiBase();
+  if (
+    fromEnv.startsWith('https://') &&
+    !fromEnv.includes('localhost') &&
+    !fromEnv.includes('127.0.0.1')
+  ) {
+    return fromEnv;
+  }
+  return 'https://readerapi.vidhyavibe.in';
 }
 
 /** Optional: verify DB pool is reachable — used by routes. */

@@ -45,6 +45,18 @@ export function formatBookPrice(price?: number | null) {
   return `₹${n % 1 === 0 ? n.toFixed(0) : n.toFixed(2)}`;
 }
 
+export function formatBookSaleTag(
+  price?: number | null,
+  listPrice?: number | null,
+  discountPct?: number | null,
+) {
+  const sale = formatBookPrice(price);
+  if (!sale) return '';
+  if (listPrice != null && Number(listPrice) > Number(price) && discountPct)
+    return `Subscribe ${sale} · ${discountPct}% off`;
+  return `Subscribe ${sale}`;
+}
+
 export type BookOffer = {
   id: number;
   name: string;
@@ -53,6 +65,13 @@ export type BookOffer = {
   syllabusCode?: string | null;
   frontCoverUrl?: string | null;
   price: number | null;
+  listPrice?: number | null;
+  discountPct?: number | null;
+  formats?: {
+    EBOOK?: { price: number | null; listPrice?: number | null; discountPct?: number | null };
+    POD?: { price: number | null; listPrice?: number | null; discountPct?: number | null };
+    BOTH?: { price: number | null; listPrice?: number | null; discountPct?: number | null };
+  };
   currency: string;
   canRead: boolean;
   alreadyOwned: boolean;
@@ -84,15 +103,31 @@ export type BookCheckout = {
   href: string;
 };
 
-export async function purchaseBook(subjectId: number) {
-  const res = await api.post(
-    `/api/courses/subjects/${subjectId}/purchase`,
-    {},
-    {
-      headers: courseAuthHeaders(),
-    },
-  );
+export type BookPurchaseBody = {
+  format?: 'EBOOK' | 'POD' | 'BOTH';
+  deliveryAddress?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+};
+
+export async function purchaseBook(subjectId: number, body: BookPurchaseBody = {}) {
+  const res = await api.post(`/api/courses/subjects/${subjectId}/purchase`, body, {
+    headers: courseAuthHeaders(),
+  });
   return res.data as BookCheckout;
+}
+
+export async function guestBookCheckout(contact: { name: string; email: string; phone: string }) {
+  const res = await api.post('/api/auth/guest-checkout', contact, { withCredentials: true });
+  const token = res.data?.access_token;
+  if (token && typeof window !== 'undefined') localStorage.setItem('access_token', token);
+  return res.data as {
+    access_token?: string;
+    created?: boolean;
+    acknowledgementSent?: boolean;
+    user?: { id: number; email: string; name: string; phone?: string };
+  };
 }
 
 export async function confirmBookPurchase(
@@ -117,6 +152,50 @@ export async function uploadBookPurchaseProof(subjectId: number, orderId: number
     headers: courseAuthHeaders(),
   });
   return res.data as { proofId: number; message?: string };
+}
+
+export type BrowseBook = {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string | null;
+  syllabusCode?: string | null;
+  coverKey?: string | null;
+  frontCoverUrl?: string | null;
+  price: number | null;
+  listPrice?: number | null;
+  discountPct?: number | null;
+  chapterCount: number;
+  semesterNumber: number;
+  semesterTitle: string;
+  courseName: string;
+  courseSlug: string;
+  university?: string | null;
+  href: string;
+  buyHref: string;
+  purchasable: boolean;
+  search: string;
+};
+
+export type BrowseSemester = {
+  number: number;
+  title: string;
+  books: BrowseBook[];
+};
+
+export type BrowseCourse = {
+  id: number;
+  name: string;
+  slug: string;
+  university?: string | null;
+  description?: string | null;
+  coverKey?: string | null;
+  semesters: BrowseSemester[];
+};
+
+export async function fetchCourseBrowse() {
+  const res = await api.get<{ courses: BrowseCourse[] }>('/api/courses/browse');
+  return res.data?.courses || [];
 }
 
 export async function fetchCourses() {
@@ -145,6 +224,8 @@ export type CourseCatalogBook = {
   coverKey?: string | null;
   frontCoverUrl?: string | null;
   price: number | null;
+  listPrice?: number | null;
+  discountPct?: number | null;
   chapterCount: number;
   semesterNumber: number;
   semesterTitle: string;
@@ -173,7 +254,7 @@ export async function fetchCourseCatalog(slug: string) {
 }
 
 export async function fetchSemester(slug: string, n: number) {
-  const res = await api.get(`/api/courses/${slug}/semesters/${n}`, {
+  const res = await api.get(`/api/courses/${encodeURIComponent(slug)}/semesters/${n}`, {
     headers: courseAuthHeaders(),
   });
   return res.data as {
@@ -542,6 +623,7 @@ export type CourseNoteRecord = CourseNoteItem & {
   updatedAt?: string;
   chapterTitle: string;
   chapterSlug: string;
+  subjectId: number;
   subjectName: string;
   subjectSlug: string;
   courseName: string;
@@ -597,7 +679,7 @@ export async function addCourseNote(
     { content, pageNumber, quote },
     { headers: courseAuthHeaders() },
   );
-  return res.data;
+  return res.data as CourseNoteItem & { chapterId: number };
 }
 
 export async function updateCourseNote(id: number, content: string) {
@@ -606,6 +688,18 @@ export async function updateCourseNote(id: number, content: string) {
 
 export async function deleteCourseNote(id: number) {
   await api.delete(`/api/courses/notes/${id}`, { headers: courseAuthHeaders() });
+}
+
+export async function uploadCourseNoteImage(file: File): Promise<{ url: string; key?: string }> {
+  const form = new FormData();
+  form.append('image', file);
+  const res = await api.post('/api/courses/notes/upload-image', form, {
+    headers: {
+      ...courseAuthHeaders(),
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return res.data;
 }
 
 export async function addCourseHighlight(

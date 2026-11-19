@@ -2033,13 +2033,106 @@ double measureCourseBlock(
   if (block.kind == CourseHtmlKind.formula) extra += 16;
   if (block.kind == CourseHtmlKind.table) {
     final rows = block.text.split('\n').where((line) => line.trim().isNotEmpty).length;
-    return rows * 28.0 + extra + 12;
+    final captionH = (block.caption ?? '').trim().isEmpty ? 0.0 : 28.0;
+    return rows * 28.0 + extra + 12 + captionH;
   }
   return tp.height + extra;
 }
 
 bool _isHeading(CourseHtmlKind kind) =>
     kind == CourseHtmlKind.h1 || kind == CourseHtmlKind.h2 || kind == CourseHtmlKind.h3;
+
+CourseHtmlBlock _tableSlice(CourseHtmlBlock block, List<String> lines, {required bool includeCaption}) {
+  return CourseHtmlBlock(
+    CourseHtmlKind.table,
+    lines.join('\n'),
+    caption: includeCaption ? block.caption : null,
+    id: block.id,
+  );
+}
+
+List<CourseHtmlBlock> _splitTableToFit(
+  CourseHtmlBlock block,
+  double width,
+  double firstMaxHeight,
+  double pageMaxHeight, {
+  required TextScaler textScaler,
+  required bool firstOnPage,
+}) {
+  final lines = block.text.split('\n').where((line) => line.trim().isNotEmpty).toList();
+  if (lines.length < 3) return [block];
+  if (measureCourseBlock(
+        block,
+        width,
+        textScaler: textScaler,
+        firstOnPage: firstOnPage,
+      ) <=
+      firstMaxHeight) {
+    return [block];
+  }
+
+  final header = lines.first;
+  final body = lines.sublist(1);
+  final parts = <CourseHtmlBlock>[];
+  var start = 0;
+  var limit = firstMaxHeight;
+  var first = firstOnPage;
+  var usedFullPage = false;
+
+  while (start < body.length) {
+    var count = 0;
+    for (var n = 1; n <= body.length - start; n++) {
+      final probe = _tableSlice(
+        block,
+        [header, ...body.sublist(start, start + n)],
+        includeCaption: start + n == body.length,
+      );
+      final height = measureCourseBlock(
+        probe,
+        width,
+        textScaler: textScaler,
+        firstOnPage: first,
+      );
+      if (height <= limit) {
+        count = n;
+      } else {
+        break;
+      }
+    }
+    if (count == 0) {
+      if (!usedFullPage) {
+        limit = pageMaxHeight;
+        first = true;
+        usedFullPage = true;
+        continue;
+      }
+      parts.add(
+        _tableSlice(
+          block,
+          [header, body[start]],
+          includeCaption: start + 1 == body.length,
+        ),
+      );
+      start += 1;
+      limit = pageMaxHeight;
+      first = true;
+      continue;
+    }
+    final end = start + count;
+    parts.add(
+      _tableSlice(
+        block,
+        [header, ...body.sublist(start, end)],
+        includeCaption: end == body.length,
+      ),
+    );
+    start = end;
+    limit = pageMaxHeight;
+    first = true;
+    usedFullPage = true;
+  }
+  return parts.isEmpty ? [block] : parts;
+}
 
 List<CourseHtmlBlock> _splitToFit(
   CourseHtmlBlock block,
@@ -2052,6 +2145,16 @@ List<CourseHtmlBlock> _splitToFit(
 }) {
   final openExplain = block.kind == CourseHtmlKind.explain &&
       (openExplains.contains(block.id ?? block.text) || !block.showHeader);
+  if (block.kind == CourseHtmlKind.table) {
+    return _splitTableToFit(
+      block,
+      width,
+      firstMaxHeight,
+      pageMaxHeight,
+      textScaler: textScaler,
+      firstOnPage: firstOnPage,
+    );
+  }
   if (block.kind == CourseHtmlKind.image ||
       block.kind == CourseHtmlKind.split ||
       block.kind == CourseHtmlKind.flashcard ||
@@ -2060,7 +2163,6 @@ List<CourseHtmlBlock> _splitToFit(
       block.kind == CourseHtmlKind.callout ||
       block.kind == CourseHtmlKind.toc ||
       block.kind == CourseHtmlKind.formula ||
-      block.kind == CourseHtmlKind.table ||
       (block.kind == CourseHtmlKind.explain && !openExplain)) {
     return [block];
   }

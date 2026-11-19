@@ -1,13 +1,13 @@
 'use client';
 
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { Card, Form, Input, Button, message } from 'antd';
 import axios from 'axios';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import React from 'react';
-import loginImg from '../../components/images/login.png';
+import brandLogo from '../../components/images/logonew.png';
 import { clearViewingContext } from '../../lib/viewingContext';
 
 export default function LoginPage() {
@@ -75,6 +75,26 @@ export default function LoginPage() {
       }}
     >
       <div className="container" style={{ maxWidth: 920 }}>
+        <div style={{ marginBottom: 14 }}>
+          <Link
+            href="/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              color: '#5c4a3a',
+              fontSize: 14,
+              fontWeight: 600,
+              textDecoration: 'none',
+              padding: '6px 14px',
+              borderRadius: 999,
+              backgroundColor: 'rgba(255, 255, 255, 0.75)',
+              border: '1px solid rgba(61, 41, 20, 0.16)',
+            }}
+          >
+            <ArrowLeftOutlined /> Back to homepage
+          </Link>
+        </div>
         <Card
           style={{
             borderRadius: 22,
@@ -86,15 +106,14 @@ export default function LoginPage() {
           bodyStyle={{ padding: '1.6rem 1.75rem' }}
         >
           <div className="vv-auth-grid">
-            {/* Left: illustration */}
             <div className="vv-auth-illustration">
               <Image
-                src={loginImg}
-                alt="Login"
-                width={360}
-                height={420}
+                src={brandLogo}
+                alt="VidhyaVibe"
+                width={480}
+                height={480}
                 priority
-                style={{ width: '100%', maxWidth: 320, height: 'auto', objectFit: 'contain' }}
+                style={{ width: '100%', maxWidth: 280, height: 'auto', objectFit: 'contain' }}
               />
             </div>
 
@@ -126,7 +145,7 @@ export default function LoginPage() {
                   className="vv-auth-underline"
                 />
                 <p style={{ margin: '0.6rem 0 0', color: '#5c4a3a', fontSize: 13 }}>
-                  Login to continue reading your favourite magazines.
+                  Sign in to open Higher Education or Fun Learning.
                 </p>
               </div>
 
@@ -187,6 +206,41 @@ export default function LoginPage() {
                 <Link href="/signup" style={{ color: 'var(--secondary-color)', fontWeight: 600 }}>
                   Sign up now
                 </Link>
+              </div>
+
+              <div style={{ textAlign: 'center', marginTop: '0.75rem' }}>
+                <Link
+                  href="/"
+                  style={{
+                    color: '#7a6550',
+                    fontSize: 13,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    textDecoration: 'none',
+                  }}
+                >
+                  <ArrowLeftOutlined style={{ fontSize: 11 }} /> Return to homepage
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          <div className="vv-login-audiences" role="region" aria-label="Who VidhyaVibe is for">
+            <p className="vv-login-audiences-lead">
+              VidhyaVibe is designed for both <strong>Fun Learning</strong> and{' '}
+              <strong>Higher Education</strong>. Use this same login for either audience.
+            </p>
+            <div className="vv-login-audience-grid">
+              <div className="vv-login-audience is-he">
+                <span className="vv-login-audience-kicker">Higher Education</span>
+                <strong>University textbooks</strong>
+                <span>Programmes, semester books, notes, and practice for college students.</span>
+              </div>
+              <div className="vv-login-audience is-fun">
+                <span className="vv-login-audience-kicker">Fun Learning</span>
+                <strong>Magazines and stories</strong>
+                <span>Reading, quizzes, and activities for younger readers and families.</span>
               </div>
             </div>
           </div>

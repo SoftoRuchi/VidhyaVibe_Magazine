@@ -33,12 +33,20 @@ router.get('/summary', async (req, res) => {
            AND last_heartbeat_at >= DATE_SUB(NOW(3), INTERVAL 120 SECOND)`,
       )
       .catch(() => [[{ count: 0 }]]);
+    const [[bookCount]]: any = await conn
+      .query('SELECT COUNT(*) as count FROM course_subjects')
+      .catch(() => [[{ count: 0 }]]);
+    const [[publishedBookCount]]: any = await conn
+      .query("SELECT COUNT(*) as count FROM course_subjects WHERE status = 'PUBLISHED'")
+      .catch(() => [[{ count: 0 }]]);
 
     res.json({
       totalUsers: userCount?.count || 0,
       totalMagazines: magCount?.count || 0,
       totalSubscriptions: subCount?.count || 0,
       totalReaders: readerCount?.count || 0,
+      totalBooks: bookCount?.count || 0,
+      publishedBooks: publishedBookCount?.count || 0,
       totalRevenueCents: revRows[0]?.total_cents || 0,
       pendingProofs: (pendingSubProofs?.count || 0) + (pendingEdProofs?.count || 0),
       liveBookReaders: liveBookReaders?.count || 0,

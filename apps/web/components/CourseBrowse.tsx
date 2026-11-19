@@ -6,7 +6,7 @@ import { assetUrl } from '../lib/apiBase';
 import { courseCountLabel } from '../lib/courseLabels';
 import {
   fetchBookOffer,
-  formatBookPrice,
+  formatBookSaleTag,
   type BookOffer,
   type CourseSummary,
 } from '../lib/coursesApi';
@@ -163,7 +163,9 @@ export function CourseAccessBlocked({
     };
   }, [showBuy, subjectId]);
 
-  const priceLabel = offer?.purchasable ? formatBookPrice(offer.price) : '';
+  const priceLabel = offer?.purchasable
+    ? formatBookSaleTag(offer.price, offer.listPrice, offer.discountPct).replace(/^Subscribe /, '')
+    : '';
 
   return (
     <main className="container" style={{ padding: '48px 16px', maxWidth: 560 }}>
@@ -298,45 +300,49 @@ export function CourseBookTile({
   title,
   subtitle,
   coverKey,
+  coverSrc,
   href,
   subscribeHref,
   seed,
   owned,
   tag,
+  path,
+  priceLabel,
 }: {
   title: string;
   subtitle?: string | null;
   coverKey?: string | null;
+  coverSrc?: string | null;
   href: string;
   subscribeHref?: string | null;
   seed?: string | number;
   owned?: boolean;
   tag?: string | null;
+  path?: string | null;
+  priceLabel?: string | null;
 }) {
-  const cover = coverKey ? assetUrl(coverKey) : null;
-  const primaryHref = owned || !subscribeHref ? href : subscribeHref;
+  const cover = coverSrc || (coverKey ? assetUrl(coverKey) : null);
+  const buyLabel = priceLabel ? `Buy ${priceLabel}` : tag && !owned ? tag : 'Buy';
   return (
     <article className="vv-course-tile is-book">
-      <Link href={primaryHref} className="vv-course-cover-link" aria-label={title}>
+      <Link href={href} className="vv-course-cover-link" aria-label={title}>
         <CourseCover src={cover} title={title} seed={seed || title} />
       </Link>
       <div className="vv-course-tile-body">
-        <Link href={primaryHref} className="vv-course-tile-title">
+        {path ? <p className="vv-he-book-path">{path}</p> : null}
+        <Link href={href} className="vv-course-tile-title">
           {title}
         </Link>
         {subtitle ? <small>{subtitle}</small> : null}
         <div className="vv-course-tile-actions">
-          {owned ? (
-            <Link href={href} className="vv-course-btn is-ghost">
-              {tag || 'Open'}
-            </Link>
-          ) : subscribeHref ? (
+          <Link href={href} className="vv-course-btn is-ghost">
+            View book
+          </Link>
+          {!owned && subscribeHref ? (
             <Link href={subscribeHref} className="vv-course-btn is-subscribe">
-              {tag || 'Subscribe'}
+              {buyLabel}
             </Link>
-          ) : (
-            <span className="vv-course-btn is-muted">{tag || 'License needed'}</span>
-          )}
+          ) : null}
         </div>
       </div>
     </article>
@@ -364,3 +370,4 @@ export function CourseSemesterCard({
     </Link>
   );
 }
+

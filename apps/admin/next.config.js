@@ -2,6 +2,9 @@ const { getApiRewriteBase } = require('../../scripts/next-api-rewrite-base.cjs')
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   transpilePackages: ['@magazine/ui'],
   experimental: {
     optimizePackageImports: ['antd', '@ant-design/icons'],

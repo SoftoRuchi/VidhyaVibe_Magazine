@@ -5,8 +5,10 @@ import { requireChapterAccess, requireSubjectAccess } from '../middleware/course
 import { optionalAuth } from '../middleware/optionalAuth';
 import { memoryUpload } from '../middleware/upload';
 import { getStorageAdapter } from '../providers/storage';
+import { ensureShippingAddress } from '../services/guestBuyer';
 import {
   acquireReadingSession,
+  applyListDiscount,
   assertCanReadSubject,
   attachBookOrderProof,
   BookAccessError,
@@ -19,8 +21,9 @@ import {
   resolveEntitlement,
 } from '../services/bookAccess';
 import { publicFileUrlForKey, rewriteCourseAssetUrls } from '../utils/courseAssets';
+import { compareChapters } from '../utils/courseChapters';
 import { sendStorageBody } from '../utils/sendStorage';
-import { asDoc, jsonToHtml, quickChecksFromDoc } from '../utils/textbookContent';
+import { asDoc, jsonToHtml, quickChecksFromDoc, stripImageFileNotes } from '../utils/textbookContent';
 
 const router = Router();
 
@@ -71,6 +74,98 @@ router.get('/', async (_req, res) => {
   } catch (e: any) {
     console.error('[courses] list failed', e);
     res.status(500).json({ error: 'list_failed', details: e?.message });
+  }
+});
+
+/** GET /api/courses/browse — public catalogue: course, semester, and book */
+router.get('/browse', async (_req, res) => {
+  try {
+    const [rows]: any = await query(
+      `SELECT c.id AS courseId, c.name AS courseName, c.slug AS courseSlug, c.university,
+              c.description AS courseDescription, c.cover_key AS courseCover, c.sort_order AS courseSort,
+              sem.number AS semesterNumber, sem.title AS semesterTitle,
+              s.id AS subjectId, s.name AS subjectName, s.slug AS subjectSlug,
+              s.description AS subjectDescription, s.syllabus_code AS syllabusCode,
+              s.cover_key AS coverKey, s.price, s.discount_pct AS discountPct, s.sort_order AS subjectSort,
+              (SELECT COUNT(*) FROM course_chapters ch WHERE ch.subject_id = s.id) AS chapterCount,
+              SUBSTRING(
+                COALESCE((SELECT GROUP_CONCAT(ch.title SEPARATOR ' ') FROM course_chapters ch WHERE ch.subject_id = s.id), ''),
+                1, 800
+              ) AS chapterTitles
+       FROM courses c
+       LEFT JOIN course_semesters sem ON sem.course_id = c.id
+       LEFT JOIN course_subjects s
+         ON s.semester_id = sem.id AND ${publishedSubjectSql('s')}
+       WHERE ${publishedCourseSql('c')}
+       ORDER BY c.sort_order ASC, c.id ASC, sem.number ASC, s.sort_order ASC, s.id ASC`,
+    );
+
+    const courses: any[] = [];
+    const byCourse = new Map<number, any>();
+    for (const row of rows || []) {
+      const courseId = n(row.courseId);
+      let course = byCourse.get(courseId);
+      if (!course) {
+        course = {
+          id: courseId,
+          name: row.courseName,
+          slug: row.courseSlug,
+          university: row.university,
+          description: row.courseDescription,
+          coverKey: row.courseCover,
+          semesters: [] as any[],
+        };
+        byCourse.set(courseId, course);
+        courses.push(course);
+      }
+      if (row.semesterNumber == null || row.subjectId == null) continue;
+      const semesterNumber = n(row.semesterNumber);
+      let semester = course.semesters.find((s: any) => s.number === semesterNumber);
+      if (!semester) {
+        semester = { number: semesterNumber, title: row.semesterTitle, books: [] };
+        course.semesters.push(semester);
+      }
+      const sale = salePrice(row.price, row.discountPct);
+      const href = bookHref(row.courseSlug, semesterNumber, row.subjectSlug);
+      const search = [
+        row.subjectName,
+        row.subjectDescription,
+        row.syllabusCode,
+        row.courseName,
+        row.university,
+        row.semesterTitle,
+        row.chapterTitles,
+      ]
+        .filter(Boolean)
+        .join(' ');
+      semester.books.push({
+        id: n(row.subjectId),
+        name: row.subjectName,
+        slug: row.subjectSlug,
+        description: row.subjectDescription,
+        syllabusCode: row.syllabusCode,
+        coverKey: row.coverKey,
+        frontCoverUrl: row.coverKey ? publicFileUrlForKey(row.coverKey) : null,
+        price: sale.price,
+        listPrice: sale.listPrice,
+        discountPct: sale.discountPct,
+        chapterCount: n(row.chapterCount),
+        semesterNumber,
+        semesterTitle: row.semesterTitle,
+        courseName: row.courseName,
+        courseSlug: row.courseSlug,
+        university: row.university,
+        href,
+        buyHref: `${href}/buy`,
+        purchasable: sale.price != null && sale.price > 0,
+        search,
+      });
+    }
+
+    res.json({ courses });
+  } catch (e: any) {
+    console.error('[courses] browse failed', e);
+    res.status(500).json({ error: 'browse_failed', details: e?.message });
   }
 });
 
@@ -189,15 +284,34 @@ function numberPrice(v: unknown): number | null {
   return Number.isFinite(amount) ? amount : null;
 }
 
-/** GET /api/courses/subjects/:id/offer — catalog + price, no license required */
-router.get('/subjects/:id/offer', requireAuth, async (req: AuthRequest, res) => {
+function salePrice(list: unknown, discountPct: unknown) {
+  const listPrice = numberPrice(list);
+  const pct = numberPrice(discountPct);
+  const price = applyListDiscount(listPrice, pct);
+  const onSale = listPrice != null && price != null && price < listPrice;
+  return {
+    listPrice: onSale ? listPrice : null,
+    price,
+    discountPct: onSale && pct && pct > 0 ? pct : null,
+  };
+}
+
+function studentList(row: { price?: unknown; physicalPrice?: unknown; bothPrice?: unknown }, format: string) {
+  if (format === 'POD') return row.physicalPrice != null ? row.physicalPrice : row.price;
+  if (format === 'BOTH') return row.bothPrice != null ? row.bothPrice : row.price;
+  return row.price;
+}
+
+/** GET /api/courses/subjects/:id/offer — catalog + price, login not required */
+router.get('/subjects/:id/offer', optionalAuth, async (req: AuthRequest, res) => {
   const id = n(req.params.id);
   if (!id) return res.status(400).json({ error: 'invalid_id' });
   try {
     await ensureBookAccessTables();
     const [rows]: any = await query(
       `SELECT s.id, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
-              s.cover_key AS coverKey, s.price,
+              s.cover_key AS coverKey, s.price, s.physical_price AS physicalPrice,
+              s.both_price AS bothPrice, s.discount_pct AS discountPct,
               sem.number AS semesterNumber, sem.title AS semesterTitle,
               c.name AS courseName, c.slug AS courseSlug
        FROM course_subjects s
@@ -209,11 +323,21 @@ router.get('/subjects/:id/offer', requireAuth, async (req: AuthRequest, res) => 
     );
     const s = rows?.[0];
     if (!s) return res.status(404).json({ error: 'not_found' });
-    const ent = await resolveEntitlement(Number(req.user!.id), id, req.user?.isAdmin);
-    const price = numberPrice(s.price);
+    const userId = req.user?.id != null ? Number(req.user.id) : null;
+    let canRead = false;
+    let accessModel: string | null = null;
+    if (userId) {
+      const ent = await resolveEntitlement(userId, id, req.user?.isAdmin);
+      canRead = !!ent.allowed;
+      accessModel = canRead ? ent.accessModel : null;
+    }
+    const ebook = salePrice(studentList(s, 'EBOOK'), s.discountPct);
+    const physical = salePrice(studentList(s, 'POD'), s.discountPct);
+    const both = salePrice(studentList(s, 'BOTH'), s.discountPct);
     const href = bookHref(s.courseSlug, n(s.semesterNumber), s.slug);
-    const canRead = !!ent.allowed;
-    const purchasable = !canRead && price != null && price > 0;
+    const purchasable =
+      !canRead &&
+      [ebook.price, physical.price, both.price].some((amount) => amount != null && amount > 0);
     res.json({
       id: n(s.id),
       name: s.name,
@@ -221,12 +345,19 @@ router.get('/subjects/:id/offer', requireAuth, async (req: AuthRequest, res) => 
       description: s.description,
       syllabusCode: s.syllabusCode,
       frontCoverUrl: s.coverKey ? publicFileUrlForKey(s.coverKey) : null,
-      price,
+      price: ebook.price,
+      listPrice: ebook.listPrice,
+      discountPct: ebook.discountPct,
+      formats: {
+        EBOOK: ebook,
+        POD: physical,
+        BOTH: both,
+      },
       currency: 'INR',
       canRead,
-      alreadyOwned: canRead && ent.accessModel !== 'OPEN',
+      alreadyOwned: canRead && accessModel !== 'OPEN',
       purchasable,
-      accessModel: canRead ? ent.accessModel : null,
+      accessModel,
       href,
       buyHref: `${href}/buy`,
       course: { name: s.courseName, slug: s.courseSlug },
@@ -244,7 +375,8 @@ router.post('/subjects/:id/purchase', requireAuth, async (req: AuthRequest, res)
   try {
     await ensureBookAccessTables();
     const [rows]: any = await query(
-      `SELECT s.id, s.name, s.slug, s.price,
+      `SELECT s.id, s.name, s.slug, s.price, s.physical_price AS physicalPrice,
+              s.both_price AS bothPrice, s.discount_pct AS discountPct,
               sem.number AS semesterNumber, c.slug AS courseSlug
        FROM course_subjects s
        JOIN course_semesters sem ON sem.id = s.semester_id
@@ -265,20 +397,61 @@ router.post('/subjects/:id/purchase', requireAuth, async (req: AuthRequest, res)
         accessModel: ent.accessModel,
       });
     }
-    const price = numberPrice(s.price);
-    if (price == null || price <= 0) {
+    const rawFormat = String(req.body?.format || 'EBOOK').toUpperCase();
+    const format = rawFormat === 'POD' || rawFormat === 'BOTH' ? rawFormat : 'EBOOK';
+    const sale = salePrice(studentList(s, format), s.discountPct);
+    if (sale.price == null || sale.price <= 0) {
       return res.status(400).json({
         error: 'not_for_sale',
         message: 'This book is not listed for individual purchase. Ask your college for a seat.',
       });
     }
+    let shipping: { line1: string; city: string; state?: string; pincode: string } | null = null;
+    if (format !== 'EBOOK') {
+      const line1 = String(req.body?.deliveryAddress || '').trim();
+      const city = String(req.body?.city || '').trim();
+      const state = String(req.body?.state || '').trim();
+      const pincode = String(req.body?.pincode || '').trim();
+      if (line1.length < 8) {
+        return res.status(400).json({
+          error: 'delivery_address_required',
+          message: 'Please enter your full delivery address.',
+        });
+      }
+      if (!city) {
+        return res.status(400).json({ error: 'city_required', message: 'Please enter your city.' });
+      }
+      if (!/^\d{6}$/.test(pincode)) {
+        return res.status(400).json({
+          error: 'pincode_required',
+          message: 'Please enter a valid 6-digit PIN code.',
+        });
+      }
+      shipping = { line1, city, state: state || undefined, pincode };
+      await ensureShippingAddress({
+        userId: Number(req.user!.id),
+        line1,
+        city,
+        state: state || undefined,
+        pincode,
+      });
+    }
     const checkout = await createBookCheckout({
       userId: Number(req.user!.id),
       subjectId: id,
-      price,
+      price: sale.price,
+      format,
+      shipping,
     });
-    res.status(201).json({ ...checkout, href });
+    res.status(201).json({ ...checkout, href, format });
   } catch (e: any) {
+    const code = e?.message;
+    if (code === 'delivery_address_required' || code === 'city_required' || code === 'pincode_required') {
+      return res.status(400).json({
+        error: code,
+        message: 'Please enter a complete delivery address for the printed book.',
+      });
+    }
     sendBookAccessError(res, e);
   }
 });
@@ -463,7 +636,7 @@ router.get('/subjects/:id', requireSubjectAccess, async (req: AuthRequest, res) 
         number: n(s.semesterNumber),
         title: s.semesterTitle,
       },
-      chapters: (chapters || []).map((ch: any) => ({
+      chapters: (chapters || []).sort(compareChapters).map((ch: any) => ({
         id: n(ch.id),
         title: ch.title,
         slug: ch.slug,
@@ -556,7 +729,9 @@ router.get('/chapters/:id', requireChapterAccess, async (req, res) => {
       title: ch.title,
       html: ch.content || '',
     });
-    const html = ch.contentFormat === 'json' ? jsonToHtml(doc) : ch.content || jsonToHtml(doc);
+    const html = stripImageFileNotes(
+      ch.contentFormat === 'json' ? jsonToHtml(doc) : ch.content || jsonToHtml(doc),
+    );
     const activities = (acts || []).map((a: any) => ({
       linkId: n(a.linkId),
       id: n(a.id),
@@ -621,6 +796,7 @@ router.get('/notes', requireAuth, async (req: AuthRequest, res) => {
          n.updated_at AS updatedAt,
          ch.title AS chapterTitle,
          ch.slug AS chapterSlug,
+         s.id AS subjectId,
          s.name AS subjectName,
          s.slug AS subjectSlug,
          c.name AS courseName,
@@ -652,6 +828,7 @@ router.get('/notes', requireAuth, async (req: AuthRequest, res) => {
           updatedAt: r.updatedAt,
           chapterTitle: r.chapterTitle,
           chapterSlug: r.chapterSlug,
+          subjectId: n(r.subjectId),
           subjectName: r.subjectName,
           subjectSlug: r.subjectSlug,
           courseName: r.courseName,
@@ -683,7 +860,7 @@ router.get('/:slug/catalog', optionalAuth, async (req: AuthRequest, res) => {
 
     const [books]: any = await query(
       `SELECT s.id, s.name, s.slug, s.syllabus_code AS syllabusCode, s.cover_key AS coverKey,
-              s.price, s.sort_order AS sortOrder,
+              s.price, s.discount_pct AS discountPct, s.sort_order AS sortOrder,
               (SELECT COUNT(*) FROM course_chapters ch WHERE ch.subject_id = s.id) AS chapterCount,
               sem.number AS semesterNumber, sem.title AS semesterTitle
        FROM course_subjects s
@@ -697,7 +874,7 @@ router.get('/:slug/catalog', optionalAuth, async (req: AuthRequest, res) => {
     const mapped = [];
     for (const s of books || []) {
       const href = bookHref(c.slug, n(s.semesterNumber), s.slug);
-      const price = numberPrice(s.price);
+      const sale = salePrice(s.price, s.discountPct);
       let canRead = false;
       let accessModel: string | null = null;
       if (userId) {
@@ -705,7 +882,7 @@ router.get('/:slug/catalog', optionalAuth, async (req: AuthRequest, res) => {
         canRead = !!ent.allowed;
         accessModel = canRead ? ent.accessModel : null;
       }
-      const purchasable = !canRead && price != null && price > 0;
+      const purchasable = !canRead && sale.price != null && sale.price > 0;
       mapped.push({
         id: n(s.id),
         name: s.name,
@@ -713,7 +890,9 @@ router.get('/:slug/catalog', optionalAuth, async (req: AuthRequest, res) => {
         syllabusCode: s.syllabusCode,
         coverKey: s.coverKey,
         frontCoverUrl: s.coverKey ? publicFileUrlForKey(s.coverKey) : null,
-        price,
+        price: sale.price,
+        listPrice: sale.listPrice,
+        discountPct: sale.discountPct,
         chapterCount: n(s.chapterCount),
         semesterNumber: n(s.semesterNumber),
         semesterTitle: s.semesterTitle,
@@ -804,7 +983,9 @@ router.get('/:slug/semesters/:n', optionalAuth, async (req: AuthRequest, res) =>
 
     const [subjects]: any = await query(
       `SELECT s.id, s.name, s.slug, s.description, s.syllabus_code AS syllabusCode,
-              s.cover_key AS coverKey, s.sort_order AS sortOrder, s.price,
+              s.cover_key AS coverKey, s.file_key AS fileKey, s.sort_order AS sortOrder,
+              s.price, s.physical_price AS physicalPrice, s.both_price AS bothPrice,
+              s.discount_pct AS discountPct,
               (SELECT COUNT(*) FROM course_chapters ch WHERE ch.subject_id = s.id) AS chapterCount
        FROM course_subjects s
        WHERE s.semester_id = ? AND ${publishedSubjectSql('s')}
@@ -815,7 +996,9 @@ router.get('/:slug/semesters/:n', optionalAuth, async (req: AuthRequest, res) =>
     const userId = req.user?.id != null ? Number(req.user.id) : null;
     const mapped = [];
     for (const s of subjects || []) {
-      const price = numberPrice(s.price);
+      const ebook = salePrice(s.price, s.discountPct);
+      const physical = salePrice(s.physicalPrice, s.discountPct);
+      const both = salePrice(s.bothPrice, s.discountPct);
       let canRead = false;
       let accessModel: string | null = null;
       if (userId) {
@@ -823,6 +1006,9 @@ router.get('/:slug/semesters/:n', optionalAuth, async (req: AuthRequest, res) =>
         canRead = !!ent.allowed;
         accessModel = canRead ? ent.accessModel : null;
       }
+      const priced = [ebook.price, physical.price, both.price].some(
+        (amount) => amount != null && amount > 0,
+      );
       mapped.push({
         id: n(s.id),
         name: s.name,
@@ -831,10 +1017,17 @@ router.get('/:slug/semesters/:n', optionalAuth, async (req: AuthRequest, res) =>
         syllabusCode: s.syllabusCode,
         coverKey: s.coverKey,
         sortOrder: n(s.sortOrder),
-        price,
+        price: ebook.price,
+        listPrice: ebook.listPrice,
+        discountPct: ebook.discountPct,
+        ebookPrice: ebook.price,
+        physicalPrice: physical.price,
+        bothPrice: both.price,
+        hasSample: !!s.fileKey,
+        sampleUrl: s.fileKey ? publicFileUrlForKey(s.fileKey) : null,
         chapterCount: n(s.chapterCount),
         canRead,
-        purchasable: !canRead && price != null && price > 0,
+        purchasable: !canRead && priced,
         accessModel,
       });
     }

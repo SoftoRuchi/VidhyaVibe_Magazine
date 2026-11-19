@@ -6,6 +6,7 @@ import {
   DeleteOutlined,
   EyeOutlined,
   PlusOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { Button, Dropdown, Input, Modal, Popconfirm, Radio, Select, Space, message } from 'antd';
 import React from 'react';
@@ -36,6 +37,7 @@ const BLOCK_TYPES: { type: TextbookBlockType; label: string }[] = [
   { type: 'toc', label: 'Table of contents' },
   { type: 'heading', label: 'Section title' },
   { type: 'paragraph', label: 'Paragraph' },
+  { type: 'code', label: 'Code' },
   { type: 'list', label: 'List' },
   { type: 'table', label: 'Table' },
   { type: 'image', label: 'Picture' },
@@ -59,6 +61,7 @@ const ADD_ITEMS: { type: TextbookBlockType; label: string; extra?: Partial<Textb
   { type: 'heading', label: 'Section title' },
   { type: 'heading', label: 'Sub-section', extra: { level: 3 } },
   { type: 'paragraph', label: 'Paragraph' },
+  { type: 'code', label: 'Code' },
   { type: 'list', label: 'List' },
   { type: 'list', label: 'Numbered list', extra: { ordered: true } },
   { type: 'table', label: 'Table' },
@@ -109,6 +112,45 @@ function optionsOf(block: TextbookBlock) {
   return options.slice(0, 4);
 }
 
+function matchesQuery(query: string, haystack: string) {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = haystack.toLowerCase();
+  return words.every((word) => text.includes(word));
+}
+
+function blockSearchLabel(block: TextbookBlock) {
+  const parts = [BLOCK_TYPES.find((item) => item.type === block.type)?.label || block.type];
+  if (block.type === 'heading') {
+    if (block.level === 1) parts.push('Chapter title');
+    else if (block.level === 3) parts.push('Sub-section');
+    else parts.push('Section');
+  }
+  if (block.type === 'list') parts.push(block.ordered ? 'Numbered list' : 'Bullets');
+  return parts.join(' ');
+}
+
+function blockSearchContent(block: TextbookBlock) {
+  const bits: string[] = [];
+  const add = (value?: string | null) => {
+    const text = String(value ?? '').trim();
+    if (text) bits.push(text);
+  };
+  add(block.text);
+  add(block.content);
+  add(block.caption);
+  add(block.alt_text);
+  add(block.front);
+  add(block.back);
+  add(block.question);
+  add(block.explanation);
+  add(block.title);
+  (block.items || []).forEach(add);
+  (block.options || []).forEach(add);
+  (block.rows || []).forEach((row) => (row || []).forEach((cell) => add(cell)));
+  return bits.join('\n');
+}
+
 export default function ChapterBlockEditor({
   chapter,
   onSaved,
@@ -119,6 +161,9 @@ export default function ChapterBlockEditor({
   const [title, setTitle] = React.useState(chapter.title);
   const [blocks, setBlocks] = React.useState<TextbookBlock[]>([]);
   const [paste, setPaste] = React.useState('');
+  const [labelQuery, setLabelQuery] = React.useState('');
+  const [contentQuery, setContentQuery] = React.useState('');
+  const [labelsOpen, setLabelsOpen] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [previewOpen, setPreviewOpen] = React.useState(false);
@@ -138,6 +183,31 @@ export default function ChapterBlockEditor({
     );
     setDirty(false);
   }, [chapter.id, chapter.title, chapter.content, chapter.contentJson]);
+
+  React.useEffect(() => {
+    setLabelQuery('');
+    setContentQuery('');
+    setLabelsOpen(false);
+  }, [chapter.id]);
+
+  React.useEffect(() => {
+    if (labelQuery.trim()) setLabelsOpen(true);
+  }, [labelQuery]);
+
+  const searching = Boolean(labelQuery.trim() || contentQuery.trim());
+  const titleHit =
+    searching && matchesQuery(labelQuery, 'Chapter title') && matchesQuery(contentQuery, title);
+  const pasteHit = Boolean(contentQuery.trim()) && !labelQuery.trim() && matchesQuery(contentQuery, paste);
+  const pasteLabels = CHAPTER_PASTE_LABELS.filter((item) =>
+    matchesQuery(labelQuery, item.label.replace(/:$/, '')),
+  );
+  const visibleBlocks = blocks
+    .map((block, index) => ({ block, index }))
+    .filter(
+      ({ block }) =>
+        matchesQuery(labelQuery, blockSearchLabel(block)) &&
+        matchesQuery(contentQuery, blockSearchContent(block)),
+    );
 
   const mark = (next: TextbookBlock[]) => {
     setBlocks(next);
@@ -243,16 +313,7 @@ export default function ChapterBlockEditor({
         const fd = new FormData();
         fd.append('image', file);
         const r = await apiUpload<{ url: string }>('POST', '/admin/courses/images', fd);
-        const caption =
-          file.name
-            .replace(/\.[^.]+$/, '')
-            .replace(/[-_]+/g, ' ')
-            .trim() || 'Figure';
-        patch(index, {
-          src: r.url,
-          caption: blocks[index].caption || caption,
-          alt_text: blocks[index].alt_text || caption,
-        });
+        patch(index, { src: r.url });
         message.success('Picture added');
       } catch (e: any) {
         message.error(e?.response?.data?.message || e?.message || 'Upload failed');
@@ -290,6 +351,7 @@ export default function ChapterBlockEditor({
       </label>
       <Input
         id="chapter-title"
+        className={titleHit ? 'vv-search-hit' : undefined}
         value={title}
         onChange={(e) => {
           setTitle(e.target.value);
@@ -307,29 +369,40 @@ export default function ChapterBlockEditor({
           : 'Paste everything in one go. Start each piece with a label so the system can tell them apart.'}{' '}
         Put a <strong>*</strong> after the correct quiz choice.
       </p>
-      <details className="vv-label-help">
+      <details
+        className="vv-label-help"
+        open={labelsOpen}
+        onToggle={(event) => setLabelsOpen(event.currentTarget.open)}
+      >
         <summary>Labels you can paste</summary>
-        <table>
-          <thead>
-            <tr>
-              <th>Label</th>
-              <th>What it becomes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {CHAPTER_PASTE_LABELS.map((item) => (
-              <tr key={item.label}>
-                <td>
-                  <code>{item.label}</code>
-                </td>
-                <td>{item.becomes}</td>
+        {pasteLabels.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>What it becomes</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pasteLabels.map((item) => (
+                <tr key={item.label}>
+                  <td>
+                    <code>{item.label}</code>
+                  </td>
+                  <td>{item.becomes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="vv-hint" style={{ margin: '8px 0 0' }}>
+            No labels match “{labelQuery.trim()}”.
+          </p>
+        )}
       </details>
       <Input.TextArea
         id="chapter-paste"
+        className={pasteHit ? 'vv-search-hit' : undefined}
         rows={12}
         value={paste}
         placeholder={CHAPTER_PASTE_EXAMPLE}
@@ -355,6 +428,51 @@ export default function ChapterBlockEditor({
         a file on that box.
       </p>
 
+      {blocks.length ? (
+        <div className="vv-block-search">
+          <div>
+            <label htmlFor="search-block-label">Search label</label>
+            <Input
+              id="search-block-label"
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="Chapter title, Table, Simple words"
+              value={labelQuery}
+              onChange={(e) => setLabelQuery(e.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="search-block-content">Search content</label>
+            <Input
+              id="search-block-content"
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="Words inside a piece"
+              value={contentQuery}
+              onChange={(e) => setContentQuery(e.target.value)}
+            />
+          </div>
+          {searching ? (
+            <p className="vv-hint vv-block-search-status">
+              {visibleBlocks.length
+                ? `Showing ${visibleBlocks.length} of ${blocks.length} pieces.`
+                : `No pieces match. All ${blocks.length} pieces are still in the chapter.`}
+              {titleHit ? ' The chapter title matches.' : ''}
+              <Button
+                type="link"
+                size="small"
+                onClick={() => {
+                  setLabelQuery('');
+                  setContentQuery('');
+                }}
+              >
+                Clear both
+              </Button>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {blocks.length === 0 ? (
         <div className="vv-empty-box">
           Paste the chapter above, then click Detect and fill.
@@ -364,8 +482,10 @@ export default function ChapterBlockEditor({
             </Dropdown>
           </div>
         </div>
+      ) : visibleBlocks.length === 0 ? (
+        <div className="vv-empty-box">Nothing matches this search.</div>
       ) : (
-        blocks.map((block, index) => (
+        visibleBlocks.map(({ block, index }) => (
           <article key={block.id} className={`vv-block-card is-${block.type}`}>
             <header className="vv-block-head">
               <Select
@@ -543,6 +663,26 @@ function BlockFields({
           value={block.caption || ''}
           placeholder="Optional caption (what the table shows)"
           onChange={(e) => onChange({ caption: e.target.value })}
+        />
+      </>
+    );
+  }
+
+  if (block.type === 'code') {
+    return (
+      <>
+        <Input.TextArea
+          rows={6}
+          value={block.text || block.content || ''}
+          placeholder="Paste or type code snippet here..."
+          style={{ fontFamily: 'monospace', fontSize: 13, background: '#fafafa' }}
+          onChange={(e) => onChange({ text: e.target.value, content: e.target.value })}
+        />
+        <Input
+          style={{ marginTop: 8 }}
+          value={block.language || ''}
+          placeholder="Optional: programming language (e.g. python, cpp, java, html, sql)"
+          onChange={(e) => onChange({ language: e.target.value })}
         />
       </>
     );

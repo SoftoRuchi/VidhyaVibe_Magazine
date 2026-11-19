@@ -21,6 +21,7 @@ export type TextbookBlockType =
   | 'mcq'
   | 'formula'
   | 'table'
+  | 'code'
   | 'unknown';
 
 const CALLOUT_TYPES: TextbookBlockType[] = [
@@ -125,6 +126,7 @@ export type TextbookBlock = {
   id: string;
   type: TextbookBlockType;
   text?: string;
+  language?: string;
   level?: 1 | 2 | 3;
   items?: string[];
   ordered?: boolean;
@@ -160,6 +162,19 @@ export function emptyDoc(id: string, title: string): TextbookDoc {
     schema_version: TEXTBOOK_SCHEMA_VERSION,
     chapter: { id: String(id), title: title || 'Chapter', blocks: [] },
   };
+}
+
+export function decodeCodeText(html: string) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .trim();
 }
 
 export function decodeText(html: string) {
@@ -278,6 +293,7 @@ export function htmlToJson(html: string, meta: { id: string; title: string }): T
   if (!cleaned) return doc;
   const re = new RegExp(
     [
+      '<pre\\b[^>]*>[\\s\\S]*?<\\/pre>',
       '<img\\b[^>]*>',
       '<figure\\b[^>]*>[\\s\\S]*?<\\/figure>',
       '<details\\b[^>]*>[\\s\\S]*?<\\/details>',
@@ -303,6 +319,23 @@ export function htmlToJson(html: string, meta: { id: string; title: string }): T
     const attrs = open?.[2] || '';
     const inner = raw.replace(/^<[^>]+>/, '').replace(/<\/[a-z0-9]+>\s*$/i, '');
     const cls = `${attrs} ${attr(raw, 'class')}`;
+    if (tag === 'pre' || /course-code/i.test(cls)) {
+      const codeInside = inner.match(/<code\b[^>]*>([\s\S]*?)<\/code>/i)?.[1];
+      const text = decodeCodeText(codeInside != null ? codeInside : inner);
+      const langMatch =
+        cls.match(/language-([a-z0-9_-]+)/i) ||
+        raw.match(/data-lang(?:uage)?=["']([a-z0-9_-]+)["']/i);
+      const language = langMatch ? langMatch[1] : undefined;
+      if (text) {
+        doc.chapter.blocks.push({
+          id: newBlockId('code'),
+          type: 'code',
+          text,
+          language,
+        });
+      }
+      continue;
+    }
     if (/course-flash/i.test(cls) || /course-flash/i.test(raw)) {
       const strong = inner.match(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/i);
       const front = decodeText(strong?.[2] || attr(raw, 'data-front'));
@@ -457,8 +490,31 @@ export function htmlToJson(html: string, meta: { id: string; title: string }): T
   return doc;
 }
 
+/** Hide manuscript notes that name the uploaded file, such as "(image file: Figure_1.1.png)". */
+export function stripImageFileNotes(html: string) {
+  if (!html) return '';
+  const note = () => /\s*\(\s*image\s+file\s*:\s*[^)]+\)/gi;
+  const cleaned = html.replace(
+    /(?:<figure>\s*)?(<img\b[^>]*\/?>)(?:\s*<figcaption>[\s\S]*?<\/figcaption>\s*)?(?:<\/figure>\s*)?<p>([\s\S]*?)<\/p>/gi,
+    (full, img, para) => {
+      const plain = para.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!/\(\s*image\s+file\s*:/i.test(plain)) return full;
+      const caption = para.replace(note(), '').trim();
+      if (!caption) return `<figure>${img}</figure>`;
+      const withAlt = /\salt="/i.test(img)
+        ? img.replace(/\salt="[^"]*"/i, ` alt="${caption.replace(/"/g, '&quot;')}"`)
+        : img.replace(/<img\b/i, `<img alt="${caption.replace(/"/g, '&quot;')}"`);
+      return `<figure>${withAlt}<figcaption>${caption}</figcaption></figure>`;
+    },
+  );
+  return cleaned
+    .replace(note(), '')
+    .replace(/<figcaption>\s*<\/figcaption>/gi, '')
+    .replace(/<p>\s*<\/p>/gi, '');
+}
+
 export function jsonToHtml(doc: TextbookDoc) {
-  return (doc.chapter.blocks || [])
+  return stripImageFileNotes((doc.chapter.blocks || [])
     .map((block) => {
       switch (block.type) {
         case 'heading': {
@@ -511,24 +567,46 @@ export function jsonToHtml(doc: TextbookDoc) {
           return quickHtml(block);
         case 'formula':
           return `<p class="course-formula">${escapeText(block.content || block.text || '')}</p>`;
+        case 'code': {
+          const lang = block.language ? ` class="language-${escapeText(block.language)}"` : '';
+          const code = escapeText(block.text || block.content || '');
+          return `<pre class="course-code"><code${lang}>${code}</code></pre>`;
+        }
         default:
           return block.text ? `<p>${escapeText(block.text)}</p>` : '';
       }
     })
     .filter(Boolean)
-    .join('\n');
+    .join('\n'));
+}
+
+function cleanQuizOption(opt: string) {
+  const text = String(opt || '').trim();
+  const marked =
+    /^\*\s*/.test(text) ||
+    /\s+\*\s*$/.test(text) ||
+    /\((correct|right|answer)\)\s*$/i.test(text);
+  const label = text
+    .replace(/^\*\s*/, '')
+    .replace(/\s+\*\s*$/, '')
+    .replace(/\s*\((correct|right|answer)\)\s*$/i, '')
+    .trim();
+  return { label, marked };
 }
 
 function quickHtml(block: TextbookBlock) {
   const kind = block.type === 'mcq' ? 'mcq' : 'quick_check';
   const label = kind === 'mcq' ? 'Quiz' : 'Quick check';
-  const options = (block.options || [])
-    .map((opt, i) => `<button type="button" data-opt="${i}">${escapeText(opt)}</button>`)
+  const cleaned = (block.options || []).map((opt) => cleanQuizOption(String(opt || '')));
+  const marked = cleaned.findIndex((opt) => opt.marked);
+  const answer = marked >= 0 ? marked : Number(block.answer) || 0;
+  const options = cleaned
+    .map((opt, i) => `<button type="button" data-opt="${i}">${escapeText(opt.label)}</button>`)
     .join('');
   const explain = block.explanation
     ? `<p class="course-quick-explain">${escapeText(block.explanation)}</p>`
     : '';
-  return `<aside class="course-quick-block" data-kind="${kind}" data-answer="${Number(block.answer) || 0}">
+  return `<aside class="course-quick-block" data-kind="${kind}" data-answer="${answer}">
   <p class="course-kicker">${label}</p>
   <p class="course-quick-prompt">${escapeText(block.question || '')}</p>
   <div class="course-quick-options">${options}</div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { BookOutlined, DeleteOutlined } from '@ant-design/icons';
+import { BookOutlined, CopyOutlined, DeleteOutlined, ReadOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -17,7 +17,9 @@ import {
   message,
 } from 'antd';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import React from 'react';
+import CopyBookModal from '../../../components/CopyBookModal';
 import api from '../../../lib/api';
 
 type Course = {
@@ -31,8 +33,10 @@ type Course = {
 };
 
 export default function AdminCoursesPage() {
+  const router = useRouter();
   const [courses, setCourses] = React.useState<Course[]>([]);
   const [open, setOpen] = React.useState(false);
+  const [copyIntoId, setCopyIntoId] = React.useState<number | null>(null);
   const [search, setSearch] = React.useState('');
   const [form] = Form.useForm();
 
@@ -104,9 +108,14 @@ export default function AdminCoursesPage() {
             students can find them.
           </p>
         </div>
-        <Button type="primary" size="large" onClick={() => setOpen(true)}>
-          New course
-        </Button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <Button icon={<ReadOutlined />} size="large" onClick={() => router.push('/admin/books')}>
+            View all books
+          </Button>
+          <Button type="primary" size="large" onClick={() => setOpen(true)}>
+            New course
+          </Button>
+        </div>
       </div>
 
       <div className="vv-course-steps">
@@ -170,10 +179,13 @@ export default function AdminCoursesPage() {
                     {c.semesterCount || 0} semester{(c.semesterCount || 0) === 1 ? '' : 's'}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <Link href={`/admin/courses/${c.id}`}>
                     <Button type="primary">Open structure</Button>
                   </Link>
+                  <Button icon={<CopyOutlined />} onClick={() => setCopyIntoId(c.id)}>
+                    Copy a book here
+                  </Button>
                   <Popconfirm
                     title="Delete this whole course and its chapters?"
                     onConfirm={() => remove(c.id)}
@@ -219,6 +231,17 @@ export default function AdminCoursesPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <CopyBookModal
+        open={copyIntoId != null}
+        onClose={() => setCopyIntoId(null)}
+        defaultDestCourseId={copyIntoId}
+        currentCourseId={copyIntoId}
+        onCopied={(result) => {
+          setCopyIntoId(null);
+          router.push(`/admin/courses/${result.courseId}`);
+        }}
+      />
     </main>
   );
 }

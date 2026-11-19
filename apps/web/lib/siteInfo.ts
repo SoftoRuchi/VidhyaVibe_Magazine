@@ -1,5 +1,5 @@
 export const siteInfo = {
-  brandName: 'VidhyaVibe Magazine',
+  brandName: 'VidhyaVibe',
   companyName: 'VidhyaVibe',
   supportEmail: 'support@vidhyavibe.in',
   websiteUrl: 'https://vidhyavibe.in',

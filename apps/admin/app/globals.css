@@ -192,6 +192,17 @@ a {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
 }
+.vv-cover-field {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+}
+.vv-cover-label {
+    margin: 0;
+    font-weight: 600;
+    color: #314155;
+}
 .vv-cover-thumb {
     display: block;
     width: 140px;
@@ -207,6 +218,39 @@ a {
     flex-wrap: wrap;
     gap: 8px;
     margin: 0 0 16px;
+}
+.vv-block-search {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 0 0 14px;
+    padding: 12px;
+    border: 1px solid #eadfd0;
+    border-radius: 12px;
+    background: #fff;
+}
+.vv-block-search label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #3d2914;
+}
+.vv-block-search-status {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+}
+.vv-search-hit {
+    box-shadow: 0 0 0 2px #2d7a3e;
+}
+@media (max-width: 720px) {
+    .vv-block-search {
+        grid-template-columns: 1fr;
+    }
 }
 .vv-block-card {
     margin-bottom: 12px;
@@ -666,6 +710,10 @@ a {
     margin: 12px 0 18px;
     overflow-x: auto;
 }
+.course-table-wrap.is-table-continued,
+.is-flow-continued {
+    margin-top: 0;
+}
 .course-table {
     width: 100%;
     border-collapse: collapse;
@@ -694,6 +742,30 @@ a {
     padding: 10px 12px;
     background: rgba(29, 78, 137, 0.06);
     border-radius: 8px;
+}
+pre.course-code,
+.course-code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    font-size: 0.88em;
+    line-height: 1.55;
+    margin: 12px 0 16px;
+    padding: 12px 16px;
+    background: #24292e;
+    color: #f6f8fa;
+    border-radius: 8px;
+    border: 1px solid #1b1f23;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+pre.course-code code {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    background: transparent;
+    padding: 0;
+    border: 0;
 }
 .course-explain {
     margin: 8px 0 16px;
@@ -859,4 +931,759 @@ mark.course-mark {
     color: inherit;
     padding: 0 2px;
     border-radius: 2px;
+}
+
+/* ==========================================================================
+   Authentic Book Realism: Spine, Boards, Edges & Ribbons
+   ========================================================================== */
+
+.course-select-block {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.course-book-volume {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform-style: preserve-3d;
+    -webkit-transform-style: preserve-3d;
+}
+
+.course-book-cover-board {
+    position: absolute;
+    z-index: 0;
+    inset: -3px calc(-1 * var(--book-unread, 8px)) -8px calc(-1 * var(--book-read, 8px) - 4px);
+    border-radius: 4px 7px 7px 4px;
+    background: linear-gradient(90deg, #6b4220 0 8px, #8b5a2e 9px, #c4a074 42%, #7a4a24 100%);
+    box-shadow:
+        0 16px 24px rgba(61, 41, 20, 0.16),
+        0 34px 54px rgba(61, 41, 20, 0.22);
+    pointer-events: none;
+}
+
+.course-book-spine {
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    bottom: 0;
+    left: calc(-1 * var(--book-read, 8px) - 5px);
+    width: 7px;
+    pointer-events: none;
+    background: linear-gradient(90deg, #1c1008, #6a4320 55%, #3d2410);
+}
+
+.course-book-volume.is-open .course-book-spine {
+    left: 50%;
+    width: 16px;
+    transform: translateX(-50%);
+    z-index: 5;
+    background: linear-gradient(
+        90deg,
+        rgba(0, 0, 0, 0.2),
+        rgba(40, 24, 10, 0.48) 46%,
+        rgba(255, 236, 200, 0.2) 50%,
+        rgba(40, 24, 10, 0.48) 54%,
+        rgba(0, 0, 0, 0.2)
+    );
+}
+
+.course-book-binding {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    z-index: 6;
+    pointer-events: none;
+    background: rgba(40, 24, 10, 0.35);
+}
+
+.course-book-edges {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    z-index: 1;
+    pointer-events: none;
+    background: repeating-linear-gradient(to right, #f7efe0 0 1px, #d7c4a4 1px 2px);
+}
+
+.course-book-edges.is-unread {
+    left: 100%;
+    right: auto;
+    width: var(--book-unread, 8px);
+    transform: skewY(-12deg);
+    transform-origin: left center;
+    border-radius: 0 2px 2px 0;
+    box-shadow: 2px 0 0 #c9b089;
+}
+
+.course-book-edges.is-read {
+    right: 100%;
+    left: auto;
+    width: var(--book-read, 8px);
+    transform: skewY(12deg);
+    transform-origin: right center;
+    border-radius: 2px 0 0 2px;
+    box-shadow: -2px 0 0 #c9b089;
+}
+
+.course-page-fold {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 26px;
+    z-index: 8;
+    pointer-events: auto;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    appearance: none;
+}
+
+.course-page-fold.is-next {
+    right: 0;
+    cursor: e-resize;
+}
+
+.course-page-fold.is-prev {
+    left: 0;
+    cursor: w-resize;
+}
+
+.course-page-fold::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    width: 18px;
+    height: 18px;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+        opacity 0.16s ease,
+        width 0.16s ease,
+        height 0.16s ease;
+}
+
+.course-page-fold.is-next::after {
+    right: 0;
+    background:
+        linear-gradient(225deg, rgba(255, 253, 246, 0.95) 0 22%, transparent 23%),
+        linear-gradient(135deg, transparent 49.5%, #c9b089 50%, #f4ead4 68%, #fffdf6 100%);
+    clip-path: polygon(100% 0, 0 100%, 100% 100%);
+    box-shadow: -10px -8px 16px rgba(61, 41, 20, 0.18);
+}
+
+.course-page-fold.is-prev::after {
+    left: 0;
+    background:
+        linear-gradient(135deg, rgba(255, 253, 246, 0.95) 0 22%, transparent 23%),
+        linear-gradient(225deg, transparent 49.5%, #c9b089 50%, #f4ead4 68%, #fffdf6 100%);
+    clip-path: polygon(0 0, 0 100%, 100% 100%);
+    box-shadow: 10px -8px 16px rgba(61, 41, 20, 0.18);
+}
+
+.course-page-fold:hover::after {
+    opacity: 1;
+    width: 84px;
+    height: 84px;
+}
+
+.course-book-sheet.is-verso .course-book-ribbon-wrap {
+    left: 22px;
+    right: auto;
+}
+
+.course-book-ribbon-wrap {
+    position: absolute;
+    top: 0;
+    right: 28px;
+    z-index: 6;
+}
+
+.course-book-ribbon-wrap .course-book-ribbon {
+    position: relative;
+    right: 0;
+}
+
+.course-book-ribbon {
+    position: absolute;
+    top: 0;
+    right: 28px;
+    width: 22px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    cursor: pointer;
+    background: #c4a574;
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), 50% 100%, 0 calc(100% - 10px));
+    box-shadow: 0 4px 8px rgba(61, 41, 20, 0.25);
+    z-index: 2;
+}
+
+.course-book-ribbon.is-on {
+    height: 56px;
+    background: #c4452d;
+}
+
+.course-book-ribbon.is-on.is-important { background: #c4452d; }
+.course-book-ribbon.is-on.is-doubt { background: #2b6cb0; }
+.course-book-ribbon.is-on.is-revise { background: #2d7a3e; }
+
+/* ==========================================================================
+   Course Reader Workspace & Measurement Overrides (Dense Web Book Typography)
+   ========================================================================== */
+
+.course-reader-workspace,
+.course-book-measure {
+    --course-text-scale: 1;
+}
+
+.course-reader-workspace .course-book-sheet,
+.course-book-measure .course-book-sheet {
+    padding: 12px 16px 8px;
+}
+
+.course-reader-workspace .course-book-sheet.is-verso,
+.course-book-measure .course-book-sheet.is-verso {
+    padding: 12px 14px 8px 16px;
+}
+
+.course-reader-workspace .course-book-sheet.is-recto,
+.course-book-measure .course-book-sheet.is-recto {
+    padding: 12px 16px 8px 14px;
+}
+
+.course-reader-workspace .course-book-running,
+.course-book-measure .course-book-running {
+    font-size: calc(0.62rem * var(--course-text-scale, 1));
+    letter-spacing: 0.08em;
+}
+
+.course-reader-workspace .course-book-running-title,
+.course-book-measure .course-book-running-title {
+    margin: 2px 0 6px;
+    padding-bottom: 4px;
+    font-size: calc(0.72rem * var(--course-text-scale, 1));
+}
+
+.course-reader-workspace .course-book-body,
+.course-reader-workspace .course-book-body.course-chapter,
+.course-reader-workspace .course-book-sheet .course-chapter,
+.course-book-measure .course-book-body,
+.course-book-measure .course-book-body.course-chapter {
+    font-size: calc(0.64rem * var(--course-text-scale, 1));
+    line-height: 1.4;
+}
+
+.course-reader-workspace .course-book-body p,
+.course-book-measure .course-book-body p {
+    margin: 0 0 0.35em;
+}
+
+.course-reader-workspace .course-book-body h1,
+.course-book-measure .course-book-body h1 {
+    font-size: calc(0.92rem * var(--course-text-scale, 1));
+    margin: 0 0 0.3em;
+}
+
+.course-reader-workspace .course-book-body h2,
+.course-book-measure .course-book-body h2 {
+    font-size: calc(0.78rem * var(--course-text-scale, 1));
+    margin: 0.45em 0 0.2em;
+}
+
+.course-reader-workspace .course-book-body h3,
+.course-book-measure .course-book-body h3 {
+    font-size: calc(0.72rem * var(--course-text-scale, 1));
+    margin: 0.4em 0 0.15em;
+}
+
+.course-reader-workspace .course-table,
+.course-book-measure .course-table,
+.course-reader-workspace .course-table th,
+.course-reader-workspace .course-table td,
+.course-book-measure .course-table th,
+.course-book-measure .course-table td {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: calc(0.64rem * var(--course-text-scale, 1));
+    line-height: 1.4;
+    letter-spacing: 0;
+}
+
+.course-reader-workspace .course-table th,
+.course-reader-workspace .course-table td,
+.course-book-measure .course-table th,
+.course-book-measure .course-table td {
+    padding: 4px 6px;
+}
+
+.course-reader-workspace .course-table-wrap figcaption,
+.course-book-measure .course-table-wrap figcaption {
+    font-size: calc(0.64rem * var(--course-text-scale, 1));
+}
+
+.course-reader-workspace .course-chapter-toc,
+.course-book-measure .course-chapter-toc {
+    margin: 0 0 10px;
+    padding: 10px 12px 8px;
+    font-size: calc(0.64rem * var(--course-text-scale, 1));
+}
+
+.course-reader-workspace .course-chapter-toc .course-kicker,
+.course-book-measure .course-chapter-toc .course-kicker,
+.course-reader-workspace .course-chapter-toc li,
+.course-book-measure .course-chapter-toc li {
+    font-size: calc(0.64rem * var(--course-text-scale, 1));
+    line-height: 1.4;
+}
+
+.course-reader-workspace .course-chapter-toc li,
+.course-book-measure .course-chapter-toc li {
+    margin: 0 0 2px;
+}
+
+.course-reader-workspace .course-callout,
+.course-reader-workspace .course-chapter .course-callout,
+.course-book-measure .course-callout,
+.course-book-measure .course-chapter .course-callout {
+    margin: 8px 0;
+    padding: 8px 10px;
+}
+
+.course-reader-workspace .course-book-folio,
+.course-book-measure .course-book-folio {
+    padding-top: 6px;
+    font-size: calc(0.92rem * var(--course-text-scale, 1));
+}
+
+.course-reader-workspace .course-book-side-btn {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    transform: none;
+    align-self: center;
+    width: 44px;
+    min-height: 44px;
+    flex: 0 0 44px;
+    border-radius: 999px;
+    z-index: 4;
+    padding: 0;
+}
+
+.course-reader-workspace .course-book-side-btn.is-prev,
+.course-reader-workspace .course-book-side-btn.is-next {
+    left: auto;
+    right: auto;
+}
+
+.course-reader-workspace .course-selection-bar {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    z-index: 5;
+    margin: 0;
+    max-width: calc(100% - 24px);
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 253, 246, 0.96);
+    border: 1px solid #d8c4a4;
+    box-shadow: 0 8px 20px rgba(31, 45, 61, 0.12);
+}
+
+.course-reader-workspace.is-desktop .course-book-page-meta {
+    display: none;
+}
+
+
+
+/* ==========================================================================
+   Admin Book Reader Shell & Themes
+   ========================================================================== */
+
+.vv-admin-reader-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: #f5efe4;
+    transition: background 0.3s ease;
+}
+
+.vv-admin-reader-root.is-theme-clean {
+    background: #f1f5f9;
+}
+
+.vv-admin-reader-root.is-theme-sepia {
+    background: #ede3ce;
+}
+
+.vv-admin-reader-root.is-theme-night {
+    background: #0f172a;
+    color: #e2e8f0;
+}
+
+.vv-admin-reader-header {
+    height: 64px;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-reader-header {
+    background: rgba(15, 23, 42, 0.94);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #f1f5f9;
+}
+
+.vv-admin-reader-h-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    flex: 1 1 320px;
+}
+
+.vv-admin-reader-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 13px;
+    color: #1e293b;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.vv-admin-reader-back-btn:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-reader-back-btn {
+    background: #1e293b;
+    border-color: #334155;
+    color: #cbd5e1;
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-reader-back-btn:hover {
+    background: #334155;
+    color: #fff;
+}
+
+.vv-admin-reader-h-divider {
+    width: 1px;
+    height: 28px;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-reader-h-divider {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.vv-admin-reader-meta {
+    min-width: 0;
+}
+
+.vv-admin-reader-title-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+.vv-admin-reader-book-title {
+    font-weight: 800;
+    font-size: 15px;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-reader-book-title {
+    color: #f8fafc;
+}
+
+.vv-admin-reader-subtitle {
+    font-size: 11px;
+    color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-reader-subtitle {
+    color: #94a3b8;
+}
+
+.vv-admin-reader-h-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vv-admin-reader-chapter-select-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.vv-admin-reader-h-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: nowrap;
+}
+
+.vv-admin-reader-theme-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.04);
+    padding: 3px 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-reader-theme-group {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.vv-admin-theme-dot {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    padding: 0;
+}
+
+.vv-admin-theme-dot:hover {
+    transform: scale(1.15);
+}
+
+.vv-admin-theme-dot.is-on {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+}
+
+.vv-admin-reader-zoom-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.vv-admin-zoom-label {
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 36px;
+    text-align: center;
+    color: #475569;
+}
+
+.vv-admin-reader-root.is-theme-night .vv-admin-zoom-label {
+    color: #cbd5e1;
+}
+
+.vv-admin-reader-body {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px 40px;
+    overflow-x: auto;
+}
+
+.vv-admin-reader-center-spin {
+    text-align: center;
+    padding: 80px 0;
+    color: #64748b;
+    font-weight: 600;
+}
+
+/* Reader Sheet Themes */
+.course-book-sheet.is-clean {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: #e2e8f0;
+}
+
+.course-book-sheet.is-clean::before {
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0.08), transparent);
+}
+
+.course-book-sheet.is-sepia {
+    background: #f4ecd8;
+    color: #3d2914;
+    border-color: #e2d3b8;
+}
+
+.course-book-sheet.is-sepia::before {
+    background: linear-gradient(90deg, rgba(61, 41, 20, 0.12), transparent);
+}
+
+.course-book-sheet.is-night {
+    background: #1b1814;
+    color: #f3ead8;
+    border-color: #3d3428;
+}
+
+.course-book-sheet.is-night .course-book-running,
+.course-book-sheet.is-night .course-book-running-title,
+.course-book-sheet.is-night .course-book-folio {
+    color: #a89880;
+    border-color: #3d3428;
+}
+
+.course-book-sheet.is-night::before {
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0.45), transparent);
+}
+
+.course-book-sheet.is-night code {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fcd34d;
+}
+
+.course-book-sheet.is-night .course-flash {
+    background: #2a241c;
+    border-color: #524434;
+    color: #f3ead8;
+}
+
+.course-book-sheet.is-night .course-quick-block {
+    background: #241f17;
+    border-color: #4a3d2e;
+    color: #f3ead8;
+}
+
+.course-book-sheet.is-night .course-quick-block button {
+    background: #17130e;
+    border-color: #4a3d2e;
+    color: #f3ead8;
+}
+
+/* TOC Drawer items */
+.vv-admin-toc-wrap {
+    padding: 0;
+}
+
+.vv-admin-toc-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vv-admin-toc-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    cursor: pointer;
+    background: #fff;
+    transition: all 0.15s ease;
+}
+
+.vv-admin-toc-item:hover {
+    border-color: #93c5fd;
+    background: #f8fafc;
+}
+
+.vv-admin-toc-item.is-current {
+    border-color: #3b82f6;
+    background: #eff6ff;
+}
+
+.vv-admin-toc-item-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.vv-admin-toc-index {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.vv-admin-toc-item.is-current .vv-admin-toc-index {
+    background: #2563eb;
+    color: #fff;
+}
+
+.vv-admin-toc-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e293b;
+    line-height: 1.35;
+}
+
+.vv-admin-toc-subtopics {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #dbeafe;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vv-admin-toc-topic {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #475569;
+    padding: 3px 6px;
+    border-radius: 6px;
+}
+
+.vv-admin-toc-topic:hover {
+    background: rgba(37, 99, 235, 0.08);
+    color: #1d4ed8;
+}
+
+.vv-admin-toc-dot {
+    color: #3b82f6;
+}
+
+.vv-admin-toc-topic-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vv-admin-toc-topic-page {
+    font-size: 11px;
+    color: #94a3b8;
+    font-weight: 600;
 }

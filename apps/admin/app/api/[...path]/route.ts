@@ -3,13 +3,14 @@ import { NextResponse } from 'next/server';
 import { getApiProxyBase } from '../../../lib/apiProxyBase';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const FORWARD_HEADERS = [
   'authorization',
   'x-access-token',
   'x-refresh-token',
   'content-type',
-  'content-length',
   'cookie',
   'accept',
 ];
@@ -25,14 +26,28 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
     if (value) headers.set(name, value);
   });
 
-  const init: RequestInit & { duplex?: 'half' } = {
+  const init: RequestInit = {
     method: req.method,
     headers,
   };
 
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
-    init.body = req.body;
-    init.duplex = 'half';
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    try {
+      const buf = await req.arrayBuffer();
+      if (buf.byteLength) {
+        init.body = buf;
+        headers.set('content-length', String(buf.byteLength));
+      }
+    } catch (e) {
+      console.error('[admin api proxy] read body failed:', url, e);
+      return NextResponse.json(
+        {
+          error: 'upload_too_large',
+          message: 'The picture is too large for this upload path. Try a smaller JPG or PNG.',
+        },
+        { status: 413 },
+      );
+    }
   }
 
   let upstream: Response;

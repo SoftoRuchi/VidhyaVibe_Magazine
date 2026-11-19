@@ -1,7 +1,10 @@
 import { Router } from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db';
 import { requireAuth, type AuthRequest } from '../middleware/auth';
 import { requireChapterAccess } from '../middleware/courseAccess';
+import { memoryUpload } from '../middleware/upload';
+import { getStorageAdapter } from '../providers/storage';
 import { flashcardsFromChapterHtml } from '../utils/courseFlashcards';
 import { asDoc, flashcardsFromDoc } from '../utils/textbookContent';
 
@@ -196,6 +199,29 @@ router.delete('/notes/:id', requireAuth, async (req: AuthRequest, res) => {
     res.status(500).json({ error: 'delete_failed' });
   }
 });
+
+/** POST /api/courses/notes/upload-image */
+router.post(
+  '/notes/upload-image',
+  requireAuth,
+  memoryUpload.single('image'),
+  async (req: AuthRequest, res) => {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'file_required' });
+    try {
+      const storage = getStorageAdapter();
+      const ext = (file.originalname || 'png').split('.').pop()?.toLowerCase() || 'png';
+      const safeExt = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext) ? ext : 'png';
+      const key = `course-notes/user-${req.user?.id || 'anon'}/${uuidv4()}.${safeExt}`;
+      const uploaded = await storage.upload(key, file.buffer, file.mimetype || 'image/png');
+      const url = `/api/assets/serve?key=${encodeURIComponent(uploaded.key)}`;
+      res.json({ url, key: uploaded.key });
+    } catch (err: any) {
+      console.error('[courseStudy] note image upload failed', err);
+      res.status(500).json({ error: 'upload_failed' });
+    }
+  },
+);
 
 /** POST /api/courses/chapters/:id/highlights { pageNumber, text, color } */
 router.post('/chapters/:id/highlights', requireChapterAccess, async (req: AuthRequest, res) => {

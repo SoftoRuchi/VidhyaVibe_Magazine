@@ -25,7 +25,7 @@ export default function CourseFlashcards({
   if (cards.length === 0) {
     return (
       <p className="course-notes-empty">
-        No flashcards in this chapter yet. Select a term on the page and tap Flashcard.
+        No flashcards in this chapter yet. Tap a flashcard in the book to study it.
       </p>
     );
   }
@@ -67,12 +67,22 @@ export default function CourseFlashcards({
       </p>
       <button
         type="button"
-        className={`course-flash-card${flipped ? ' is-back' : ''}`}
+        className={`course-flash-3d${flipped ? ' is-flipped' : ''}`}
+        aria-pressed={flipped}
         onClick={() => setFlipped((v) => !v)}
       >
-        <span className="course-flash-side">{flipped ? 'Answer' : 'Term'}</span>
-        <strong>{flipped ? card.back : card.front}</strong>
-        <small>Tap to flip</small>
+        <span className="course-flash-3d-inner">
+          <span className="course-flash-3d-face is-front">
+            <small>Term</small>
+            <strong>{card.front}</strong>
+            <em>Tap to see answer</em>
+          </span>
+          <span className="course-flash-3d-face is-back">
+            <small>Answer</small>
+            <strong>{card.back}</strong>
+            <em>Tap to see term</em>
+          </span>
+        </span>
       </button>
       <div className="course-flash-actions">
         <button type="button" onClick={() => go(index - 1)} disabled={queue.length < 2}>

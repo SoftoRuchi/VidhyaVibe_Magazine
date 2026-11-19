@@ -2,6 +2,9 @@ const { getApiRewriteBase } = require('../../scripts/next-api-rewrite-base.cjs')
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false,
   },

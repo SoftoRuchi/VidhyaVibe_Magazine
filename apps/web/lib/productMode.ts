@@ -10,8 +10,8 @@ const KEY = 'vv_product_mode';
 const EVENT = 'vv-product-mode';
 
 export function getProductMode(): ProductMode {
-  if (typeof window === 'undefined') return 'magazine';
-  return localStorage.getItem(KEY) === 'course' ? 'course' : 'magazine';
+  if (typeof window === 'undefined') return 'course';
+  return localStorage.getItem(KEY) === 'magazine' ? 'magazine' : 'course';
 }
 
 export function persistProductMode(mode: ProductMode) {
@@ -55,7 +55,7 @@ type ProductModeContextValue = {
 };
 
 const ProductModeContext = React.createContext<ProductModeContextValue>({
-  mode: 'magazine',
+  mode: 'course',
   setMode: () => {},
   canUseCourses: true,
 });
@@ -63,7 +63,7 @@ const ProductModeContext = React.createContext<ProductModeContextValue>({
 export function ProductModeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '/';
   const router = useRouter();
-  const [mode, setModeState] = React.useState<ProductMode>('magazine');
+  const [mode, setModeState] = React.useState<ProductMode>('course');
   const [canUseCourses, setCanUseCourses] = React.useState(true);
 
   React.useEffect(() => {
@@ -107,7 +107,7 @@ export function ProductModeProvider({ children }: { children: React.ReactNode })
       persistProductMode(next);
       setModeState(next);
       const inferred = productModeFromPath(pathname);
-      if (inferred && inferred !== next) router.push('/');
+      if (inferred !== next && pathname !== '/') router.push('/');
     },
     [pathname, router],
   );

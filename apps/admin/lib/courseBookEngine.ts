@@ -47,7 +47,7 @@ export function blocksFromHtml(html: string): CourseBlock[] {
   wrap.innerHTML = rewriteImages(html || '');
   const nodes = Array.from(
     wrap.querySelectorAll(
-      'h1,h2,h3,p,ul,ol,li,nav.course-chapter-toc,div.course-callout,div.course-split,div.course-flash,figure,img,details.course-explain,aside.course-explain,div.course-explain,aside.course-quick-block,div.course-table-wrap,table.course-table',
+      'h1,h2,h3,p,ul,ol,li,nav.course-chapter-toc,div.course-callout,div.course-split,div.course-flash,figure,img,details.course-explain,aside.course-explain,div.course-explain,aside.course-quick-block,div.course-table-wrap,table.course-table,pre.course-code,pre',
     ),
   ).filter((el) => {
     if (el.closest('.course-flash') && !el.classList.contains('course-flash')) return false;
@@ -61,10 +61,11 @@ export function blocksFromHtml(html: string): CourseBlock[] {
       return false;
     if (el.tagName.toLowerCase() === 'table' && el.closest('figure, div.course-table-wrap'))
       return false;
+    if (el.tagName.toLowerCase() === 'code' && el.closest('pre')) return false;
     if (el.tagName.toLowerCase() === 'li' && el.closest('ul, ol')) return false;
     if (
       el.tagName.toLowerCase() === 'p' &&
-      el.closest('ul, ol, li, figure, table, .course-table-wrap')
+      el.closest('ul, ol, li, figure, table, .course-table-wrap, pre')
     )
       return false;
     if (el.tagName.toLowerCase() !== 'img') return true;
@@ -92,7 +93,9 @@ export function blocksFromHtml(html: string): CourseBlock[] {
                       ? 'formula'
                       : tag === 'p' && el.classList.contains('course-kicker')
                         ? 'kicker'
-                        : tag;
+                        : tag === 'pre' || el.classList.contains('course-code')
+                          ? 'code'
+                          : tag;
       const id = `b-${i}`;
       if (kind === 'explain') el.setAttribute('data-explain-id', id);
       return { id, kind, text: (el.textContent || '').trim(), html: el.outerHTML };
@@ -100,6 +103,7 @@ export function blocksFromHtml(html: string): CourseBlock[] {
     .filter(
       (b) =>
         b.text.length > 0 ||
+        b.kind === 'code' ||
         b.kind === 'img' ||
         b.kind === 'figure' ||
         b.kind === 'split' ||
@@ -136,6 +140,169 @@ function canSplitBlock(kind: string) {
     kind === 'kicker' ||
     kind === 'formula'
   );
+}
+
+function canSplitList(kind: string) {
+  return kind === 'toc' || kind === 'ol' || kind === 'ul';
+}
+
+function isSectionHeading(kind: string) {
+  return kind === 'h1' || kind === 'h2' || kind === 'h3' || kind === 'h4' || kind === 'kicker';
+}
+
+function isChapterStart(kind: string, html: string) {
+  if (kind === 'h1') return true;
+  if (kind !== 'h2' && kind !== 'h3') return false;
+  const text = html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return /^chapter\s+\d+/i.test(text);
+}
+
+function listPieces(html: string): string[] | null {
+  if (typeof document === 'undefined') return null;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return null;
+  const list = (root.matches('ul,ol') ? root : root.querySelector('ol, ul')) as HTMLElement | null;
+  if (!list) return null;
+  const items = Array.from(list.children).filter((el) => el.tagName.toLowerCase() === 'li');
+  if (items.length < 2) return null;
+  return items.map((el) => (el as HTMLElement).outerHTML);
+}
+
+function htmlWithListSlice(
+  html: string,
+  itemHtmls: string[],
+  fromIndex: number,
+  continued: boolean,
+) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return html;
+  const list = (root.matches('ul,ol') ? root : root.querySelector('ol, ul')) as HTMLElement | null;
+  if (!list) return html;
+  list.innerHTML = itemHtmls.join('');
+  if (fromIndex > 0 && list.tagName.toLowerCase() === 'ol') {
+    list.setAttribute('start', String(fromIndex + 1));
+  }
+  if (continued && root.classList.contains('course-chapter-toc')) {
+    const kicker = root.querySelector('.course-kicker');
+    if (kicker) {
+      const base = (kicker.textContent || 'Contents').replace(/\s*\(continued\)\s*$/i, '').trim();
+      kicker.textContent = `${base} (continued)`;
+    }
+  }
+  return root.outerHTML;
+}
+
+function parseTableRoot(html: string) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return null;
+  const table = (
+    root.matches('table') ? root : root.querySelector('table')
+  ) as HTMLTableElement | null;
+  if (!table) return null;
+  return { root, table };
+}
+
+function classifyTable(table: HTMLTableElement) {
+  const headerRows: HTMLTableRowElement[] = [];
+  const footerRows: HTMLTableRowElement[] = [];
+  const bodyRows: HTMLTableRowElement[] = [];
+  Array.from(table.rows).forEach((row) => {
+    const parent = row.parentElement?.tagName.toLowerCase();
+    if (parent === 'thead') headerRows.push(row);
+    else if (parent === 'tfoot') footerRows.push(row);
+    else bodyRows.push(row);
+  });
+  if (!headerRows.length && bodyRows.length) {
+    const first = bodyRows[0];
+    const cells = Array.from(first.cells);
+    if (cells.length && cells.every((cell) => cell.tagName.toLowerCase() === 'th')) {
+      headerRows.push(bodyRows.shift() as HTMLTableRowElement);
+    }
+  }
+  return { headerRows, footerRows, bodyRows };
+}
+
+function tableBodyRows(html: string): string[] | null {
+  if (typeof document === 'undefined') return null;
+  const parsed = parseTableRoot(html);
+  if (!parsed) return null;
+  const { bodyRows } = classifyTable(parsed.table);
+  if (bodyRows.length < 2) return null;
+  return bodyRows.map((row) => row.outerHTML);
+}
+
+function htmlWithTableSlice(html: string, rowHtmls: string[], continued: boolean, isLast: boolean) {
+  const parsed = parseTableRoot(html);
+  if (!parsed) return html;
+  const { root, table } = parsed;
+  const caption = table.querySelector('caption');
+  const { headerRows, footerRows } = classifyTable(table);
+  const thead = document.createElement('thead');
+  headerRows.forEach((row) => thead.appendChild(row));
+  const tfoot = document.createElement('tfoot');
+  footerRows.forEach((row) => tfoot.appendChild(row));
+  caption?.remove();
+  table.replaceChildren();
+  if (caption && !continued) table.appendChild(caption);
+  if (headerRows.length) table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  tbody.innerHTML = rowHtmls.join('');
+  table.appendChild(tbody);
+  if (isLast && footerRows.length) table.appendChild(tfoot);
+  if (continued) {
+    root.classList.add('is-table-continued');
+  }
+  if (!isLast) root.querySelectorAll('figcaption').forEach((el) => el.remove());
+  return root.outerHTML;
+}
+
+function compositeChildHtmls(html: string): string[] | null {
+  if (typeof document === 'undefined') return null;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return null;
+  if (
+    root.matches('table, ul, ol, p, h1, h2, h3, h4, img, pre, blockquote, li, details') ||
+    root.classList.contains('course-flash') ||
+    root.classList.contains('course-quick-block') ||
+    root.classList.contains('course-book-cover') ||
+    root.classList.contains('course-table-wrap') ||
+    root.classList.contains('course-table') ||
+    root.classList.contains('course-callout') ||
+    root.classList.contains('course-explain') ||
+    root.querySelector('table, ul, ol')
+  ) {
+    return null;
+  }
+  const hasLooseText = Array.from(root.childNodes).some(
+    (node) => node.nodeType === Node.TEXT_NODE && (node.textContent || '').trim().length > 0,
+  );
+  if (hasLooseText) return null;
+  const kids = Array.from(root.children).filter(
+    (el) => (el.textContent || '').trim().length > 0 || Boolean(el.querySelector('img, svg, video')),
+  );
+  if (kids.length < 2) return null;
+  return kids.map((el) => el.outerHTML);
+}
+
+function htmlWithChildSlice(html: string, parts: string[], continued: boolean) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const root = wrap.firstElementChild as HTMLElement | null;
+  if (!root) return html;
+  root.innerHTML = parts.join('');
+  if (continued) root.classList.add('is-flow-continued');
+  return root.outerHTML;
 }
 
 function wordsFromHtml(html: string) {
@@ -176,6 +343,39 @@ function waitForProbeImages(root: HTMLElement) {
   );
 }
 
+export function isCoverHtml(html: string) {
+  return /course-book-cover/.test(html);
+}
+
+export function collapseQuickBlocks(html: string) {
+  if (!html || typeof document === 'undefined' || !/course-quick-block/.test(html)) return html;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.course-quick-block').forEach((el, i) => {
+    if (el.querySelector('.course-quick-icon-btn')) return;
+    const kind = el.getAttribute('data-kind') === 'mcq' ? 'Quiz' : 'Quick check';
+    const slug = (el.textContent || '').replace(/[^a-z0-9]+/gi, '').slice(0, 24);
+    const id = el.getAttribute('data-quick-id') || `quick-${i}-${slug}`;
+    el.setAttribute('data-quick-id', id);
+    el.classList.add('is-collapsed');
+    const inner = el.innerHTML.trim();
+    el.innerHTML = `<button type="button" class="course-quick-icon-btn" aria-expanded="false" aria-label="${kind}"><span class="course-quick-icon" aria-hidden="true"></span><span class="course-quick-icon-label">${kind}</span></button><template class="course-quick-expand">${inner}</template>`;
+  });
+  return wrap.innerHTML;
+}
+
+export function wrapPagePieces(pieces: string[]) {
+  return collapseQuickBlocks(
+    pieces
+      .map((html) => {
+        if (!html) return '';
+        if (isCoverHtml(html) || /course-select-block/.test(html)) return html;
+        return `<div class="course-select-block">${html}</div>`;
+      })
+      .join(''),
+  );
+}
+
 export async function paginateByMeasure(
   blocks: CourseBlock[],
   opts: {
@@ -194,20 +394,22 @@ export async function paginateByMeasure(
     return [blocks.map((b) => htmlForBlock(b, opts.openIds))];
   }
   const host = document.createElement('div');
+  host.className = 'course-book-measure';
   host.setAttribute('aria-hidden', 'true');
   host.style.cssText =
     'position:absolute;left:-99999px;top:0;pointer-events:none;visibility:hidden;';
+  host.style.setProperty('--course-text-scale', String(opts.font / 100));
   const sheetStyle = opts.a4
     ? 'width:100%;height:100%;font-size:' + opts.font + '%;min-height:0;box-sizing:border-box'
     : `width:${opts.width}px;height:${opts.height}px;font-size:${opts.font}%;min-height:0;box-sizing:border-box`;
-  const inner = `<div class="course-book-sheet is-${opts.theme}" style="${sheetStyle}">
+  const inner = `<div class="course-book-sheet is-${opts.theme} is-verso" style="${sheetStyle}">
     <div class="course-book-running">${escapeHtml(opts.header || 'Chapter')}</div>
     <div class="course-book-running-title">${escapeHtml(opts.chapterTitle || ' ')}</div>
     <div class="course-chapter course-book-body"></div>
     <div class="course-book-folio">0</div>
   </div>`;
   host.innerHTML = opts.a4
-    ? `<div class="course-book is-a4" style="width:${opts.width}px"><div class="course-book-solo" style="width:${opts.width}px;height:${opts.height}px">${inner}</div></div>`
+    ? `<div class="course-book is-a4 is-spread" style="width:${opts.width}px"><div class="course-book-solo" style="width:${opts.width}px;height:${opts.height}px">${inner}</div></div>`
     : `<div class="course-book" style="width:${opts.width}px">${inner}</div>`;
   document.body.appendChild(host);
   const sheet = host.querySelector('.course-book-sheet') as HTMLElement;
@@ -232,7 +434,7 @@ export async function paginateByMeasure(
   let current: string[] = [];
 
   const paint = async (pieces: string[]) => {
-    body.innerHTML = pieces.join('');
+    body.innerHTML = wrapPagePieces(pieces);
     await waitForProbeImages(body);
     return fits();
   };
@@ -278,14 +480,164 @@ export async function paginateByMeasure(
     }
   };
 
-  try {
-    for (const block of blocks) {
-      const full = htmlForBlock(block, opts.openIds);
-      if (await paint(current.concat(full))) {
-        current.push(full);
-        continue;
+  const maxList = async (base: string[], html: string, rest: string[], offset: number) => {
+    if (!rest.length) return 0;
+    let lo = 1;
+    let hi = rest.length;
+    let best = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const slice = htmlWithListSlice(html, rest.slice(0, mid), offset, offset > 0);
+      if (await paint(base.concat(slice))) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
       }
-      if (canSplitBlock(block.kind)) {
+    }
+    return best;
+  };
+
+  const emitList = async (html: string, items: string[]) => {
+    let offset = 0;
+    while (offset < items.length) {
+      const rest = items.slice(offset);
+      let fitted = await maxList(current, html, rest, offset);
+      if (fitted <= 0 && current.length) {
+        pages.push(current);
+        current = [];
+        fitted = await maxList(current, html, rest, offset);
+      }
+      if (fitted <= 0) {
+        current.push(htmlWithListSlice(html, rest, offset, offset > 0));
+        pages.push(current);
+        current = [];
+        break;
+      }
+      current.push(htmlWithListSlice(html, rest.slice(0, fitted), offset, offset > 0));
+      offset += fitted;
+      if (offset < items.length) {
+        pages.push(current);
+        current = [];
+      }
+    }
+  };
+
+  try {
+    const endPage = () => {
+      if (!current.length) return;
+      pages.push(current);
+      current = [];
+    };
+
+    const maxTable = async (base: string[], html: string, rest: string[], continued: boolean) => {
+      if (!rest.length) return 0;
+      let lo = 1;
+      let hi = rest.length;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const slice = htmlWithTableSlice(html, rest.slice(0, mid), continued, mid === rest.length);
+        if (await paint(base.concat(slice))) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return best;
+    };
+
+    const emitTable = async (html: string, rows: string[]) => {
+      let offset = 0;
+      while (offset < rows.length) {
+        const rest = rows.slice(offset);
+        const continued = offset > 0;
+        let fitted = await maxTable(current, html, rest, continued);
+        if (fitted <= 0 && current.length) {
+          pages.push(current);
+          current = [];
+          fitted = await maxTable(current, html, rest, continued);
+        }
+        if (fitted <= 0) {
+          current.push(htmlWithTableSlice(html, rest.slice(0, 1), continued, rest.length === 1));
+          pages.push(current);
+          current = [];
+          offset += 1;
+          continue;
+        }
+        current.push(
+          htmlWithTableSlice(html, rest.slice(0, fitted), continued, offset + fitted >= rows.length),
+        );
+        offset += fitted;
+        if (offset < rows.length) {
+          pages.push(current);
+          current = [];
+        }
+      }
+    };
+
+    const maxParts = async (base: string[], html: string, rest: string[], continued: boolean) => {
+      if (!rest.length) return 0;
+      let lo = 1;
+      let hi = rest.length;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const slice = htmlWithChildSlice(html, rest.slice(0, mid), continued);
+        if (await paint(base.concat(slice))) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return best;
+    };
+
+    const emitParts = async (html: string, parts: string[]) => {
+      let offset = 0;
+      while (offset < parts.length) {
+        const rest = parts.slice(offset);
+        const continued = offset > 0;
+        let fitted = await maxParts(current, html, rest, continued);
+        if (fitted <= 0 && current.length) {
+          pages.push(current);
+          current = [];
+          fitted = await maxParts(current, html, rest, continued);
+        }
+        if (fitted <= 0) {
+          current.push(htmlWithChildSlice(html, rest.slice(0, 1), continued));
+          pages.push(current);
+          current = [];
+          offset += 1;
+          continue;
+        }
+        current.push(htmlWithChildSlice(html, rest.slice(0, fitted), continued));
+        offset += fitted;
+        if (offset < parts.length) {
+          pages.push(current);
+          current = [];
+        }
+      }
+    };
+
+    const fillOverflow = async (full: string, kind: string) => {
+      if (canSplitList(kind)) {
+        const items = listPieces(full);
+        if (items) {
+          await emitList(full, items);
+          return true;
+        }
+      }
+      if (kind === 'table') {
+        const rows = tableBodyRows(full);
+        if (rows) {
+          await emitTable(full, rows);
+          return true;
+        }
+      }
+      if (canSplitBlock(kind)) {
         const words = wordsFromHtml(full);
         const fitted = await maxWords(current, full, words);
         if (fitted > 0 && fitted < words.length) {
@@ -293,9 +645,76 @@ export async function paginateByMeasure(
           pages.push(current);
           current = [];
           await emitWords(full, words.slice(fitted));
-          continue;
+          return true;
         }
       }
+      const parts = compositeChildHtmls(full);
+      if (parts) {
+        await emitParts(full, parts);
+        return true;
+      }
+      return false;
+    };
+
+    const headingKeepsFollowing = async (
+      base: string[],
+      headingHtmls: string[],
+      next: { id: string; kind: string; html: string } | undefined,
+    ) => {
+      if (!next) return true;
+      const nextHtml = htmlForBlock(next, opts.openIds);
+      if (await paint(base.concat(headingHtmls, nextHtml))) return true;
+      if (next.kind === 'table') {
+        const rows = tableBodyRows(nextHtml);
+        if (!rows?.length) return false;
+        const need = Math.min(rows.length, Math.max(3, Math.ceil(rows.length * 0.34)));
+        return paint(
+          base.concat(
+            headingHtmls,
+            htmlWithTableSlice(nextHtml, rows.slice(0, need), false, need >= rows.length),
+          ),
+        );
+      }
+      if (canSplitList(next.kind)) {
+        const items = listPieces(nextHtml);
+        if (!items?.length) return false;
+        const need = Math.min(items.length, Math.max(2, Math.ceil(items.length * 0.34)));
+        return paint(
+          base.concat(headingHtmls, htmlWithListSlice(nextHtml, items.slice(0, need), 0, false)),
+        );
+      }
+      if (canSplitBlock(next.kind)) {
+        const words = wordsFromHtml(nextHtml);
+        if (!words.length) return false;
+        const need = Math.min(words.length, Math.max(28, Math.ceil(words.length * 0.34)));
+        return paint(base.concat(headingHtmls, htmlWithWords(nextHtml, words.slice(0, need))));
+      }
+      return false;
+    };
+
+    for (let bi = 0; bi < blocks.length; bi += 1) {
+      const block = blocks[bi];
+      const full = htmlForBlock(block, opts.openIds);
+      if (isChapterStart(block.kind, full)) endPage();
+      if (current.length && isSectionHeading(block.kind) && !isChapterStart(block.kind, full)) {
+        let runEnd = bi;
+        const headingHtmls = [full];
+        while (
+          runEnd + 1 < blocks.length &&
+          isSectionHeading(blocks[runEnd + 1].kind) &&
+          !isChapterStart(blocks[runEnd + 1].kind, blocks[runEnd + 1].html)
+        ) {
+          runEnd += 1;
+          headingHtmls.push(htmlForBlock(blocks[runEnd], opts.openIds));
+        }
+        if (!(await headingKeepsFollowing(current, headingHtmls, blocks[runEnd + 1]))) endPage();
+      }
+
+      if (await paint(current.concat(full))) {
+        current.push(full);
+        continue;
+      }
+      if (await fillOverflow(full, block.kind)) continue;
       if (current.length) {
         pages.push(current);
         current = [];
@@ -304,6 +723,7 @@ export async function paginateByMeasure(
         current.push(full);
         continue;
       }
+      if (await fillOverflow(full, block.kind)) continue;
       if (canSplitBlock(block.kind)) {
         await emitWords(full, wordsFromHtml(full));
       } else {

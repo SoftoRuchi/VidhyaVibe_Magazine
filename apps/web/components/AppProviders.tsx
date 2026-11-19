@@ -51,7 +51,9 @@ export default function AppProviders({ children }: { children: React.ReactNode }
 function AppFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { mode } = useProductMode();
-  const isCourseReader = /\/courses\/.+\/(read|notes|explain)\/?$/.test(pathname || '');
+  const isCourseReader =
+    /\/courses\/.+\/(read|notes|explain)\/?$/.test(pathname || '') ||
+    pathname === '/notes';
 
   useEffect(() => {
     document.querySelector<HTMLElement>('.vv-main-scroll')?.scrollTo({ top: 0 });

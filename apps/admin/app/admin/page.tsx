@@ -2,6 +2,7 @@
 import {
   UserOutlined,
   ReadOutlined,
+  BookOutlined,
   RiseOutlined,
   FileTextOutlined,
   PlusOutlined,
@@ -167,6 +168,7 @@ export default function DashboardPage() {
 
   const totalUsers = summary?.totalUsers ?? 0;
   const activeMagazines = summary?.totalMagazines ?? 0;
+  const totalBooks = summary?.totalBooks ?? 0;
   const totalSubscriptions = summary?.totalSubscriptions ?? 0;
   const monthlyRevenue = (summary?.totalRevenueCents ?? 0) / 100;
   const liveBookReaders = summary?.liveBookReaders ?? 0;
@@ -187,6 +189,15 @@ export default function DashboardPage() {
       icon: <ReadOutlined />,
       iconColor: '#c92a2a',
       iconBg: 'rgba(201,42,42,0.16)',
+    },
+    {
+      label: 'TOTAL BOOKS',
+      value: totalBooks,
+      href: '/admin/books',
+      gradient: 'linear-gradient(135deg, rgba(234,88,12,0.85) 0%, rgba(194,65,12,0.70) 100%)',
+      icon: <BookOutlined />,
+      iconColor: '#ea580c',
+      iconBg: 'rgba(234,88,12,0.16)',
     },
     {
       label: 'TOTAL SUBSCRIPTIONS',
@@ -221,6 +232,12 @@ export default function DashboardPage() {
       label: 'Add New Magazine',
       icon: <PlusOutlined />,
       bg: '#1d4ed8',
+    },
+    {
+      href: '/admin/books',
+      label: 'Browse & Read Books',
+      icon: <BookOutlined />,
+      bg: '#ea580c',
     },
     { href: '/admin/users', label: 'View Users', icon: <UserOutlined />, bg: '#0ea5e9' },
     {
@@ -280,7 +297,7 @@ export default function DashboardPage() {
 
         <Row gutter={[16, 16]}>
           {kpis.map((k) => (
-            <Col key={k.label} xs={24} sm={12} lg={8} xl={k.href ? 8 : 4}>
+            <Col key={k.label} xs={24} sm={12} lg={8} xl={4}>
               <Link
                 href={k.href || '#'}
                 style={{

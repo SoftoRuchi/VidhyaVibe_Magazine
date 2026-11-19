@@ -15,6 +15,7 @@ type EmailSettingsForm = {
   imapPort: number;
   imapSsl: boolean;
   fromName: string;
+  upiVpa: string;
 };
 
 export default function EmailSettingsPage() {
@@ -40,6 +41,7 @@ export default function EmailSettingsPage() {
           imapPort: d.imapPort || 993,
           imapSsl: d.imapSsl !== false,
           fromName: d.fromName || 'VidhyaVibe',
+          upiVpa: d.upiVpa || '',
         });
       })
       .catch((e: any) => {
@@ -65,6 +67,7 @@ export default function EmailSettingsPage() {
         imapPort: Number(values.imapPort),
         imapSsl: values.imapSsl,
         fromName: values.fromName,
+        upiVpa: values.upiVpa,
       };
       if (values.smtpPass && values.smtpPass.trim() && values.smtpPass !== '********') {
         payload.smtpPass = values.smtpPass.trim();
@@ -183,6 +186,16 @@ export default function EmailSettingsPage() {
             <Col xs={24} md={12}>
               <Form.Item name="imapSsl" label="IMAP SSL" valuePropName="checked">
                 <Switch checkedChildren="On" unCheckedChildren="Off" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="upiVpa"
+                label="VidhyaVibe UPI ID"
+                extra="Used on college payment mails (QR + UPI). Example: vidhyavibe@okaxis. Do not use a dummy ID."
+                rules={[{ required: true, message: 'Enter the VidhyaVibe UPI ID for payment QR' }]}
+              >
+                <Input placeholder="vidhyavibe@okaxis" />
               </Form.Item>
             </Col>
           </Row>

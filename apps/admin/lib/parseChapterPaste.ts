@@ -33,6 +33,7 @@ const LABEL_MAP: LabelRule[] = [
   { re: /^(common mistake|mistake)\s*:\s*/i, type: 'common_mistake' },
   { re: /^(highlight|callout|note)\s*:\s*/i, type: 'callout' },
   { re: /^(formula|equation)\s*:\s*/i, type: 'formula' },
+  { re: /^(code snippet|code block|code|program|syntax)\s*:\s*/i, type: 'code' },
   { re: /^(summary|remember)\s*:\s*/i, type: 'summary' },
 ];
 
@@ -50,6 +51,7 @@ export const CHAPTER_PASTE_LABELS: { label: string; becomes: string }[] = [
   { label: 'Table:', becomes: 'Table — one row per line, cells split by |' },
   { label: 'Picture:', becomes: 'Picture box — then choose the file' },
   { label: 'Text and picture:', becomes: 'Text beside a picture — then choose the file' },
+  { label: 'Code:', becomes: 'Code block — preserves indentation and formatting' },
   { label: 'Simple words:', becomes: 'In simple words' },
   { label: 'Definition:', becomes: 'Definition box' },
   { label: 'Example:', becomes: 'Example box' },
@@ -440,6 +442,11 @@ function typedFromGuess(chunk: string): TextbookBlock | null {
       text: chunk.replace(/^(summary|remember)\s*:?\s*/i, '').trim(),
     };
   }
+  if (/^```/m.test(chunk)) {
+    const code = chunk.replace(/^```[a-z0-9_-]*\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    const lang = chunk.match(/^```([a-z0-9_-]+)/i)?.[1];
+    return { id: newBlockId('code'), type: 'code', text: code, language: lang };
+  }
   if (looksLikeQuiz(chunk)) return parseQuiz(chunk, 'quick_check');
   if (looksLikeTable(chunk)) {
     return { id: newBlockId('table'), type: 'table', rows: parseTableText(chunk) };
@@ -486,9 +493,10 @@ function parseTyped(
     type === 'definition' ||
     type === 'example' ||
     type === 'common_mistake' ||
-    type === 'formula'
+    type === 'formula' ||
+    type === 'code'
   ) {
-    return { id: newBlockId(type), type, text: body };
+    return { id: newBlockId(type), type, text: body, language: extra?.language };
   }
   if (type === 'list') {
     return {
@@ -652,6 +660,7 @@ export function describeDetected(blocks: TextbookBlock[]) {
     common_mistake: 'common mistake',
     callout: 'highlight',
     formula: 'formula',
+    code: 'code block',
   };
   return Object.entries(counts)
     .map(([type, n]) => `${n} ${names[type] || type}${n === 1 ? '' : 's'}`)

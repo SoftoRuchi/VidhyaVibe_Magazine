@@ -8,14 +8,17 @@ import { requireAdmin } from '../../middleware/admin';
 import { requireAuth } from '../../middleware/auth';
 import {
   adminEndReadingSession,
+  applyListDiscount,
   BookAccessError,
   emailStudentLogin,
   ensureBookAccessTables,
   expireStaleSessions,
   makePurchaseCode,
+  parseDiscountPct,
   upsertUserByEmail,
   type AccessModel,
 } from '../../services/bookAccess';
+import { emailInstituteLotPayment, markInstituteLotPaid } from '../../services/instituteLotPay';
 
 const router = Router();
 router.use(requireAuth);
@@ -376,6 +379,8 @@ router.get('/:id', async (req, res) => {
     const [lots]: any = await query(
       `SELECT l.id, l.subject_id AS subjectId, l.access_model AS accessModel, l.seat_count AS seatCount,
               l.purchase_code AS purchaseCode, l.status, l.notes, l.created_at AS createdAt,
+              l.amount, l.discount_pct AS discountPct, l.payment_status AS paymentStatus,
+              l.payment_sent_at AS paymentSentAt,
               s.name AS subjectName, c.name AS courseName,
               (SELECT COUNT(*) FROM book_license_seats st WHERE st.lot_id = l.id) AS assignedSeats,
               (SELECT COUNT(*) FROM book_reading_sessions rs
@@ -413,6 +418,10 @@ router.get('/:id', async (req, res) => {
         purchaseCode: l.purchaseCode,
         status: l.status,
         notes: l.notes,
+        amount: l.amount != null ? Number(l.amount) : null,
+        discountPct: l.discountPct != null ? Number(l.discountPct) : null,
+        paymentStatus: l.paymentStatus || null,
+        paymentSentAt: l.paymentSentAt || null,
         createdAt: l.createdAt,
       })),
     });
@@ -535,26 +544,242 @@ router.post('/:id/lots', async (req, res) => {
       instituteId,
     ]);
     if (!inst?.[0]) return res.status(404).json({ error: 'institute_not_found' });
-    const [sub]: any = await query('SELECT id FROM course_subjects WHERE id = ? LIMIT 1', [
-      subjectId,
-    ]);
+    const [sub]: any = await query(
+      `SELECT id, name, price, book_bank_price AS bookBankPrice, library_price AS libraryPrice,
+              discount_pct AS discountPct
+       FROM course_subjects WHERE id = ? LIMIT 1`,
+      [subjectId],
+    );
     if (!sub?.[0]) return res.status(404).json({ error: 'subject_not_found' });
+    const catalogUnit =
+      model === 'LIBRARY'
+        ? applyListDiscount(
+            sub[0].libraryPrice != null ? Number(sub[0].libraryPrice) : null,
+            sub[0].discountPct != null ? Number(sub[0].discountPct) : null,
+          )
+        : applyListDiscount(
+            sub[0].bookBankPrice != null ? Number(sub[0].bookBankPrice) : null,
+            sub[0].discountPct != null ? Number(sub[0].discountPct) : null,
+          );
+    const extraPct = parseDiscountPct(req.body?.discountPct);
+    const unit = applyListDiscount(catalogUnit, extraPct);
+    const amount = unit != null ? Math.round(unit * seatCount * 100) / 100 : null;
     const purchaseCode = makePurchaseCode(model, inst[0].code, subjectId);
     const [ins]: any = await query(
       `INSERT INTO book_license_lots
-        (subject_id, access_model, institute_id, seat_count, purchase_code, status, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, NOW(3), NOW(3))`,
-      [subjectId, model, instituteId, seatCount, purchaseCode, req.body?.notes || null],
+        (subject_id, access_model, institute_id, seat_count, purchase_code, status, notes, amount, discount_pct, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, NOW(3), NOW(3))`,
+      [
+        subjectId,
+        model,
+        instituteId,
+        seatCount,
+        purchaseCode,
+        req.body?.notes || null,
+        amount,
+        extraPct,
+      ],
     );
+    const lotId = n(ins.insertId);
+    const sendPaymentEmail = Boolean(req.body?.sendPaymentEmail);
+    let emailed = false;
+    let payEmail: string | null = null;
+    let payUrl: string | null = null;
+    let emailWarning: string | undefined;
+    if (sendPaymentEmail) {
+      if (amount == null) {
+        return res.status(201).json({
+          id: lotId,
+          purchaseCode,
+          accessModel: model,
+          seatCount,
+          amount,
+          discountPct: extraPct,
+          emailed: false,
+          emailWarning:
+            'License created, but payment mail was not sent — set book-bank or library prices on the subject.',
+        });
+      }
+      try {
+        const mail = await emailInstituteLotPayment({
+          lotId,
+          to: req.body?.payEmail,
+        });
+        emailed = Boolean(mail.ok);
+        payEmail = mail.to;
+        payUrl = mail.payUrl;
+        if (emailed && !mail.upiSet) {
+          emailWarning =
+            'License created and mail sent. Add VidhyaVibe UPI ID in Admin → Email Configuration so the mail also includes the UPI ID.';
+        }
+      } catch (mailErr: any) {
+        return res.status(201).json({
+          id: lotId,
+          purchaseCode,
+          accessModel: model,
+          seatCount,
+          amount,
+          discountPct: extraPct,
+          emailed: false,
+          emailWarning: mailErr?.message || 'License created, but payment mail failed.',
+        });
+      }
+    } else {
+      await query(
+        `UPDATE book_license_lots SET payment_status = 'OFFLINE', updated_at = NOW(3) WHERE id = ?`,
+        [lotId],
+      );
+    }
     res.status(201).json({
-      id: n(ins.insertId),
+      id: lotId,
       purchaseCode,
       accessModel: model,
       seatCount,
+      amount,
+      discountPct: extraPct,
+      emailed,
+      payEmail,
+      payUrl,
+      emailWarning:
+        emailWarning ||
+        (sendPaymentEmail && !emailed
+          ? 'License created, but the payment email was not sent. Check Admin → Email Configuration.'
+          : undefined),
     });
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: 'create_lot_failed' });
+  }
+});
+
+router.put('/:id/lots/:lotId', async (req, res) => {
+  const instituteId = n(req.params.id);
+  const lotId = n(req.params.lotId);
+  try {
+    await ensureBookAccessTables();
+    const [rows]: any = await query(
+      `SELECT l.id, l.institute_id AS instituteId, l.subject_id AS subjectId,
+              l.access_model AS accessModel, l.seat_count AS seatCount,
+              (SELECT COUNT(*) FROM book_license_seats st WHERE st.lot_id = l.id) AS assignedSeats
+       FROM book_license_lots l
+       WHERE l.id = ? LIMIT 1`,
+      [lotId],
+    );
+    const lot = rows?.[0];
+    if (!lot || n(lot.instituteId) !== instituteId) {
+      return res.status(404).json({ error: 'lot_not_found', message: 'License not found.' });
+    }
+    const assigned = n(lot.assignedSeats);
+    const seatCount =
+      req.body?.seatCount != null ? Math.max(1, n(req.body.seatCount)) : n(lot.seatCount);
+    if (seatCount < assigned) {
+      return res.status(400).json({
+        error: 'seat_count_too_low',
+        message: `Already ${assigned} student${assigned === 1 ? '' : 's'} assigned. Use at least ${assigned} licenses.`,
+      });
+    }
+    const model = String(req.body?.accessModel || lot.accessModel).toUpperCase() as AccessModel;
+    if (model !== 'BOOK_BANK' && model !== 'LIBRARY') {
+      return res.status(400).json({ error: 'invalid_access_model' });
+    }
+    if (assigned > 0 && model !== String(lot.accessModel)) {
+      return res.status(400).json({
+        error: 'model_locked',
+        message: 'Cannot change book bank / library after students are assigned.',
+      });
+    }
+    const [sub]: any = await query(
+      `SELECT book_bank_price AS bookBankPrice, library_price AS libraryPrice,
+              discount_pct AS discountPct
+       FROM course_subjects WHERE id = ? LIMIT 1`,
+      [lot.subjectId],
+    );
+    const catalogUnit =
+      model === 'LIBRARY'
+        ? applyListDiscount(
+            sub?.[0]?.libraryPrice != null ? Number(sub[0].libraryPrice) : null,
+            sub?.[0]?.discountPct != null ? Number(sub[0].discountPct) : null,
+          )
+        : applyListDiscount(
+            sub?.[0]?.bookBankPrice != null ? Number(sub[0].bookBankPrice) : null,
+            sub?.[0]?.discountPct != null ? Number(sub[0].discountPct) : null,
+          );
+    const extraPct = parseDiscountPct(req.body?.discountPct);
+    const unit = applyListDiscount(catalogUnit, extraPct);
+    const amount = unit != null ? Math.round(unit * seatCount * 100) / 100 : null;
+    const notes =
+      req.body?.notes === undefined ? undefined : String(req.body.notes || '').trim() || null;
+    await query(
+      `UPDATE book_license_lots SET
+         access_model = ?, seat_count = ?, discount_pct = ?, amount = ?,
+         notes = CASE WHEN ? = 1 THEN ? ELSE notes END,
+         updated_at = NOW(3)
+       WHERE id = ?`,
+      [model, seatCount, extraPct, amount, notes === undefined ? 0 : 1, notes ?? null, lotId],
+    );
+    res.json({
+      ok: true,
+      id: lotId,
+      accessModel: model,
+      seatCount,
+      amount,
+      discountPct: extraPct,
+      notes: notes === undefined ? undefined : notes,
+    });
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).json({ error: 'update_lot_failed' });
+  }
+});
+
+router.post('/:id/lots/:lotId/payment-email', async (req, res) => {
+  const instituteId = n(req.params.id);
+  const lotId = n(req.params.lotId);
+  try {
+    await ensureBookAccessTables();
+    const [rows]: any = await query(
+      'SELECT id, institute_id AS instituteId FROM book_license_lots WHERE id = ? LIMIT 1',
+      [lotId],
+    );
+    if (!rows?.[0] || n(rows[0].instituteId) !== instituteId) {
+      return res.status(404).json({ error: 'lot_not_found' });
+    }
+    const mail = await emailInstituteLotPayment({ lotId, to: req.body?.payEmail });
+    res.json({
+      emailed: mail.ok,
+      to: mail.to,
+      payUrl: mail.payUrl,
+      detail: mail.detail,
+      upiSet: mail.upiSet,
+      emailWarning: mail.ok && !mail.upiSet
+        ? 'Mail sent with pay link and QR. Add VidhyaVibe UPI ID in Admin → Email Configuration so the mail also includes the UPI ID.'
+        : undefined,
+    });
+  } catch (e: any) {
+    if (e instanceof BookAccessError) {
+      return res.status(e.status).json({ error: e.code, message: e.message });
+    }
+    console.error(e);
+    res.status(500).json({ error: 'payment_email_failed' });
+  }
+});
+
+router.post('/:id/lots/:lotId/mark-paid', async (req, res) => {
+  const instituteId = n(req.params.id);
+  const lotId = n(req.params.lotId);
+  try {
+    const [rows]: any = await query(
+      'SELECT id, institute_id AS instituteId FROM book_license_lots WHERE id = ? LIMIT 1',
+      [lotId],
+    );
+    if (!rows?.[0] || n(rows[0].instituteId) !== instituteId) {
+      return res.status(404).json({ error: 'lot_not_found' });
+    }
+    await markInstituteLotPaid(lotId);
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error(e);
+    res.status(500).json({ error: 'mark_paid_failed' });
   }
 });
 
